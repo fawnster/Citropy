@@ -1,0 +1,120 @@
+.diff {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.6;
+}
+
+.diff-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 11px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.diff-path {
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+.diff-stat {
+  display: flex;
+  gap: 6px;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-plus {
+  color: var(--add);
+}
+
+.diff-minus {
+  color: var(--del);
+}
+
+.diff-body {
+  max-height: 520px;
+  overflow: auto;
+  padding: 4px 0;
+}
+
+.diff-line {
+  display: grid;
+  grid-template-columns: 40px 40px 14px minmax(0, 1fr);
+  align-items: baseline;
+  padding-right: 10px;
+}
+
+.diff-line[data-type="add"] {
+  background: var(--add-bg);
+}
+
+.diff-line[data-type="del"] {
+  background: var(--del-bg);
+}
+
+.diff-no {
+  padding-right: 8px;
+  color: var(--text-4);
+  font-size: 10px;
+  text-align: right;
+  user-select: none;
+  font-variant-numeric: tabular-nums;
+}
+
+.diff-line[data-type="add"] .diff-no {
+  background: var(--add-gutter);
+  color: color-mix(in oklab, var(--add) 70%, var(--text-3));
+}
+
+.diff-line[data-type="del"] .diff-no {
+  background: var(--del-gutter);
+  color: color-mix(in oklab, var(--del) 70%, var(--text-3));
+}
+
+.diff-sign {
+  color: var(--text-4);
+  text-align: center;
+  user-select: none;
+}
+
+.diff-line[data-type="add"] .diff-sign {
+  color: var(--add);
+}
+
+.diff-line[data-type="del"] .diff-sign {
+  color: var(--del);
+}
+
+.diff-code {
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-2);
+}
+
+.diff-more {
+  display: block;
+  width: 100%;
+  padding: 7px 11px;
+  border-top: 1px solid var(--line);
+  color: var(--text-3);
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  text-align: left;
+  transition:
+    background var(--dur-instant) var(--ease-out),
+    color var(--dur-instant) var(--ease-out);
+}
+
+.diff-more:hover {
+  background: var(--raised);
+  color: var(--text);
+}
+
+.diff-more[data-static="true"] {
+  pointer-events: none;
+  color: var(--text-4);
+}

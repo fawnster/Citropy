@@ -1,0 +1,468 @@
+import type { GitHubRequest, GitHubResponse } from "./github.ts";
+import type { ComputerState } from "./computer.ts";
+import type { BrowserAction, BrowserState, PanelKind, PanelTab, ToolConnection, ToolDefinition } from "./workbench.ts";
+
+export type ProviderId = "claude" | "codex" | "opencode";
+
+export type ThreadStatus =
+  | "idle"
+  | "queued"
+  | "thinking"
+  | "working"
+  | "awaiting"
+  | "error"
+  | "stopped";
+
+export type PartKind =
+  | "text"
+  | "reasoning"
+  | "tool"
+  | "todo"
+  | "patch"
+  | "notice";
+
+export type ToolStatus = "running" | "ok" | "error" | "denied";
+
+export type ToolShape =
+  | "command"
+  | "read"
+  | "write"
+  | "edit"
+  | "search"
+  | "web"
+  | "computer"
+  | "task"
+  | "todo"
+  | "generic";
+
+export interface ToolPart {
+  id: string;
+  kind: "tool";
+  callId: string;
+  name: string;
+  shape: ToolShape;
+  headline: string;
+  detail?: string;
+  input: unknown;
+  status: ToolStatus;
+  output?: string;
+  patch?: FilePatch;
+  hits?: string[];
+  startedAt: number;
+  endedAt?: number;
+}
+
+export interface TextPart {
+  id: string;
+  kind: "text";
+  text: string;
+  complete?: boolean;
+}
+
+export interface ReasoningPart {
+  id: string;
+  kind: "reasoning";
+  text: string;
+  complete?: boolean;
+  seconds?: number;
+}
+
+export interface TodoItem {
+  text: string;
+  status: "pending" | "in_progress" | "completed";
+}
+
+export interface TodoPart {
+  id: string;
+  kind: "todo";
+  items: TodoItem[];
+}
+
+export interface FilePatch {
+  path: string;
+  added: number;
+  removed: number;
+  hunks: PatchHunk[];
+  truncated?: boolean;
+}
+
+export interface PatchHunk {
+  header: string;
+  oldStart: number;
+  newStart: number;
+  lines: PatchLine[];
+}
+
+export interface PatchLine {
+  type: "add" | "del" | "ctx";
+  text: string;
+  oldNo?: number;
+  newNo?: number;
+}
+
+export interface PatchPart {
+  id: string;
+  kind: "patch";
+  patch: FilePatch;
+}
+
+export interface NoticePart {
+  id: string;
+  kind: "notice";
+  level: "info" | "warn" | "error";
+  text: string;
+}
+
+export type Part = TextPart | ReasoningPart | ToolPart | TodoPart | PatchPart | NoticePart;
+
+export interface Attachment {
+  id?: string;
+  mime?: string;
+  size?: number;
+  path: string;
+  label: string;
+}
+
+export interface Message {
+  id: string;
+  role: "user" | "assistant" | "system";
+  parts: Part[];
+  ts: number;
+  model?: string;
+  attachments?: Attachment[];
+}
+
+export interface QueuedMessage {
+  id: string;
+  text: string;
+  attachments?: Attachment[];
+  createdAt: number;
+}
+
+export interface Usage {
+  codexTotals?: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  costUsd: number;
+  contextTokens: number;
+  contextMax: number;
+  turns: number;
+}
+
+export const emptyUsage = (): Usage => ({
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  costUsd: 0,
+  contextTokens: 0,
+  contextMax: 0,
+  turns: 0,
+});
+
+export interface Project {
+  id: string;
+  path: string;
+  name: string;
+  isGit: boolean;
+  branch?: string;
+  lastOpened: number;
+  settings?: ProjectSettings;
+}
+
+export interface ProjectSettings {
+  provider?: ProviderId;
+  model?: string;
+  effort?: string;
+  permissionMode?: PermissionMode;
+  workspace?: "current" | "new";
+  autoPull?: boolean;
+  browserAccess?: boolean;
+  actions?: Array<{ id: string; name: string; command: string; setup?: boolean }>;
+}
+
+export interface WorkspaceChoice {
+  kind: "current" | "new" | "existing";
+  path?: string;
+  branch?: string;
+  base?: string;
+}
+
+export interface ThreadMeta {
+  id: string;
+  projectId: string;
+  provider: ProviderId;
+  model?: string;
+  effort?: string;
+  contextWindow?: number;
+  fastMode?: boolean;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  status: ThreadStatus;
+  changedFiles?: number;
+  activeTool?: string;
+  usage: Usage;
+  permissionMode: PermissionMode;
+  externalId?: string;
+  running: boolean;
+  finished?: boolean;
+  pinned?: boolean;
+  position?: number;
+  snoozedUntil?: number;
+  archived?: boolean;
+  pullRequest?: string;
+  workspacePath?: string;
+  workspaceBranch?: string;
+  compacting?: boolean;
+  compactedAt?: number;
+  parentThreadId?: string;
+  parentMessageId?: string;
+  nativeAgentId?: string;
+  error?: string;
+  queue?: QueuedMessage[];
+}
+
+export type PermissionMode = "plan" | "manual" | "acceptEdits" | "bypass";
+
+export interface Thread extends ThreadMeta {
+  messages: Message[];
+}
+
+export interface GitFile {
+  path: string;
+  index: string;
+  work: string;
+  added: number;
+  removed: number;
+  staged: boolean;
+  untracked: boolean;
+}
+
+export interface GitStatus {
+  branch: string;
+  ahead: number;
+  behind: number;
+  files: GitFile[];
+  clean: boolean;
+}
+
+export interface PermissionRequest {
+  id: string;
+  threadId: string;
+  tool: string;
+  shape: ToolShape;
+  headline: string;
+  detail?: string;
+  input: unknown;
+  createdAt: number;
+}
+
+export interface ProviderInfo {
+  id: ProviderId;
+  label: string;
+  available: boolean;
+  enabled: boolean;
+  version?: string;
+  binary?: string;
+  models: ModelOption[];
+  supportsPermissionPrompt: boolean;
+  steerHint?: string;
+  modelsError?: string;
+  modelsUpdatedAt?: number;
+}
+
+export interface ModelOption {
+  contextMax?: number;
+  contextWindows?: number[];
+  aliases?: string[];
+  fastMode?: boolean;
+  fastModeHint?: string;
+  fastModeTier?: "priority" | "fast";
+  efforts?: string[];
+  defaultEffort?: string;
+  resolvedModel?: string;
+  isDefault?: boolean;
+  id: string;
+  label: string;
+  hint?: string;
+}
+
+export interface NotificationPreferences {
+  toasts: boolean;
+  desktop: boolean;
+  sound: boolean;
+}
+
+export interface NotificationTarget {
+  view: "chat" | "git" | "github";
+  projectId?: string;
+  threadId?: string;
+}
+
+export interface AppNotification {
+  id: string;
+  title: string;
+  text: string;
+  level: "success" | "error" | "info";
+  kind: "chat" | "git" | "github";
+  createdAt: number;
+  read: boolean;
+  target: NotificationTarget;
+}
+
+export interface Snapshot {
+  computer?: ComputerState;
+  notifications?: AppNotification[];
+  notificationPreferences?: NotificationPreferences;
+  panels?: PanelTab[];
+  browsers?: BrowserState[];
+  toolConnections?: ToolConnection[];
+  tools?: ToolDefinition[];
+  permissions: PermissionRequest[];
+  projects: Project[];
+  threads: ThreadMeta[];
+  providers: ProviderInfo[];
+  activeProjectId?: string;
+  home: string;
+}
+
+export type ServerEvent =
+  | { t: "computer.state"; computer: ComputerState }
+  | { t: "thread.accepted"; requestId: string }
+  | { t: "request.error"; requestId: string; error: string }
+  | { t: "notification.add"; notification: AppNotification }
+  | { t: "notifications.update"; notifications: AppNotification[] }
+  | { t: "notifications.preferences"; preferences: NotificationPreferences }
+  | { t: "panel.upsert"; panel: PanelTab }
+  | { t: "panel.remove"; id: string }
+  | { t: "browser.state"; browser: BrowserState }
+  | { t: "tools.connection"; connection: ToolConnection }
+  | { t: "github.result"; requestId: string; result?: GitHubResponse; error?: string }
+  | { t: "git.manage"; requestId: string; result?: GitResult; error?: string }
+  | { t: "thread.search"; query: string; projectId?: string; results: Array<{ threadId: string; messageId?: string; snippet: string }> }
+  | { t: "project.chosen"; projectId: string | null; error?: string }
+  | { t: "providers.update"; providers: ProviderInfo[] }
+  | { t: "hello"; snapshot: Snapshot }
+  | { t: "project.upsert"; project: Project }
+  | { t: "project.remove"; id: string }
+  | { t: "thread.upsert"; thread: ThreadMeta }
+  | { t: "thread.remove"; id: string }
+  | { t: "thread.messages"; threadId: string; messages: Message[] }
+  | { t: "message.add"; threadId: string; message: Message }
+  | { t: "part.add"; threadId: string; messageId: string; part: Part }
+  | { t: "part.append"; threadId: string; messageId: string; partId: string; text: string }
+  | { t: "part.patch"; threadId: string; messageId: string; partId: string; patch: Record<string, unknown> }
+  | { t: "permission.request"; request: PermissionRequest }
+  | { t: "permission.close"; id: string }
+  | { t: "git.status"; projectId: string; threadId?: string; status: GitStatus }
+  | { t: "git.diff"; requestId: string; patch: FilePatch | null; error?: string }
+  | { t: "file.tree"; requestId: string; entries: FileEntry[] }
+  | { t: "file.content"; requestId: string; path: string; content: string | null }
+  | { t: "term.data"; termId: string; data: string }
+  | { t: "term.exit"; termId: string; code: number }
+  | { t: "toast"; level: "info" | "warn" | "error" | "success"; text: string };
+
+export interface FileEntry {
+  name: string;
+  path: string;
+  dir: boolean;
+  size?: number;
+}
+
+export type ClientEvent = (
+  | { t: "notifications.read"; ids?: string[] }
+  | { t: "notifications.clear" }
+  | {
+      t: "notifications.configure";
+      preferences: Partial<NotificationPreferences>;
+    }
+  | { t: "panel.open"; projectId: string; kind: PanelKind; id?: string; threadId?: string }
+  | { t: "panel.close"; id: string }
+  | { t: "browser.action"; id: string; input: BrowserAction }
+  | { t: "desktop.open" }
+  | { t: "thread.finish"; id: string; finished: boolean }
+  | { t: "github.request"; requestId: string; request: GitHubRequest }
+  | { t: "git.manage"; requestId: string; projectId: string; operation: GitOperation; value?: string; offset?: number; remote?: string }
+  | { t: "thread.search"; query: string; projectId?: string }
+  | { t: "project.choose" }
+  | { t: "providers.refresh" }
+  | { t: "providers.configure"; provider: ProviderId; enabled: boolean }
+  | { t: "project.open"; path: string }
+  | { t: "project.close"; id: string }
+  | {
+      t: "thread.create";
+      projectId: string;
+      provider: ProviderId;
+      model?: string;
+      effort?: string | null;
+      contextWindow?: number;
+      fastMode?: boolean;
+      permissionMode?: PermissionMode;
+      title?: string;
+      workspace?: WorkspaceChoice;
+    }
+  | {
+      t: "thread.send";
+      requestId?: string;
+      threadId: string;
+      text: string;
+      attachments?: Attachment[];
+    }
+  | { t: "thread.stop"; threadId: string }
+  | { t: "queue.send"; threadId: string; id: string }
+  | { t: "queue.remove"; threadId: string; id: string }
+  | { t: "queue.move"; threadId: string; id: string; index: number }
+  | { t: "queue.edit"; requestId: string; threadId: string; id: string }
+  | { t: "thread.remove"; id: string }
+  | { t: "thread.load"; id: string }
+  | {
+      t: "thread.config";
+      id: string;
+      model?: string;
+      effort?: string | null;
+      contextWindow?: number;
+      fastMode?: boolean;
+      permissionMode?: PermissionMode;
+      title?: string;
+    }
+  | {
+      t: "permission.answer";
+      id: string;
+      decision: "allow" | "allow_always" | "deny";
+    }
+  | { t: "git.refresh"; projectId: string }
+  | { t: "git.diff"; requestId: string; projectId: string; path: string; staged?: boolean }
+  | { t: "git.stage"; projectId: string; path: string; staged: boolean }
+  | { t: "git.commit"; projectId: string; message: string }
+  | { t: "git.discard"; projectId: string; path: string }
+  | { t: "file.tree"; requestId: string; projectId: string; path?: string }
+  | { t: "file.read"; requestId: string; projectId: string; path: string }
+  | { t: "term.open"; termId: string; projectId: string; cols: number; rows: number }
+  | { t: "term.data"; termId: string; data: string }
+  | { t: "term.resize"; termId: string; cols: number; rows: number }
+  | { t: "term.close"; termId: string }
+) & { threadId?: string };
+
+export interface GitOverview {
+  repository: boolean;
+  hasCommits: boolean;
+  mergeInProgress: boolean;
+  status?: GitStatus;
+  branches: Array<{ name: string; current: boolean; remote: boolean; upstream: string; subject: string; date: string }>;
+  commits: Array<{ hash: string; author: string; date: string; subject: string; refs: string }>;
+  remotes: Array<{ name: string; url: string }>;
+  stashes: Array<{ ref: string; subject: string }>;
+}
+
+export interface GitDetail {
+  kind: "detail";
+  message: string;
+  patches: FilePatch[];
+}
+
+export type GitResult = GitOverview | GitDetail | string;
+
+export type GitOperation = "overview" | "history" | "show" | "showStash" | "init" | "stage" | "unstage" | "stageAll" | "unstageAll" | "commit" | "createBranch" | "switchBranch" | "deleteBranch" | "merge" | "abortMerge" | "fetch" | "pull" | "push" | "stash" | "applyStash" | "dropStash" | "addRemote" | "removeRemote" | "publish" | "discardWorktree";

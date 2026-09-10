@@ -1,0 +1,154 @@
+import { store } from "./store.ts";
+import { emptyUsage } from "../shared/protocol.ts";
+import { providerControl } from "./providers/control.ts";
+import type { ProviderId } from "../shared/protocol.ts";
+import type {
+  ProviderUsage,
+  UsageReport,
+  UsageWindow,
+} from "../shared/features.ts";
+
+const cached = new Map<ProviderId, ProviderUsage>();
+const pending = new Map<ProviderId, Promise<ProviderUsage>>();
+
+export function parseProviderLimits(
+  provider: ProviderId,
+  result: Record<string, any>,
+): ProviderUsage {
+  const windows: UsageWindow[] = [];
+  if (provider === "codex") {
+    const limits = result.rateLimitsByLimitId
+      ? Object.entries(result.rateLimitsByLimitId)
+      : [["Codex", result.rateLimits]];
+    for (const [name, raw] of limits) {
+      const bucket = raw as Record<string, any> | undefined;
+      for (const key of ["primary", "secondary"]) {
+        const window = bucket?.[key];
+        if (!Number.isFinite(window?.usedPercent)) continue;
+        const minutes = window.windowDurationMins;
+        const label =
+          minutes === 300
+            ? "5 hours"
+            : minutes === 10080
+              ? "Weekly"
+              : minutes
+                ? `${minutes / 60} hours`
+                : key;
+        windows.push({
+          label: `${bucket?.limitName || name} · ${label}`,
+          usedPercent: Math.max(0, Math.min(100, window.usedPercent)),
+          resetsAt: Number.isFinite(window.resetsAt)
+            ? window.resetsAt * 1000
+            : undefined,
+        });
+      }
+    }
+  } else {
+    const limits = result.rate_limits ?? result;
+    for (const [key, raw] of Object.entries(limits)) {
+      const window = raw as Record<string, any> | null;
+      if (!Number.isFinite(window?.utilization)) continue;
+      windows.push({
+        label:
+          key === "five_hour"
+            ? "5 hours"
+            : key === "seven_day"
+              ? "Weekly"
+              : key.replaceAll("_", " "),
+        usedPercent: Math.max(0, Math.min(100, window!.utilization)),
+        resetsAt: window?.resets_at
+          ? Date.parse(window.resets_at) || undefined
+          : undefined,
+      });
+    }
+    for (const window of limits.model_scoped ?? [])
+      if (Number.isFinite(window.utilization))
+        windows.push({
+          label: window.display_name,
+          usedPercent: Math.max(0, Math.min(100, window.utilization)),
+          resetsAt: Date.parse(window.resets_at) || undefined,
+        });
+  }
+  return {
+    provider,
+    windows,
+    updatedAt: Date.now(),
+    error: windows.length
+      ? undefined
+      : "This account does not report subscription limits.",
+  };
+}
+
+async function limits(provider: ProviderId): Promise<ProviderUsage> {
+  const saved = cached.get(provider);
+  if (saved && Date.now() - saved.updatedAt < 30_000) return saved;
+  const existing = pending.get(provider);
+  if (existing) return existing;
+  const request = (async (): Promise<ProviderUsage> => {
+    try {
+      if (provider === "opencode")
+        return {
+          provider,
+          windows: [],
+          updatedAt: Date.now(),
+          error:
+            "OpenCode does not expose a combined remaining allowance. Check the connected model service.",
+        };
+      return parseProviderLimits(
+        provider,
+        await providerControl(
+          provider,
+          provider === "codex" ? "account/rateLimits/read" : "get_usage",
+        ),
+      );
+    } catch (error) {
+      return {
+        provider,
+        windows: saved?.windows ?? [],
+        updatedAt: Date.now(),
+        error: (error as Error).message,
+      };
+    }
+  })()
+    .then((result) => {
+      cached.set(provider, result);
+      return result;
+    })
+    .finally(() => pending.delete(provider));
+  pending.set(provider, request);
+  return request;
+}
+
+export async function usageReport(
+  providers: ProviderId[],
+): Promise<UsageReport> {
+  const conversations = [...store.threads.values()]
+    .filter((thread) => !thread.nativeAgentId)
+    .map((thread) => ({
+      id: thread.id,
+      title: thread.title,
+      provider: thread.provider,
+      model: thread.model,
+      usage: thread.usage,
+      updatedAt: thread.updatedAt,
+    }))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
+  const totals = emptyUsage();
+  for (const thread of conversations) {
+    totals.input +=
+      thread.usage.input +
+      (thread.provider === "codex"
+        ? 0
+        : thread.usage.cacheRead + thread.usage.cacheWrite);
+    totals.output += thread.usage.output;
+    totals.cacheRead += thread.usage.cacheRead;
+    totals.cacheWrite += thread.usage.cacheWrite;
+    totals.costUsd += thread.usage.costUsd;
+    totals.turns += thread.usage.turns;
+  }
+  return {
+    totals,
+    conversations,
+    providers: await Promise.all(providers.map(limits)),
+  };
+}

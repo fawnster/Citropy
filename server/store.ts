@@ -1,0 +1,432 @@
+import { mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, existsSync, renameSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { homedir } from "node:os";
+import { join, basename, resolve } from "node:path";
+import { bus } from "./bus.ts";
+import { uid } from "./ids.ts";
+import { emptyUsage } from "../shared/protocol.ts";
+import type {
+  ProviderId,
+  Message,
+  Part,
+  Project,
+  Thread,
+  ThreadMeta,
+  Usage,
+  AppNotification,
+  NotificationPreferences,
+} from "../shared/protocol.ts";
+
+const root = join(homedir(), ".citropy");
+const previousRoot = join(homedir(), ".loom");
+if (!existsSync(root) && existsSync(previousRoot)) renameSync(previousRoot, root);
+const threadsDir = join(root, "threads");
+const settingsFile = join(root, "settings.json");
+const projectsFile = join(root, "projects.json");
+const notificationsFile = join(root, "notifications.json");
+
+mkdirSync(threadsDir, { recursive: true });
+
+function save(path: string, value: unknown): void {
+  const temporary = `${path}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(temporary, JSON.stringify(value), { flag: "wx", mode: 0o600, flush: true });
+    renameSync(temporary, path);
+  } finally {
+    rmSync(temporary, { force: true });
+  }
+}
+
+function meta(thread: Thread): ThreadMeta {
+  const { messages, ...rest } = thread;
+  const paths = new Set<string>();
+  for (const message of messages) for (const part of message.parts) {
+    if (part.kind !== "tool" || part.status !== "ok" || !["edit", "write"].includes(part.shape)) continue;
+    const input = part.input as Record<string, unknown> | undefined;
+    const candidates = Array.isArray(input?.paths) ? input.paths : [input?.file_path ?? input?.filePath ?? input?.path];
+    for (const path of candidates) if (typeof path === "string" && path) paths.add(path);
+  }
+  return { ...rest, updatedAt: messages.at(-1)?.ts ?? rest.updatedAt, changedFiles: paths.size };
+}
+
+export class Store {
+  projects = new Map<string, Project>();
+  threads = new Map<string, Thread>();
+  disabledProviders = new Set<ProviderId>();
+  computerEnabled = false;
+  notifications: AppNotification[] = [];
+  notificationPreferences: NotificationPreferences = {
+    toasts: true,
+    desktop: true,
+    sound: false,
+  };
+  #dirty = new Set<string>();
+  #flushTimer: NodeJS.Timeout | null = null;
+  #savedProjects = "";
+
+  constructor() {
+    this.#load();
+  }
+
+  #load(): void {
+    if (existsSync(settingsFile)) {
+      try {
+        const settings = JSON.parse(readFileSync(settingsFile, "utf8"));
+        this.computerEnabled = settings.computerEnabled === true;
+        for (const key of ["toasts", "desktop", "sound"] as const) {
+          if (typeof settings.notifications?.[key] === "boolean")
+            this.notificationPreferences[key] = settings.notifications[key];
+        }
+        if (Array.isArray(settings.disabledProviders)) {
+          for (const id of settings.disabledProviders) {
+            if (["claude", "codex", "opencode"].includes(id)) this.disabledProviders.add(id);
+          }
+        }
+      } catch (error) {
+        process.stderr.write(
+          `Could not load provider settings: ${String(error)}\n`,
+        );
+      }
+    }
+    if (existsSync(notificationsFile)) {
+      try {
+        const entries = JSON.parse(readFileSync(notificationsFile, "utf8"));
+        if (Array.isArray(entries))
+          this.notifications = entries
+            .filter(
+              (entry) =>
+                typeof entry.id === "string" &&
+                typeof entry.title === "string" &&
+                typeof entry.text === "string" &&
+                entry.target &&
+                typeof entry.createdAt === "number",
+            )
+            .slice(0, 100);
+      } catch (error) {
+        process.stderr.write(
+          `Could not load notifications: ${String(error)}\n`,
+        );
+      }
+    }
+    if (existsSync(projectsFile)) {
+      const raw = JSON.parse(readFileSync(projectsFile, "utf8")) as Project[];
+      for (const project of raw) this.projects.set(project.id, project);
+    }
+    for (const name of readdirSync(threadsDir)) {
+      if (!name.endsWith(".json")) continue;
+      try {
+        const thread = JSON.parse(readFileSync(join(threadsDir, name), "utf8")) as Thread;
+        thread.running = false;
+        thread.compacting = false;
+        thread.activeTool = undefined;
+        for (const message of thread.messages) for (const part of message.parts)
+          if ((part.kind === "text" || part.kind === "reasoning") && part.complete === false)
+            part.complete = true;
+        if (thread.status !== "idle" && thread.status !== "error") thread.status = "idle";
+        this.threads.set(thread.id, thread);
+      } catch (error) {
+        process.stderr.write(`Could not load saved conversation ${name}; the file was preserved: ${String(error)}\n`);
+      }
+    }
+  }
+
+  #schedule(threadId: string): void {
+    this.#dirty.add(threadId);
+    if (this.#flushTimer) return;
+    this.#flushTimer = setTimeout(() => {
+      this.#flushTimer = null;
+      this.flush();
+    }, 400);
+  }
+
+  flush(): void {
+    if (this.#flushTimer) clearTimeout(this.#flushTimer);
+    this.#flushTimer = null;
+    for (const id of this.#dirty) {
+      const thread = this.threads.get(id);
+      if (!thread) continue;
+      save(join(threadsDir, `${id}.json`), thread);
+    }
+    this.#dirty.clear();
+    const projects = [...this.projects.values()];
+    const serialized = JSON.stringify(projects);
+    if (serialized !== this.#savedProjects) {
+      save(projectsFile, projects);
+      this.#savedProjects = serialized;
+    }
+  }
+
+  setProviderEnabled(id: ProviderId, enabled: boolean): void {
+    if (!["claude", "codex", "opencode"].includes(id) || typeof enabled !== "boolean") throw new Error("Invalid provider setting");
+    const disabled = new Set(this.disabledProviders);
+    if (enabled) disabled.delete(id);
+    else disabled.add(id);
+    save(settingsFile, {
+      disabledProviders: [...disabled],
+      notifications: this.notificationPreferences,
+      computerEnabled: this.computerEnabled,
+    });
+    this.disabledProviders = disabled;
+  }
+
+  setComputerEnabled(enabled: boolean): void {
+    save(settingsFile, {
+      disabledProviders: [...this.disabledProviders],
+      notifications: this.notificationPreferences,
+      computerEnabled: enabled,
+    });
+    this.computerEnabled = enabled;
+  }
+
+  notify(input: Omit<AppNotification, "id" | "createdAt" | "read">): void {
+    const notification: AppNotification = {
+      ...input,
+      id: uid("ntf"),
+      createdAt: Date.now(),
+      read: false,
+    };
+    this.notifications = [notification, ...this.notifications].slice(0, 100);
+    save(notificationsFile, this.notifications);
+    bus.emit({ t: "notification.add", notification });
+  }
+
+  readNotifications(ids?: string[]): void {
+    if (
+      ids !== undefined &&
+      (!Array.isArray(ids) || ids.some((id) => typeof id !== "string"))
+    )
+      throw new Error("Invalid notification selection");
+    this.notifications = this.notifications.map((entry) =>
+      !ids || ids.includes(entry.id) ? { ...entry, read: true } : entry,
+    );
+    save(notificationsFile, this.notifications);
+    bus.emit({ t: "notifications.update", notifications: this.notifications });
+  }
+
+  clearNotifications(): void {
+    this.notifications = this.notifications.filter((entry) => !entry.read);
+    save(notificationsFile, this.notifications);
+    bus.emit({ t: "notifications.update", notifications: this.notifications });
+  }
+
+  configureNotifications(patch: Partial<NotificationPreferences>): void {
+    if (
+      !patch ||
+      Object.entries(patch).some(
+        ([key, value]) =>
+          !["toasts", "desktop", "sound"].includes(key) ||
+          typeof value !== "boolean",
+      )
+    )
+      throw new Error("Invalid notification preferences");
+    const preferences = { ...this.notificationPreferences, ...patch };
+    save(settingsFile, {
+      disabledProviders: [...this.disabledProviders],
+      notifications: preferences,
+      computerEnabled: this.computerEnabled,
+    });
+    this.notificationPreferences = preferences;
+    bus.emit({ t: "notifications.preferences", preferences });
+  }
+
+  openProject(path: string): Project {
+    const abs = resolve(path.replace(/^~(?=$|\/)/, homedir()));
+    const existing = [...this.projects.values()].find((p) => p.path === abs);
+    if (existing) {
+      existing.lastOpened = Date.now();
+      bus.emit({ t: "project.upsert", project: existing });
+      this.flush();
+      return existing;
+    }
+    const project: Project = {
+      id: uid("prj"),
+      path: abs,
+      name: basename(abs) || abs,
+      isGit: existsSync(join(abs, ".git")),
+      lastOpened: Date.now(),
+    };
+    this.projects.set(project.id, project);
+    bus.emit({ t: "project.upsert", project });
+    this.flush();
+    return project;
+  }
+
+  updateProject(id: string, patch: Pick<Partial<Project>, "name" | "settings">): Project {
+    const project = this.projects.get(id);
+    if (!project) throw new Error("Workspace not found");
+    Object.assign(project, patch);
+    this.flush();
+    bus.emit({ t: "project.upsert", project });
+    return project;
+  }
+
+  closeProject(id: string): void {
+    this.projects.delete(id);
+    for (const thread of [...this.threads.values()]) {
+      if (thread.projectId === id) this.removeThread(thread.id);
+    }
+    bus.emit({ t: "project.remove", id });
+    this.flush();
+  }
+
+  createThread(input: Omit<ThreadMeta, "id" | "createdAt" | "updatedAt" | "status" | "usage" | "running">): Thread {
+    if (this.disabledProviders.has(input.provider)) throw new Error("This provider is disabled. Enable it in Settings > Providers.");
+    const now = Date.now();
+    const thread: Thread = {
+      ...input,
+      ...(input.parentThreadId ? { parentMessageId: this.threads.get(input.parentThreadId)?.messages.findLast((message) => message.role === "user")?.id } : {}),
+      id: uid("thr"),
+      createdAt: now,
+      updatedAt: now,
+      status: "idle",
+      usage: emptyUsage(),
+      running: false,
+      messages: [],
+    };
+    this.threads.set(thread.id, thread);
+    bus.emit({ t: "thread.upsert", thread: meta(thread) });
+    this.#schedule(thread.id);
+    return thread;
+  }
+
+  removeThread(id: string): void {
+    if (!this.threads.has(id)) return;
+    for (const child of [...this.threads.values()]) {
+      if (child.parentThreadId === id) this.removeThread(child.id);
+    }
+    this.threads.delete(id);
+    this.#dirty.delete(id);
+    rmSync(join(threadsDir, `${id}.json`), { force: true });
+    rmSync(join(root, "attachments", id), { recursive: true, force: true });
+    bus.emit({ t: "thread.remove", id });
+  }
+
+  setThreadFinished(id: string, finished: boolean): void {
+    if (typeof finished !== "boolean") throw new Error("Invalid conversation state");
+    const thread = this.threads.get(id);
+    if (!thread) return;
+    if (finished && (thread.running || thread.status === "awaiting")) throw new Error("Stop this conversation before finishing it.");
+    if (finished && [...this.threads.values()].some((child) => child.parentThreadId === id && child.running)) throw new Error("Wait for this conversation's subagents to finish first.");
+    thread.finished = finished;
+    thread.snoozedUntil = undefined;
+    if (finished) thread.pinned = false;
+    bus.emit({ t: "thread.upsert", thread: meta(thread) });
+    this.#schedule(id);
+  }
+
+  organizeThread(id: string, patch: Pick<Partial<ThreadMeta>, "title" | "pinned" | "position" | "snoozedUntil" | "archived" | "pullRequest">): void {
+    const thread = this.threads.get(id);
+    if (!thread) throw new Error("Conversation not found");
+    if ((patch.archived || patch.snoozedUntil) && (thread.running || [...this.threads.values()].some((child) => child.parentThreadId === id && child.running))) throw new Error("Stop this conversation and its subagents before putting it away.");
+    this.patchThread(id, { ...patch, ...(patch.pinned ? { finished: false, archived: false, snoozedUntil: undefined } : {}) });
+  }
+
+  wakeThreads(): void {
+    for (const thread of this.threads.values()) if (thread.snoozedUntil && thread.snoozedUntil <= Date.now()) this.patchThread(thread.id, { snoozedUntil: undefined });
+  }
+
+  patchThread(id: string, patch: Partial<ThreadMeta>): void {
+    const thread = this.threads.get(id);
+    if (!thread) return;
+    Object.assign(thread, patch);
+    thread.updatedAt = Date.now();
+    bus.emit({ t: "thread.upsert", thread: meta(thread) });
+    this.#schedule(id);
+  }
+
+  updateSubagent(parentId: string, update: { id: string; title?: string; prompt?: string; model?: string; status: ThreadMeta["status"]; result?: string }): void {
+    const parent = this.threads.get(parentId);
+    if (!parent) return;
+    let child = [...this.threads.values()].find((entry) => entry.parentThreadId === parentId && entry.nativeAgentId === update.id);
+    if (!child) {
+      child = this.createThread({ projectId: parent.projectId, provider: parent.provider, workspacePath: parent.workspacePath, workspaceBranch: parent.workspaceBranch, parentThreadId: parentId, nativeAgentId: update.id, title: update.title || "Subagent", model: update.model ?? parent.model, permissionMode: parent.permissionMode });
+      if (update.prompt) this.addMessage(child.id, { id: uid("msg"), ts: Date.now(), role: "user", parts: [{ id: uid("prt"), kind: "text", text: update.prompt }] });
+    }
+    const completed =
+      child.running && (update.status === "idle" || update.status === "error");
+    this.patchThread(child.id, { status: update.status, running: ["queued", "thinking", "working", "awaiting"].includes(update.status), ...(update.title ? { title: update.title.slice(0, 80) } : {}), ...(update.model ? { model: update.model } : {}) });
+    if (completed)
+      this.notify({
+        kind: "chat",
+        level: update.status === "error" ? "error" : "success",
+        title:
+          update.status === "error"
+            ? "Subagent needs attention"
+            : "Subagent finished",
+        text: update.title ?? child.title,
+        target: {
+          view: "chat",
+          projectId: child.projectId,
+          threadId: child.id,
+        },
+      });
+    if (update.result) {
+      const previous = child.messages.at(-1);
+      if (previous?.role === "assistant" && previous.parts[0]?.kind === "text") {
+        this.patchPart(child.id, previous.id, previous.parts[0].id, { text: update.result });
+      } else {
+        this.addMessage(child.id, { id: uid("msg"), ts: Date.now(), role: "assistant", model: child.model, parts: [{ id: uid("prt"), kind: "text", text: update.result }] });
+      }
+    }
+  }
+
+  setUsage(id: string, usage: Usage): void {
+    this.patchThread(id, { usage });
+  }
+
+  addMessage(threadId: string, message: Message): Message {
+    const thread = this.threads.get(threadId);
+    if (!thread) throw new Error(`unknown thread ${threadId}`);
+    thread.messages.push(message);
+    thread.updatedAt = message.ts;
+    bus.emit({ t: "message.add", threadId, message });
+    this.#schedule(threadId);
+    return message;
+  }
+
+  addPart(threadId: string, messageId: string, part: Part): Part {
+    const message = this.#message(threadId, messageId);
+    message.parts.push(part);
+    bus.emit({ t: "part.add", threadId, messageId, part });
+    this.#schedule(threadId);
+    return part;
+  }
+
+  appendText(threadId: string, messageId: string, partId: string, text: string): void {
+    const part = this.#part(threadId, messageId, partId);
+    if (part.kind === "text" || part.kind === "reasoning") part.text += text;
+    bus.emit({ t: "part.append", threadId, messageId, partId, text });
+    this.#schedule(threadId);
+  }
+
+  patchPart(threadId: string, messageId: string, partId: string, patch: Record<string, unknown>): void {
+    const part = this.#part(threadId, messageId, partId);
+    Object.assign(part, patch);
+    bus.emit({ t: "part.patch", threadId, messageId, partId, patch });
+    this.#schedule(threadId);
+  }
+
+  #message(threadId: string, messageId: string): Message {
+    const thread = this.threads.get(threadId);
+    if (!thread) throw new Error(`unknown thread ${threadId}`);
+    const message = thread.messages.find((m) => m.id === messageId);
+    if (!message) throw new Error(`unknown message ${messageId}`);
+    return message;
+  }
+
+  #part(threadId: string, messageId: string, partId: string): Part {
+    const part = this.#message(threadId, messageId).parts.find((p) => p.id === partId);
+    if (!part) throw new Error(`unknown part ${partId}`);
+    return part;
+  }
+
+  meta(thread: Thread): ThreadMeta {
+    return meta(thread);
+  }
+
+  allMeta(): ThreadMeta[] {
+    return [...this.threads.values()].map(meta);
+  }
+}
+
+export const store = new Store();

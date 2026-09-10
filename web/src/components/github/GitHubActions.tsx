@@ -1,0 +1,377 @@
+import { ResizeHandle } from "../ResizeHandle.tsx";
+import { useEffect, useState } from "react";
+import { ArrowLeft, Play, RefreshCw, Terminal } from "lucide-react";
+import { useGitHub } from "../../lib/use-github.ts";
+import { github } from "../../lib/actions.ts";
+import {
+  GitHubDialog,
+  GitHubFeedback,
+  GitHubLink,
+  GitHubPagination,
+  GitHubState,
+  formText,
+  githubDate,
+} from "./GitHubShared.tsx";
+import type {
+  GitHubRepository,
+  GitHubMutation,
+} from "../../../../shared/github.ts";
+
+export function GitHubActions({
+  repository,
+}: {
+  repository: GitHubRepository;
+}) {
+  const repo = repository.full_name;
+  const [inputs, setInputs] = useState([{ name: "", value: "" }]);
+  const [page, setPage] = useState(1);
+  const [branch, setBranch] = useState("");
+  const [selected, setSelected] = useState<number | null>(null);
+  const [jobId, setJobId] = useState<number | null>(null);
+  const [action, setAction] = useState<"dispatch" | "rerun" | "cancel" | null>(
+    null,
+  );
+  const [message, setMessage] = useState("");
+  const list = useGitHub("runs", { repo, page, branch });
+  const detail = useGitHub("run", selected ? { repo, id: selected } : null);
+  const logs = useGitHub("logs", jobId ? { repo, jobId } : null);
+  const workflows = useGitHub(
+    "workflows",
+    action === "dispatch" ? { repo } : null,
+  );
+  const branches = useGitHub("branches", { repo });
+  const refresh = () => {
+    list.refresh();
+    if (selected) detail.refresh();
+  };
+  const active = detail.data?.run.status !== "completed";
+  useEffect(() => {
+    if (!list.data?.items.some((run) => run.status !== "completed")) return;
+    const timer = setInterval(refresh, 20_000);
+    return () => clearInterval(timer);
+  }, [list.data, selected]);
+  return (
+    <div className="github-workspace">
+      <div className="github-toolbar">
+        <h2>Workflow runs</h2>
+        <select
+          aria-label="Workflow branch"
+          value={branch}
+          onChange={(event) => {
+            setBranch(event.target.value);
+            setPage(1);
+          }}
+        >
+          <option value="">All branches</option>
+          {branches.data?.map((name) => (
+            <option key={name}>{name}</option>
+          ))}
+        </select>
+        <button
+          className="icon-btn"
+          aria-label="Refresh workflows"
+          onClick={refresh}
+          disabled={list.loading}
+        >
+          <RefreshCw size={16} />
+        </button>
+        <button
+          className="btn"
+          data-variant="primary"
+          disabled={!repository.permissions?.push || repository.archived}
+          onClick={() => setAction("dispatch")}
+        >
+          <Play size={14} />
+          Run workflow
+        </button>
+      </div>
+      {message && (
+        <p className="github-notice" role="status">
+          {message}
+        </p>
+      )}
+      <div className="github-split" data-detail={Boolean(selected)}>
+        <div className="github-list scroll">
+          <GitHubFeedback
+            error={list.error}
+            loading={list.loading && !list.data}
+            empty={
+              list.data?.items.length === 0 ? "No workflow runs" : undefined
+            }
+          />
+          {list.data?.items.map((run) => (
+            <button
+              key={run.id}
+              className="github-item"
+              aria-pressed={selected === run.id}
+              onClick={() => {
+                setSelected(run.id);
+                setJobId(null);
+              }}
+            >
+              <GitHubState state={run.conclusion ?? run.status} />
+              <strong>{run.display_title}</strong>
+              <span className="github-meta">
+                {run.name} #{run.run_number}
+              </span>
+              <span className="github-meta">
+                {run.head_branch} · {run.event} · {githubDate(run.created_at)}
+              </span>
+            </button>
+          ))}
+          {list.data && (
+            <GitHubPagination
+              page={page}
+              more={list.data.more}
+              onChange={setPage}
+            />
+          )}
+        </div>
+        <ResizeHandle panel="github" inline />
+        <div className="github-detail scroll">
+          {!selected ? (
+            <div className="github-empty">
+              <Play size={30} />
+              <h2>Select a workflow run</h2>
+              <p>
+                Inspect jobs, steps, and logs. Active runs refresh
+                automatically.
+              </p>
+            </div>
+          ) : (
+            <>
+              <button
+                className="btn github-detail-back"
+                onClick={() => setSelected(null)}
+              >
+                <ArrowLeft size={15} />
+                Back to runs
+              </button>
+              <GitHubFeedback
+                error={detail.error}
+                loading={detail.loading && !detail.data}
+              />
+              {detail.data && (
+                <>
+                  <header className="github-item-heading">
+                    <GitHubState
+                      state={
+                        detail.data.run.conclusion ?? detail.data.run.status
+                      }
+                    />
+                    <GitHubLink href={detail.data.run.html_url}>
+                      Open on GitHub
+                    </GitHubLink>
+                    <h2>{detail.data.run.display_title}</h2>
+                    <p>
+                      {detail.data.run.name} · {detail.data.run.head_branch} ·{" "}
+                      {detail.data.run.head_sha.slice(0, 7)} · Attempt{" "}
+                      {detail.data.run.run_attempt}
+                    </p>
+                  </header>
+                  <div className="github-detail-actions">
+                    {repository.permissions?.push && (
+                      <button
+                        className="btn"
+                        onClick={() => setAction(active ? "cancel" : "rerun")}
+                      >
+                        {active ? "Cancel run…" : "Re-run jobs…"}
+                      </button>
+                    )}
+                  </div>
+                  <div className="github-jobs">
+                    {detail.data.jobs.map((job) => (
+                      <details key={job.id} open>
+                        <summary>
+                          <GitHubState state={job.conclusion ?? job.status} />
+                          <strong>{job.name}</strong>
+                        </summary>
+                        <ol>
+                          {job.steps.map((step) => (
+                            <li key={step.number}>
+                              <GitHubState
+                                state={step.conclusion ?? step.status}
+                              />
+                              <span>{step.name}</span>
+                            </li>
+                          ))}
+                        </ol>
+                        <button
+                          className="btn"
+                          onClick={() => setJobId(job.id)}
+                        >
+                          <Terminal size={14} />
+                          View logs
+                        </button>
+                      </details>
+                    ))}
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+      {jobId && (
+        <GitHubDialog
+          title="Job logs"
+          description={`${repo} · job ${jobId}`}
+          onClose={() => setJobId(null)}
+        >
+          <GitHubFeedback error={logs.error} loading={logs.loading} />
+          <button
+            type="button"
+            className="btn"
+            onClick={logs.refresh}
+            disabled={logs.loading}
+          >
+            Refresh logs
+          </button>
+          <pre className="github-logs scroll">{logs.data}</pre>
+        </GitHubDialog>
+      )}
+      {action && (
+        <GitHubDialog
+          title={
+            action === "dispatch"
+              ? "Run a workflow"
+              : action === "rerun"
+                ? "Re-run workflow jobs"
+                : "Cancel this run"
+          }
+          description={`${repo}${selected && action !== "dispatch" ? ` · ${detail.data?.run.name} #${detail.data?.run.run_number}` : ""}. This action will be sent to GitHub.`}
+          submitLabel={
+            action === "dispatch"
+              ? "Run workflow"
+              : action === "rerun"
+                ? "Re-run jobs"
+                : "Cancel run"
+          }
+          danger={action === "cancel"}
+          onClose={() => setAction(null)}
+          onSubmit={async (data) => {
+            let mutation: GitHubMutation;
+            if (action === "dispatch") {
+              const provided = inputs.filter((input) => input.name.trim());
+              if (
+                new Set(provided.map((input) => input.name.trim())).size !==
+                provided.length
+              )
+                throw new Error("Each input needs a unique name.");
+              mutation = {
+                action: "dispatch",
+                id: Number(formText(data, "workflow")),
+                ref: formText(data, "ref"),
+                inputs: Object.fromEntries(
+                  provided.map((input) => [input.name.trim(), input.value]),
+                ),
+              };
+            } else if (action === "rerun")
+              mutation = {
+                action: "rerun",
+                id: selected!,
+                failedOnly: data.has("failed"),
+              };
+            else mutation = { action: "cancelRun", id: selected! };
+            setMessage((await github("mutate", { repo, mutation })).message);
+            refresh();
+          }}
+        >
+          {action === "dispatch" && (
+            <>
+              <GitHubFeedback
+                error={workflows.error}
+                loading={workflows.loading}
+              />
+              <label className="git-field">
+                Workflow
+                <select name="workflow" required defaultValue="">
+                  <option value="" disabled>
+                    Select a workflow
+                  </option>
+                  {workflows.data
+                    ?.filter((workflow) => workflow.state === "active")
+                    .map((workflow) => (
+                      <option key={workflow.id} value={workflow.id}>
+                        {workflow.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label className="git-field">
+                Branch or tag
+                <input
+                  name="ref"
+                  defaultValue={repository.default_branch}
+                  required
+                />
+              </label>
+              <div className="github-workflow-inputs">
+                <h3>Workflow inputs</h3>
+                <p className="github-meta">
+                  Optional values defined by this workflow.
+                </p>
+                {inputs.map((input, index) => (
+                  <div className="github-form-columns" key={index}>
+                    <label className="git-field">
+                      Input name
+                      <input
+                        value={input.name}
+                        onChange={(event) =>
+                          setInputs((rows) =>
+                            rows.map((row, i) =>
+                              i === index
+                                ? { ...row, name: event.target.value }
+                                : row,
+                            ),
+                          )
+                        }
+                        placeholder="environment"
+                      />
+                    </label>
+                    <label className="git-field">
+                      Value
+                      <input
+                        value={input.value}
+                        onChange={(event) =>
+                          setInputs((rows) =>
+                            rows.map((row, i) =>
+                              i === index
+                                ? { ...row, value: event.target.value }
+                                : row,
+                            ),
+                          )
+                        }
+                        placeholder="staging"
+                      />
+                    </label>
+                  </div>
+                ))}
+                <button
+                  className="btn"
+                  type="button"
+                  disabled={inputs.length >= 25}
+                  onClick={() =>
+                    setInputs((rows) => [...rows, { name: "", value: "" }])
+                  }
+                >
+                  Add input
+                </button>
+              </div>
+            </>
+          )}
+          {action === "rerun" && (
+            <label className="github-checkbox">
+              <input
+                type="checkbox"
+                name="failed"
+                defaultChecked={detail.data?.run.conclusion === "failure"}
+              />
+              Only re-run failed jobs
+            </label>
+          )}
+        </GitHubDialog>
+      )}
+    </div>
+  );
+}

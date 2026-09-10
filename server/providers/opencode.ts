@@ -1,0 +1,463 @@
+import { stopProcess } from "./process.ts";
+import { MessageUsage } from "./message-usage.ts";
+import { discoverOpenCodeModels } from "./models.ts";
+import { spawn, execFile, type ChildProcess } from "node:child_process";
+import { promisify } from "node:util";
+import { onLines } from "../lines.ts";
+import { ask, cancelThread } from "../permissions.ts";
+import type { AgentEvent, AgentSession, Provider, StartOptions } from "./types.ts";
+import type { Attachment, ModelOption, TodoItem } from "../../shared/protocol.ts";
+import { pathToFileURL } from "node:url";
+import type { ProviderCommand } from "../../shared/features.ts";
+
+const run = promisify(execFile);
+
+interface Instance {
+  base: string;
+  child: ChildProcess;
+}
+
+function launch(options: StartOptions, signal: AbortSignal): Promise<Instance> {
+  return new Promise((resolve, reject) => {
+    const inherited = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || "{}");
+    const permission = options.permissionMode === "bypass" ? { "*": "allow" } : { "*": options.permissionMode === "plan" ? "deny" : "ask", read: "allow", glob: "allow", grep: "allow", list: "allow", task: "allow", edit: options.permissionMode === "acceptEdits" ? "allow" : options.permissionMode === "plan" ? "deny" : "ask", "citropy_*": "allow" };
+    const config = { ...inherited, permission, mcp: { ...inherited.mcp, ...(options.mcp ? { citropy: { type: "remote", ...options.mcp, oauth: false, enabled: true } } : {}) } };
+    const child = spawn("opencode", ["serve", "--port", "0", "--hostname", "127.0.0.1"], {
+      cwd: options.cwd,
+      env: { ...process.env, NO_COLOR: "1", OPENCODE_CONFIG_CONTENT: JSON.stringify(config) },
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let settled = false;
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      stopProcess(child);
+      reject(error);
+    };
+    const abort = () => fail(new Error("OpenCode startup cancelled"));
+    const timer = setTimeout(() => fail(new Error("opencode server did not start in 30s")), 30_000);
+    signal.addEventListener("abort", abort, { once: true });
+    child.once("error", fail);
+    child.once("exit", () => fail(new Error("opencode server exited")));
+    const scan = (line: string) => {
+      if (settled) return;
+      const match = /http:\/\/127\.0\.0\.1:(\d+)/.exec(line);
+      if (!match) return;
+      settled = true;
+      clearTimeout(timer);
+      signal.removeEventListener("abort", abort);
+      resolve({ base: `http://127.0.0.1:${match[1]}`, child });
+    };
+    onLines(child.stdout, scan);
+    onLines(child.stderr, scan);
+    if (signal.aborted) abort();
+  });
+}
+
+export async function discoverOpenCodeCommands(cwd: string): Promise<ProviderCommand[]> {
+  const controller = new AbortController();
+  const instance = await launch({ cwd, threadId: "commands", permissionMode: "manual", emit: () => {} }, controller.signal);
+  try {
+    const response = await fetch(`${instance.base}/command`, { signal: AbortSignal.timeout(10000) });
+    if (!response.ok) throw new Error("OpenCode could not load its commands.");
+    return await response.json() as ProviderCommand[];
+  } finally {
+    controller.abort();
+    stopProcess(instance.child);
+  }
+}
+
+interface OcPart {
+  id: string;
+  type: string;
+  messageID?: string;
+  text?: string;
+  callID?: string;
+  tool?: string;
+  state?: { status?: string; input?: unknown; output?: string; title?: string; metadata?: Record<string, unknown> };
+}
+
+class OpenCodeSession implements AgentSession {
+  #options: StartOptions;
+  #instance: Instance | null = null;
+  #sessionId = "";
+  #abort = new AbortController();
+  #queue: Array<{ text: string; attachments: Attachment[] }> = [];
+  #ready: Promise<void>;
+  #blocks = new Set<string>();
+  #emitted = new Map<string, number>();
+  #tools = new Set<string>();
+  #roles = new Map<string, string>();
+  #busy = false;
+  #compacting = false;
+  #compactionError = "";
+  #agentSessions = new Set<string>();
+  #usage: MessageUsage;
+
+  constructor(options: StartOptions) {
+    this.#options = options;
+    this.#usage = new MessageUsage(options.usage);
+    this.#ready = this.#boot().catch((error: Error) => {
+      if (this.#abort.signal.aborted) return;
+      this.dispose();
+      options.emit({ type: "notice", level: "error", text: error.message });
+      options.emit({ type: "exit", code: -1 });
+    });
+  }
+
+  async #boot(): Promise<void> {
+    const instance = await launch(this.#options, this.#abort.signal);
+    if (this.#abort.signal.aborted) { stopProcess(instance.child); return; }
+    this.#instance = instance;
+    if (this.#options.externalId) {
+      this.#sessionId = this.#options.externalId;
+    } else {
+      const created = await this.#post("/session", { title: "Citropy thread" });
+      this.#sessionId = String((created as { id?: string }).id ?? "");
+    }
+    this.#options.emit({ type: "session", externalId: this.#sessionId, model: this.#options.model });
+    void this.#listen().catch((error: Error) => {
+      if (this.#abort.signal.aborted) return;
+      this.#finish(error.message);
+      this.#options.emit({ type: "exit", code: -1 });
+      this.dispose();
+    });
+    const queued = this.#queue;
+    this.#queue = [];
+    for (const entry of queued) void this.#prompt(entry.text, entry.attachments);
+  }
+
+  async #post(path: string, body: unknown): Promise<unknown> {
+    const base = this.#instance?.base;
+    if (!base) throw new Error("opencode server not ready");
+    const response = await fetch(`${base}${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+      signal: this.#abort.signal,
+    });
+    if (!response.ok) throw new Error(`${path} failed: ${response.status} ${await response.text()}`);
+    const text = await response.text();
+    return text ? JSON.parse(text) : {};
+  }
+
+  async #listen(): Promise<void> {
+    const base = this.#instance?.base;
+    if (!base) return;
+    const response = await fetch(`${base}/event`, {
+      headers: { accept: "text/event-stream" },
+      signal: this.#abort.signal,
+    });
+    if (!response.ok || !response.body) throw new Error(`OpenCode event stream failed: ${response.status}`);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) throw new Error("OpenCode event stream closed");
+        buffer += decoder.decode(value, { stream: true });
+        let split = buffer.indexOf("\n\n");
+        while (split !== -1) {
+          const frame = buffer.slice(0, split);
+          buffer = buffer.slice(split + 2);
+          const payload = frame
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map((line) => line.slice(5).trim())
+            .join("");
+          if (payload) {
+            try {
+              this.#handle(JSON.parse(payload) as Record<string, unknown>);
+            } catch {
+              /* ignore malformed frame */
+            }
+          }
+          split = buffer.indexOf("\n\n");
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  #body(text: string, attachments: Attachment[]): Record<string, unknown> {
+    const model = this.#options.model?.includes("/") ? this.#options.model.split("/") : null;
+    const body: Record<string, unknown> = { parts: [{ type: "text", text: text || "Please inspect the attached files." }, ...attachments.map((file) => ({ type: "file", mime: file.mime ?? "application/octet-stream", filename: file.label, url: pathToFileURL(file.path).href }))] };
+    if (this.#options.effort) body.variant = this.#options.effort;
+    if (model) body.model = { providerID: model[0], modelID: model.slice(1).join("/") };
+    return body;
+  }
+
+  async #prompt(text: string, attachments: Attachment[] = []): Promise<void> {
+    this.#busy = true;
+    const body = this.#body(text, attachments);
+    this.#options.emit({ type: "status", status: "thinking" });
+    try {
+      const command = /^\/([\w.:-]+)(?:\s+([\s\S]*))?$/.exec(text.trim());
+      if (command) {
+        const response = await fetch(`${this.#instance!.base}/command`, { signal: this.#abort.signal });
+        if (!response.ok) throw new Error("OpenCode could not load its commands.");
+        const available = await response.json() as ProviderCommand[];
+        if (!available.some(entry => entry.name === command[1])) throw new Error(`OpenCode does not provide /${command[1]}.`);
+        await this.#post(`/session/${this.#sessionId}/command`, {
+          command: command[1], arguments: command[2] ?? "", model: this.#options.model,
+          variant: this.#options.effort,
+          parts: (body.parts as Array<{ type: string }>).filter(part => part.type === "file"),
+        });
+      } else await this.#post(`/session/${this.#sessionId}/message`, body);
+      this.#finish();
+    } catch (error) {
+      if (this.#abort.signal.aborted) return;
+      this.#finish((error as Error).message);
+    }
+  }
+
+  send(text: string, attachments: Attachment[] = [], skills: Array<{ name: string; path: string }> = []): void {
+    text = withSkills(text, skills);
+    if (!this.#sessionId) {
+      this.#queue.push({ text, attachments });
+      void this.#ready;
+      return;
+    }
+    void this.#prompt(text, attachments);
+  }
+
+  async steer(text: string, attachments: Attachment[] = [], skills: Array<{ name: string; path: string }> = []): Promise<void> {
+    await this.#ready;
+    if (!this.#sessionId) throw new Error("OpenCode is still starting. Try again in a moment.");
+    await this.#post(`/session/${this.#sessionId}/prompt_async`, this.#body(withSkills(text, skills), attachments));
+  }
+
+  async compact(): Promise<void> {
+    await this.#ready;
+    const model = this.#options.model?.split("/");
+    if (!model || model.length < 2) throw new Error("Select a model before compacting.");
+    this.#compacting = true;
+    this.#compactionError = "";
+    try {
+      const result = await this.#post(`/session/${this.#sessionId}/summarize`, { providerID: model[0], modelID: model.slice(1).join("/"), auto: false });
+      if (this.#compactionError) throw new Error(this.#compactionError);
+      if (result !== true) throw new Error("OpenCode did not complete context compaction.");
+      this.#options.emit({ type: "compacted" });
+    } finally { this.#compacting = false; }
+  }
+
+  interrupt(): void {
+    if (this.#queue.length) this.#options.emit({ type: "notice", level: "warn", text: this.#queue.length === 1 ? "Stopped before OpenCode started your latest message. Send it again to run it." : `Stopped before OpenCode started your last ${this.#queue.length} messages. Send them again to run them.` });
+    this.#queue = [];
+    if (this.#compacting) this.#compactionError = "Context compaction was stopped.";
+    cancelThread(this.#options.threadId);
+    if (!this.#sessionId) return;
+    void this.#post(`/session/${this.#sessionId}/abort`, {}).catch(() => {});
+  }
+
+  dispose(): void {
+    cancelThread(this.#options.threadId);
+    this.#abort.abort();
+    if (this.#instance) stopProcess(this.#instance.child);
+    this.#instance = null;
+    this.#queue = [];
+    this.#blocks.clear();
+    this.#emitted.clear();
+    this.#tools.clear();
+    this.#roles.clear();
+    this.#agentSessions.clear();
+  }
+
+  #handle(event: Record<string, unknown>): void {
+    const type = String(event.type ?? "");
+    const props = (event.properties ?? {}) as Record<string, unknown>;
+    const info = props.info as { id?: string; parentID?: string } | undefined;
+    if (type === "session.created" && info?.parentID === this.#sessionId && info.id) this.#agentSessions.add(info.id);
+    const sessionID = props.sessionID ?? (props.part as { sessionID?: string } | undefined)?.sessionID ?? (props.info as { sessionID?: string } | undefined)?.sessionID;
+    if (sessionID && sessionID !== this.#sessionId && !(["permission.asked", "permission.v2.asked"].includes(type) && this.#agentSessions.has(String(sessionID)))) return;
+    const emit = this.#options.emit;
+
+    if (type === "session.compacted") {
+      if (!this.#compacting) emit({ type: "compacted" });
+      return;
+    }
+    if (this.#compacting && (type === "message.part.delta" || type === "message.part.updated")) return;
+
+    if (type === "message.part.delta") {
+      const partId = String(props.partID ?? "");
+      const field = String(props.field ?? "");
+      if (field !== "text") return;
+      if (!this.#blocks.has(partId)) return;
+      const delta = String(props.delta ?? "");
+      emit({ type: "block.delta", blockId: partId, text: delta });
+      this.#emitted.set(partId, (this.#emitted.get(partId) ?? 0) + delta.length);
+      return;
+    }
+
+    if (type === "message.part.updated") {
+      const part = props.part as OcPart | undefined;
+      if (!part) return;
+      this.#part(part);
+      return;
+    }
+
+    if (type === "message.updated") {
+      const info = props.info as
+        | { id?: string; role?: string; tokens?: { input: number; output: number; cache?: { read: number; write: number } }; cost?: number; time?: { completed?: number } }
+        | undefined;
+      if (info?.id && info.role) this.#roles.set(info.id, info.role);
+      if (!info || info.role !== "assistant") return;
+      if (info.tokens && info.id) {
+        const input = info.tokens.input ?? 0;
+        const output = info.tokens.output ?? 0;
+        emit({
+          type: "usage",
+          usage: {
+            ...this.#usage.update(info.id, { input, output, cacheRead: info.tokens.cache?.read ?? 0, cacheWrite: info.tokens.cache?.write ?? 0, costUsd: info.cost ?? 0 }),
+            contextTokens: input + output + (info.tokens.cache?.read ?? 0) + (info.tokens.cache?.write ?? 0),
+            contextMax: this.#options.contextMax ?? 0,
+          },
+        });
+      }
+      if (info.time?.completed) {
+        for (const id of this.#blocks) emit({ type: "block.end", blockId: id });
+        this.#blocks.clear();
+        this.#emitted.clear();
+      }
+      return;
+    }
+
+    if (type === "session.error") {
+      const error = props.error as { data?: { message?: string } } | undefined;
+      const message = error?.data?.message ?? "opencode error";
+      if (this.#compacting) this.#compactionError = message;
+      else this.#finish(message);
+      return;
+    }
+
+    if (type === "permission.v2.asked" || type === "permission.asked") {
+      emit({ type: "status", status: "awaiting" });
+      void ask(this.#options.threadId, mapTool(String(props.permission ?? "Tool")), { ...((props.metadata ?? {}) as Record<string, unknown>), patterns: props.patterns }).then((decision) => this.#post(`/permission/${encodeURIComponent(String(props.id))}/reply`, { reply: decision === "deny" ? "reject" : decision === "allow_always" ? "always" : "once" })).then(() => {
+        if (this.#busy) emit({ type: "status", status: "working" });
+      }).catch((error: Error) => { if (!this.#abort.signal.aborted) this.#finish(error.message); });
+    }
+  }
+
+  #finish(error?: string): void {
+    if (!this.#busy) return;
+    this.#busy = false;
+    for (const id of this.#blocks) this.#options.emit({ type: "block.end", blockId: id });
+    this.#blocks.clear();
+    this.#emitted.clear();
+    cancelThread(this.#options.threadId, false);
+    this.#options.emit({ type: "turn.end", ...(error ? { error } : {}) });
+  }
+
+  #part(part: OcPart): void {
+    const emit = this.#options.emit;
+    if (part.messageID && this.#roles.get(part.messageID) === "user") return;
+    if (part.type === "text" || part.type === "reasoning") {
+      const kind = part.type === "reasoning" ? "reasoning" : "text";
+      if (!this.#blocks.has(part.id)) {
+        this.#blocks.add(part.id);
+        emit({ type: "block.start", blockId: part.id, block: kind });
+      }
+      const full = part.text ?? "";
+      const sent = this.#emitted.get(part.id) ?? 0;
+      if (full.length > sent) {
+        emit({ type: "block.delta", blockId: part.id, text: full.slice(sent) });
+        this.#emitted.set(part.id, full.length);
+      }
+      return;
+    }
+
+    if (part.type !== "tool") return;
+    const callId = part.callID ?? part.id;
+    const name = mapTool(part.tool ?? "tool");
+    const status = part.state?.status ?? "pending";
+    const input = part.state?.input ?? {};
+    if (name === "Task") {
+      const childSession = part.state?.metadata?.sessionId;
+      if (typeof childSession === "string") this.#agentSessions.add(childSession);
+      const task = input as Record<string, unknown>;
+      emit({ type: "subagent", id: callId, title: String(task.description ?? task.subagent_type ?? "Subagent"), prompt: typeof task.prompt === "string" ? task.prompt : undefined, status: status === "completed" ? "idle" : status === "error" ? "error" : "working", result: part.state?.output });
+    }
+
+    if (name === "TodoWrite") {
+      const todos = (input as { todos?: TodoItem[] }).todos;
+      if (Array.isArray(todos)) emit({ type: "todos", items: todos });
+      return;
+    }
+
+    if (!this.#tools.has(callId)) {
+      this.#tools.add(callId);
+      emit({ type: "tool.start", callId, name, input });
+      emit({ type: "status", status: "working", tool: name });
+    } else {
+      emit({ type: "tool.input", callId, input });
+    }
+    if (status === "completed" || status === "error") {
+      this.#tools.delete(callId);
+      emit({
+        type: "tool.end",
+        callId,
+        ok: status === "completed",
+        output: part.state?.output ?? "",
+      });
+    }
+  }
+}
+
+function withSkills(text: string, skills: Array<{ name: string; path: string }>): string {
+  if (!skills.length) return text;
+  const instructions = skills.map((skill) => `Use the ${skill.name} skill. Read its instructions at ${skill.path}.`).join("\n");
+  return /^\/[\w.:-]+(?:\s|$)/.test(text.trim()) ? `${text}\n\n${instructions}` : `${instructions}\n\n${text}`;
+}
+
+function mapTool(tool: string): string {
+  switch (tool) {
+    case "bash":
+      return "Bash";
+    case "read":
+      return "Read";
+    case "write":
+      return "Write";
+    case "edit":
+    case "patch":
+      return "Edit";
+    case "grep":
+      return "Grep";
+    case "glob":
+    case "list":
+      return "Glob";
+    case "webfetch":
+      return "WebFetch";
+    case "todowrite":
+    case "todoread":
+      return "TodoWrite";
+    case "task":
+      return "Task";
+    default:
+      return tool;
+  }
+}
+
+export const opencodeProvider: Provider = {
+  id: "opencode",
+  label: "OpenCode",
+  binary: "opencode",
+  supportsPermissionPrompt: true,
+  steerHint: "OpenCode adds it to the run in progress.",
+  models: [],
+  listModels: () => discoverOpenCodeModels(),
+  async detect() {
+    try {
+      const { stdout } = await run("opencode", ["--version"], { timeout: 8000 });
+      return { available: true, version: stdout.trim().split("\n").pop() ?? undefined };
+    } catch {
+      return { available: false };
+    }
+  },
+  start(options) {
+    return new OpenCodeSession(options);
+  },
+};

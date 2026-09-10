@@ -1,0 +1,50 @@
+import { CircleHelp, Trash2 } from "lucide-react";
+import { answerConfirmation, useApp } from "../lib/store.ts";
+import { Modal } from "./Modal.tsx";
+
+export function ConfirmationDialog() {
+  const confirmation = useApp((state) => state.confirmation);
+  const connected = useApp((state) => state.connected);
+  if (!confirmation) return null;
+  return (
+    <Modal
+      title={confirmation.title}
+      description={confirmation.description}
+      danger={confirmation.danger}
+      icon={
+        confirmation.danger ? <Trash2 size={21} /> : <CircleHelp size={21} />
+      }
+      onClose={() => answerConfirmation(false)}
+      footer={
+        <>
+          <button
+            type="button"
+            className="btn"
+            data-cancel
+            onClick={() => answerConfirmation(false)}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="btn"
+            data-variant={confirmation.danger ? "danger" : "primary"}
+            disabled={!connected}
+            onClick={() => answerConfirmation(true)}
+          >
+            {confirmation.label}
+          </button>
+        </>
+      }
+    >
+      {confirmation.context && (
+        <div className="confirmation-context">{confirmation.context}</div>
+      )}
+      {!connected && (
+        <p className="dialog-error" role="alert">
+          Reconnect to Citropy to continue.
+        </p>
+      )}
+    </Modal>
+  );
+}

@@ -1,0 +1,259 @@
+import { useEffect, useRef } from "react";
+import {
+  Globe2,
+  TerminalSquare,
+  Files,
+  FileDiff,
+  Network,
+  Plug,
+  Plus,
+  X,
+  ChevronDown,
+  Monitor,
+} from "lucide-react";
+import { Changes } from "./Changes.tsx";
+import { ResizeHandle } from "./ResizeHandle.tsx";
+import { FileTree } from "./FileTree.tsx";
+import { TerminalPane } from "./TerminalPane.tsx";
+import { BrowserPane } from "./BrowserPane.tsx";
+import { SubagentsPane } from "./SubagentsPane.tsx";
+import { ToolsPane } from "./ToolsPane.tsx";
+import { ComputerPane } from "./ComputerPane.tsx";
+import { Menu } from "./Menu.tsx";
+import { selectPanel, useApp } from "../lib/store.ts";
+import { openWorkbenchPanel } from "../lib/actions.ts";
+import { send } from "../lib/socket.ts";
+import type { PanelKind } from "../../../shared/workbench.ts";
+
+const options = [
+  { kind: "computer", label: "Computer", hint: "Work with native desktop apps", icon: Monitor },
+  {
+    kind: "browser",
+    label: "Browser",
+    hint: "Browse together with your provider",
+    icon: Globe2,
+  },
+  {
+    kind: "terminal",
+    label: "Terminal",
+    hint: "Open another shell",
+    icon: TerminalSquare,
+  },
+  {
+    kind: "files",
+    label: "Files",
+    hint: "Explore this workspace",
+    icon: Files,
+  },
+  {
+    kind: "changes",
+    label: "Changes",
+    hint: "Review the working tree",
+    icon: FileDiff,
+  },
+  {
+    kind: "subagents",
+    label: "Subagents",
+    hint: "Follow delegated work",
+    icon: Network,
+  },
+  {
+    kind: "tools",
+    label: "Tools",
+    hint: "MCP connection and available tools",
+    icon: Plug,
+  },
+] satisfies Array<{
+  kind: PanelKind;
+  label: string;
+  hint: string;
+  icon: typeof Plus;
+}>;
+
+export function Inspector({ visible }: { visible: boolean }) {
+  const projectId = useApp((state) => state.activeProjectId);
+  const threadId = useApp((state) => state.activeThreadId);
+  const panels = useApp((state) => state.panels);
+  const activePanels = useApp((state) => state.activePanels);
+  const connected = useApp((state) => state.connected);
+  const initialized = useRef(new Set<string>());
+  const tabs = panels.filter((panel) => panel.projectId === projectId);
+  const activeId =
+    projectId && tabs.some((panel) => panel.id === activePanels[projectId])
+      ? activePanels[projectId]
+      : tabs[0]?.id;
+
+  useEffect(() => {
+    if (visible && activeId)
+      document
+        .getElementById(`panel-tab-${activeId}`)
+        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [visible, activeId]);
+
+  useEffect(() => {
+    if (
+      !visible ||
+      !connected ||
+      !projectId ||
+      initialized.current.has(projectId)
+    )
+      return;
+    initialized.current.add(projectId);
+    if (!panels.some((panel) => panel.projectId === projectId))
+      openWorkbenchPanel("changes");
+  }, [visible, connected, projectId, panels]);
+
+  return (
+    <aside
+      className="inspector workbench"
+      data-visible={visible}
+      aria-label="Workspace panels"
+    >
+      <div className="workbench-heading">
+        <span>Workspace</span>
+        <Menu
+          header="Open a panel"
+          width={292}
+          align="end"
+          items={options.map((option) => ({
+            id: option.kind,
+            label: option.label,
+            hint: option.hint,
+            icon: (
+              <option.icon size={17} className={`panel-icon-${option.kind}`} />
+            ),
+            onSelect: () => openWorkbenchPanel(option.kind),
+          }))}
+          trigger={({ id, open, toggle }) => (
+            <button
+              id={id}
+              className="workbench-open"
+              type="button"
+              onClick={toggle}
+              disabled={!connected}
+              aria-label="Open panel"
+              aria-haspopup="menu"
+              aria-expanded={open}
+            >
+              <Plus size={14} /> Open <ChevronDown size={11} />
+            </button>
+          )}
+        />
+      </div>
+      <div
+        className="workbench-tabs scroll"
+        role="tablist"
+        aria-label="Open workspace panels"
+        onKeyDown={(event) => {
+          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
+            return;
+          event.preventDefault();
+          const index = tabs.findIndex((panel) => panel.id === activeId);
+          const next =
+            event.key === "Home"
+              ? 0
+              : event.key === "End"
+                ? tabs.length - 1
+                : (index +
+                    (event.key === "ArrowRight" ? 1 : -1) +
+                    tabs.length) %
+                  tabs.length;
+          const panel = tabs[next];
+          if (panel) {
+            selectPanel(panel.id);
+            document.getElementById(`panel-tab-${panel.id}`)?.focus();
+          }
+        }}
+      >
+        {tabs.map((panel) => {
+          const Icon = options.find(
+            (option) => option.kind === panel.kind,
+          )!.icon;
+          return (
+            <div
+              className="workbench-tab"
+              key={panel.id}
+              data-active={activeId === panel.id}
+            >
+              <button
+                type="button"
+                id={`panel-tab-${panel.id}`}
+                role="tab"
+                aria-selected={activeId === panel.id}
+                aria-controls={`panel-body-${panel.id}`}
+                tabIndex={activeId === panel.id ? 0 : -1}
+                title={panel.title}
+                onClick={() => selectPanel(panel.id)}
+              >
+                <Icon size={14} className={`panel-icon-${panel.kind}`} />
+                <span className="truncate">{panel.title}</span>
+              </button>
+              <button
+                type="button"
+                className="workbench-close"
+                disabled={!connected}
+                aria-label={`Close ${panel.title}`}
+                title={`Close ${panel.title}`}
+                onClick={() => send({ t: "panel.close", id: panel.id })}
+              >
+                <X size={12} />
+              </button>
+            </div>
+          );
+        })}
+      </div>
+      <div className="inspector-body">
+        {panels.map((panel) => {
+          const active =
+            visible && panel.projectId === projectId && panel.id === activeId;
+          return (
+            <div
+              key={panel.id}
+              id={`panel-body-${panel.id}`}
+              className="inspector-pane"
+              role="tabpanel"
+              aria-labelledby={`panel-tab-${panel.id}`}
+              data-show={active}
+            >
+              {panel.kind === "computer" ? (
+                <ComputerPane active={active} />
+              ) : panel.kind === "browser" ? (
+                <BrowserPane panel={panel} active={active} />
+              ) : panel.kind === "terminal" ? (
+                <TerminalPane panel={panel} active={active} />
+              ) : panel.projectId !== projectId ? null : panel.kind ===
+                "files" ? (
+                <FileTree />
+              ) : panel.kind === "changes" ? (
+                <Changes key={`${projectId}:${threadId}`} />
+              ) : panel.kind === "subagents" ? (
+                <SubagentsPane />
+              ) : (
+                <ToolsPane />
+              )}
+            </div>
+          );
+        })}
+        {tabs.length === 0 && (
+          <div className="workbench-empty">
+            <Files size={28} />
+            <h3>Room for your work</h3>
+            <p>
+              Open a browser, terminal, or workspace view alongside the
+              conversation.
+            </p>
+            <button
+              type="button"
+              className="btn"
+              disabled={!connected}
+              onClick={() => openWorkbenchPanel("browser")}
+            >
+              <Globe2 size={15} /> Open browser
+            </button>
+          </div>
+        )}
+      </div>
+      <ResizeHandle panel="inspector" />
+    </aside>
+  );
+}

@@ -1,0 +1,69 @@
+import { uid } from "./ids.ts";
+import { bus } from "./bus.ts";
+import type { PanelKind, PanelTab } from "../shared/workbench.ts";
+
+const panels = new Map<string, PanelTab>();
+
+export function panelList(): PanelTab[] {
+  return [...panels.values()];
+}
+
+export function openPanel(
+  projectId: string,
+  kind: PanelKind,
+  threadId?: string,
+  id = uid("panel"),
+): PanelTab {
+  const titles: Record<PanelKind, string> = {
+    browser: "Browser",
+    terminal: "Terminal",
+    files: "Files",
+    changes: "Changes",
+    subagents: "Subagents",
+    tools: "Tools",
+    computer: "Computer",
+  };
+  if (!Object.hasOwn(titles, kind)) throw new Error("Unknown panel type");
+  const existing =
+    panels.get(id) ??
+    (kind !== "browser" && kind !== "terminal"
+      ? [...panels.values()].find(
+          (panel) => panel.projectId === projectId && panel.kind === kind,
+        )
+      : undefined);
+  if (existing) {
+    if (existing.projectId !== projectId || existing.kind !== kind)
+      throw new Error("Panel belongs to another workspace");
+    bus.emit({ t: "panel.upsert", panel: existing });
+    return existing;
+  }
+  const titlesInUse = new Set(
+    [...panels.values()]
+      .filter((panel) => panel.projectId === projectId)
+      .map((panel) => panel.title),
+  );
+  let number = 1;
+  while (titlesInUse.has(`Terminal ${number}`)) number++;
+  const panel = {
+    id,
+    projectId,
+    kind,
+    title: `${titles[kind]}${kind === "terminal" ? ` ${number}` : ""}`,
+    ...(threadId ? { threadId } : {}),
+  };
+  panels.set(id, panel);
+  bus.emit({ t: "panel.upsert", panel });
+  return panel;
+}
+
+export function renamePanel(id: string, title: string): void {
+  const panel = panels.get(id);
+  if (!panel || panel.title === title) return;
+  panel.title = title.slice(0, 100);
+  bus.emit({ t: "panel.upsert", panel: { ...panel } });
+}
+
+export function closePanel(id: string): void {
+  if (!panels.delete(id)) return;
+  bus.emit({ t: "panel.remove", id });
+}

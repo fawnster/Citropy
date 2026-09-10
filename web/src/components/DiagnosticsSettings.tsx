@@ -1,0 +1,172 @@
+import { useEffect, useState } from "react";
+import { Activity, Cpu, MemoryStick, RefreshCw } from "lucide-react";
+import { api } from "../lib/api.ts";
+import type { DiagnosticReport } from "../../../shared/features.ts";
+
+const memory = (bytes: number) =>
+  bytes >= 1024 ** 3
+    ? `${(bytes / 1024 ** 3).toFixed(1)} GB`
+    : `${Math.round(bytes / 1024 ** 2)} MB`;
+
+export function DiagnosticsSettings() {
+  const [data, setData] = useState<DiagnosticReport>();
+  const [history, setHistory] = useState<
+    Array<{ time: number; memory: number }>
+  >([]);
+  const [error, setError] = useState("");
+  const [live, setLive] = useState(true);
+  const [revision, setRevision] = useState(0);
+  useEffect(() => {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout>;
+    const refresh = async () => {
+      if (!document.hidden)
+        try {
+          const next = await api<DiagnosticReport>("diagnostics", {
+            signal: controller.signal,
+          });
+          setData(next);
+          setError("");
+          setHistory((values) => [
+            ...values.slice(-29),
+            { time: next.sampledAt, memory: next.server.rss },
+          ]);
+        } catch (error) {
+          if (!controller.signal.aborted) setError((error as Error).message);
+        }
+      if (!controller.signal.aborted && live) timer = setTimeout(refresh, 3000);
+    };
+    void refresh();
+    return () => {
+      controller.abort();
+      clearTimeout(timer);
+    };
+  }, [live, revision]);
+  const max = Math.max(...history.map((sample) => sample.memory), 1);
+  return (
+    <div className="feature-stack">
+      <div className="feature-inline">
+        <label>
+          <input
+            type="checkbox"
+            checked={live}
+            onChange={(event) => setLive(event.target.checked)}
+          />
+          Live updates every 3 seconds
+        </label>
+        <button
+          className="btn"
+          onClick={() => setRevision((value) => value + 1)}
+        >
+          <RefreshCw size={15} />
+          Refresh
+        </button>
+      </div>
+      {error && (
+        <p className="feature-error" role="alert">
+          {error}
+        </p>
+      )}
+      {data ? (
+        <>
+          <div className="metric-grid">
+            <div>
+              <MemoryStick size={20} />
+              <span>Server memory</span>
+              <strong>{memory(data.server.rss)}</strong>
+              <small>{memory(data.server.heapUsed)} JavaScript heap</small>
+            </div>
+            <div>
+              <Cpu size={20} />
+              <span>System memory</span>
+              <strong>
+                {memory(data.system.memoryTotal - data.system.memoryFree)}
+              </strong>
+              <small>
+                of {memory(data.system.memoryTotal)} · {data.system.cores} CPU
+                cores
+              </small>
+            </div>
+            <div>
+              <Activity size={20} />
+              <span>Active work</span>
+              <strong>{data.running} conversations</strong>
+              <small>
+                {data.terminals} terminals · {data.browsers} browser tabs
+              </small>
+            </div>
+          </div>
+          <section className="resource-chart">
+            <div className="feature-section-heading">
+              <h2>Server memory</h2>
+              <span>
+                Last{" "}
+                {history.length > 1
+                  ? Math.round((history.at(-1)!.time - history[0]!.time) / 1000)
+                  : 0}{" "}
+                seconds
+              </span>
+            </div>
+            <svg
+              viewBox="0 0 600 90"
+              role="img"
+              aria-label="Recent server memory usage"
+              preserveAspectRatio="none"
+            >
+              {history.length === 1 && (
+                <circle cx="3" cy="10" r="3" fill="var(--web-icon)" />
+              )}
+              <polyline
+                points={history
+                  .map(
+                    (value, i) =>
+                      `${(i * 600) / Math.max(history.length - 1, 1)},${85 - (value.memory / max) * 75}`,
+                  )
+                  .join(" ")}
+                fill="none"
+                stroke="var(--web-icon)"
+                strokeWidth="2"
+                vectorEffect="non-scaling-stroke"
+              />
+            </svg>
+          </section>
+          <section>
+            <div className="feature-section-heading">
+              <h2>Citropy processes</h2>
+              <span>{data.processes.length} processes</span>
+            </div>
+            <div className="feature-table-wrap scroll">
+              <table className="feature-table">
+                <thead>
+                  <tr>
+                    <th>Process</th>
+                    <th>PID</th>
+                    <th>CPU</th>
+                    <th>Memory</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.processes.map((entry) => (
+                    <tr key={entry.pid}>
+                      <td>{entry.name}</td>
+                      <td>{entry.pid}</td>
+                      <td>{entry.cpu.toFixed(1)}%</td>
+                      <td>{memory(entry.memory)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="feature-note">
+              CPU is the operating system's process average. Server uptime:{" "}
+              {Math.floor(data.uptime / 60)} minutes. Updates stop when this
+              view closes.
+            </p>
+          </section>
+        </>
+      ) : (
+        !error && <div className="pane-empty">Reading resource usage…</div>
+      )}
+    </div>
+  );
+}

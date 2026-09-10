@@ -1,0 +1,170 @@
+import type { FilePatch, PatchHunk, PatchLine } from "../shared/protocol.ts";
+
+const MAX_LINES = 4000;
+
+export function parseUnifiedDiff(text: string, fallbackPath = ""): FilePatch[] {
+  const patches: FilePatch[] = [];
+  let current: FilePatch | null = null;
+  let hunk: PatchHunk | null = null;
+  let oldNo = 0;
+  let newNo = 0;
+
+  const push = () => {
+    if (current) patches.push(current);
+    current = null;
+    hunk = null;
+  };
+
+  for (const line of text.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      push();
+      const match = /b\/(.+)$/.exec(line);
+      current = { path: match?.[1] ?? fallbackPath, added: 0, removed: 0, hunks: [] };
+      continue;
+    }
+    if (line.startsWith("+++ ")) {
+      const path = line.slice(4).replace(/^b\//, "").trim();
+      if (!current) current = { path, added: 0, removed: 0, hunks: [] };
+      else if (path && path !== "/dev/null") current.path = path;
+      continue;
+    }
+    if (line.startsWith("--- ")) {
+      if (!current) current = { path: fallbackPath, added: 0, removed: 0, hunks: [] };
+      continue;
+    }
+    if (line.startsWith("@@")) {
+      if (!current) current = { path: fallbackPath, added: 0, removed: 0, hunks: [] };
+      const match = /@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/.exec(line);
+      oldNo = Number(match?.[1] ?? 1);
+      newNo = Number(match?.[2] ?? 1);
+      hunk = { header: (match?.[3] ?? "").trim(), oldStart: oldNo, newStart: newNo, lines: [] };
+      current.hunks.push(hunk);
+      continue;
+    }
+    if (!current || !hunk) continue;
+    if (line.startsWith("+")) {
+      hunk.lines.push({ type: "add", text: line.slice(1), newNo });
+      newNo += 1;
+      current.added += 1;
+    } else if (line.startsWith("-")) {
+      hunk.lines.push({ type: "del", text: line.slice(1), oldNo });
+      oldNo += 1;
+      current.removed += 1;
+    } else if (line.startsWith(" ")) {
+      hunk.lines.push({ type: "ctx", text: line.slice(1), oldNo, newNo });
+      oldNo += 1;
+      newNo += 1;
+    }
+  }
+  push();
+  return patches.map(truncate);
+}
+
+function truncate(patch: FilePatch): FilePatch {
+  let budget = MAX_LINES;
+  const hunks: PatchHunk[] = [];
+  for (const hunk of patch.hunks) {
+    if (budget <= 0) return { ...patch, hunks, truncated: true };
+    if (hunk.lines.length > budget) {
+      hunks.push({ ...hunk, lines: hunk.lines.slice(0, budget) });
+      return { ...patch, hunks, truncated: true };
+    }
+    hunks.push(hunk);
+    budget -= hunk.lines.length;
+  }
+  return { ...patch, hunks };
+}
+
+function lcs(a: string[], b: string[]): Array<[number, number]> {
+  const n = a.length;
+  const m = b.length;
+  const table: Uint32Array = new Uint32Array((n + 1) * (m + 1));
+  const at = (i: number, j: number) => i * (m + 1) + j;
+  for (let i = n - 1; i >= 0; i -= 1) {
+    for (let j = m - 1; j >= 0; j -= 1) {
+      table[at(i, j)] =
+        a[i] === b[j]
+          ? (table[at(i + 1, j + 1)] ?? 0) + 1
+          : Math.max(table[at(i + 1, j)] ?? 0, table[at(i, j + 1)] ?? 0);
+    }
+  }
+  const pairs: Array<[number, number]> = [];
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      pairs.push([i, j]);
+      i += 1;
+      j += 1;
+    } else if ((table[at(i + 1, j)] ?? 0) >= (table[at(i, j + 1)] ?? 0)) {
+      i += 1;
+    } else {
+      j += 1;
+    }
+  }
+  return pairs;
+}
+
+export function diffLines(before: string, after: string, path: string, startLine = 1): FilePatch {
+  const a = before.length ? before.split("\n") : [];
+  const b = after.length ? after.split("\n") : [];
+  const lines: PatchLine[] = [];
+  let added = 0;
+  let removed = 0;
+
+  const emit = (from: number, toA: number, fromB: number, toB: number) => {
+    for (let i = from; i < toA; i += 1) {
+      lines.push({ type: "del", text: a[i] ?? "", oldNo: startLine + i });
+      removed += 1;
+    }
+    for (let j = fromB; j < toB; j += 1) {
+      lines.push({ type: "add", text: b[j] ?? "", newNo: startLine + j });
+      added += 1;
+    }
+  };
+
+  if (a.length * b.length > 2_000_000) {
+    emit(0, a.length, 0, b.length);
+  } else {
+    const pairs = lcs(a, b);
+    let ai = 0;
+    let bi = 0;
+    for (const [pa, pb] of pairs) {
+      emit(ai, pa, bi, pb);
+      lines.push({ type: "ctx", text: a[pa] ?? "", oldNo: startLine + pa, newNo: startLine + pb });
+      ai = pa + 1;
+      bi = pb + 1;
+    }
+    emit(ai, a.length, bi, b.length);
+  }
+
+  const trimmed = trimContext(lines, 3);
+  return truncate({
+    path,
+    added,
+    removed,
+    hunks: [{ header: "", oldStart: startLine, newStart: startLine, lines: trimmed }],
+  });
+}
+
+function trimContext(lines: PatchLine[], radius: number): PatchLine[] {
+  const keep = new Array<boolean>(lines.length).fill(false);
+  lines.forEach((line, index) => {
+    if (line.type === "ctx") return;
+    for (let i = Math.max(0, index - radius); i <= Math.min(lines.length - 1, index + radius); i += 1) {
+      keep[i] = true;
+    }
+  });
+  const out: PatchLine[] = [];
+  let gap = false;
+  lines.forEach((line, index) => {
+    if (keep[index]) {
+      out.push(line);
+      gap = false;
+    } else if (!gap) {
+      out.push({ type: "ctx", text: "…", oldNo: undefined, newNo: undefined });
+      gap = true;
+    }
+  });
+  return out;
+}

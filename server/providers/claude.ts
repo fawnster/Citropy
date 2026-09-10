@@ -1,0 +1,428 @@
+import { stopProcess } from "./process.ts";
+import { MessageUsage } from "./message-usage.ts";
+import { discoverModels } from "./models.ts";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { readFile } from "node:fs/promises";
+import { onJson, onLines } from "../lines.ts";
+import { permissionToolName } from "../permissions.ts";
+import type { AgentEvent, AgentSession, Provider, StartOptions } from "./types.ts";
+import type { Attachment, PermissionMode, TodoItem } from "../../shared/protocol.ts";
+
+const run = promisify(execFile);
+
+const PLAN_TOOLS = new Set(["TodoWrite", "TaskCreate", "TaskUpdate", "TaskView"]);
+
+const MODES: Record<PermissionMode, string> = {
+  plan: "plan",
+  manual: "manual",
+  acceptEdits: "acceptEdits",
+  bypass: "bypassPermissions",
+};
+
+interface StreamEvent {
+  type: string;
+  index?: number;
+  content_block?: { type: string; id?: string; name?: string };
+  delta?: { type: string; text?: string; thinking?: string; partial_json?: string };
+  message?: { model?: string };
+}
+
+function textOf(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((entry) => {
+        if (typeof entry === "string") return entry;
+        const record = entry as Record<string, unknown>;
+        if (record.type === "text" && typeof record.text === "string") return record.text;
+        if (record.type === "image") return "[image]";
+        return JSON.stringify(record);
+      })
+      .join("\n");
+  }
+  if (content == null) return "";
+  return JSON.stringify(content);
+}
+
+class ClaudeSession implements AgentSession {
+  #child: ChildProcessWithoutNullStreams;
+  #emit: (event: AgentEvent) => void;
+  #turn = 0;
+  #disposed = false;
+  #openBlocks = new Set<string>();
+  #contextMax = 200_000;
+  #tasks = new Map<string, TodoItem>();
+  #pendingTasks = new Map<string, string>();
+  #agents = new Map<string, { title: string; prompt?: string; model?: string }>();
+  #usage: MessageUsage;
+  #initialCost = 0;
+  #contextTokens = 0;
+  #manualCompaction = false;
+  #compacted = false;
+  #compactedTokens: number | undefined;
+
+  constructor(options: StartOptions) {
+    this.#emit = options.emit;
+    this.#usage = new MessageUsage(options.usage);
+    this.#initialCost = options.usage?.costUsd ?? 0;
+    this.#contextTokens = options.usage?.contextTokens ?? 0;
+    this.#contextMax = options.contextMax ?? 200_000;
+    const args = [
+      "-p",
+      "--input-format",
+      "stream-json",
+      "--output-format",
+      "stream-json",
+      "--include-partial-messages",
+      "--verbose",
+      "--permission-mode",
+      MODES[options.permissionMode],
+      "--mcp-config",
+      JSON.stringify({
+        mcpServers: {
+          ...(options.mcp ? { citropy: { type: "http", ...options.mcp } } : {}),
+        },
+      }),
+    ];
+    if (options.mcp) args.push("--permission-prompt-tool", permissionToolName);
+    if (options.effort) args.push("--effort", options.effort);
+    if (options.model)
+      args.push(
+        "--model",
+        options.model.replace(/\[1m\]$/i, "") +
+          (options.contextMax === 1_000_000 ? "[1m]" : ""),
+      );
+    args.push(
+      "--settings",
+      JSON.stringify({ fastMode: options.fastMode ?? false }),
+    );
+    if (options.externalId) args.push("--resume", options.externalId);
+
+    this.#child = spawn("claude", args, {
+      cwd: options.cwd,
+      env: {
+        ...process.env,
+        FORCE_COLOR: "0",
+        ...(options.contextMax
+          ? {
+              CLAUDE_CODE_DISABLE_1M_CONTEXT:
+                options.contextMax <= 200_000 ? "1" : "0",
+            }
+          : {}),
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    this.#child.stdin.on("error", () => {});
+    onJson(this.#child.stdout, (value) => this.#handle(value as Record<string, unknown>));
+    onLines(this.#child.stderr, (line) => {
+      if (/^\s*$/.test(line)) return;
+      this.#emit({ type: "notice", level: "warn", text: line });
+    });
+    this.#child.on("error", (error) => {
+      this.#emit({ type: "notice", level: "error", text: error.message });
+      this.#emit({ type: "exit", code: -1 });
+    });
+    this.#child.on("exit", (code) => this.#emit({ type: "exit", code: code ?? 0 }));
+  }
+
+  async send(text: string, attachments: Attachment[] = [], skills: Array<{ name: string; path: string }> = []): Promise<void> {
+    this.#write(await this.#content(text, attachments, skills));
+  }
+
+  async steer(text: string, attachments: Attachment[] = [], skills: Array<{ name: string; path: string }> = []): Promise<void> {
+    this.#write(await this.#content(text, attachments, skills), "next");
+  }
+
+  async #content(text: string, attachments: Attachment[], skills: Array<{ name: string; path: string }>): Promise<unknown[]> {
+    const content: unknown[] = [];
+    for (const file of attachments) {
+      if (["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.mime ?? "") && (file.size ?? 0) <= 10 * 1024 * 1024) content.push({ type: "image", source: { type: "base64", media_type: file.mime, data: (await readFile(file.path)).toString("base64") } });
+      else if (file.mime === "application/pdf" && (file.size ?? 0) <= 20 * 1024 * 1024) content.push({ type: "document", source: { type: "base64", media_type: file.mime, data: (await readFile(file.path)).toString("base64") } });
+      else content.push({ type: "text", text: `Attached file: ${file.label}\nLocal path: ${file.path}` });
+    }
+    for (const skill of skills) content.push({ type: "text", text: `Use the ${skill.name} skill. Read its instructions at ${skill.path}.` });
+    const prompt = { type: "text", text: text || "Please inspect the attached files." };
+    if (/^\/[\w.:-]+(?:\s|$)/.test(text.trim())) content.unshift(prompt);
+    else content.push(prompt);
+    return content;
+  }
+
+  #write(content: unknown[], priority?: "next"): void {
+    if (this.#disposed || !this.#child.stdin.writable) throw new Error("Claude session has closed.");
+    this.#child.stdin.write(
+      `${JSON.stringify({
+        type: "user",
+        message: { role: "user", content },
+        ...(priority ? { priority } : {}),
+      })}\n`,
+    );
+  }
+
+  async compact(): Promise<void> {
+    this.#manualCompaction = true;
+    this.#compacted = false;
+    try { await this.send("/compact"); }
+    catch (error) { this.#manualCompaction = false; throw error; }
+  }
+
+  interrupt(): void {
+    this.#child.kill("SIGINT");
+  }
+
+  dispose(): void {
+    if (this.#disposed) return;
+    this.#disposed = true;
+    try {
+      this.#child.stdin.end();
+    } catch {
+      /* already closed */
+    }
+    stopProcess(this.#child);
+  }
+
+  #block(index: number | undefined): string {
+    return `${this.#turn}:${index ?? 0}`;
+  }
+
+  #emitTasks(): void {
+    if (this.#tasks.size === 0) return;
+    this.#emit({ type: "todos", items: [...this.#tasks.values()] });
+  }
+
+  #task(name: string, callId: string, rawInput: unknown): void {
+    const input = (rawInput ?? {}) as Record<string, unknown>;
+    if (name === "TodoWrite") {
+      const items = input.todos;
+      if (Array.isArray(items)) this.#emit({ type: "todos", items: items as TodoItem[] });
+      return;
+    }
+    if (name === "TaskCreate" && typeof input.title === "string") {
+      this.#pendingTasks.set(callId, input.title);
+      return;
+    }
+    if (name === "TaskUpdate") {
+      const id = String(input.taskId ?? "");
+      const existing = this.#tasks.get(id);
+      if (!existing) return;
+      const status = String(input.status ?? "");
+      existing.status =
+        status === "completed" ? "completed" : status === "in_progress" ? "in_progress" : "pending";
+      this.#emitTasks();
+    }
+  }
+
+  #adopt(callId: string, output: string): void {
+    const title = this.#pendingTasks.get(callId);
+    if (title === undefined) return;
+    this.#pendingTasks.delete(callId);
+    const match = /#(\d+)/.exec(output);
+    const id = match?.[1] ?? String(this.#tasks.size + 1);
+    this.#tasks.set(id, { text: title, status: "pending" });
+    this.#emitTasks();
+  }
+
+  #handle(message: Record<string, unknown>): void {
+    if (this.#disposed) return;
+    const type = message.type;
+    if (type === "assistant") {
+      const response = message.message as { id?: string; usage?: Record<string, number> } | undefined;
+      const usage = response?.usage;
+      if (response?.id && usage && !message.local_command_source) {
+        const current = { input: usage.input_tokens ?? 0, output: usage.output_tokens ?? 0, cacheRead: usage.cache_read_input_tokens ?? 0, cacheWrite: usage.cache_creation_input_tokens ?? 0 };
+        this.#usage.update(response.id, current);
+        if (!message.parent_tool_use_id) this.#contextTokens = current.input + current.output + current.cacheRead + current.cacheWrite;
+        this.#emit({ type: "usage", usage: { ...this.#usage.totals, contextTokens: this.#contextTokens, contextMax: this.#contextMax } });
+      }
+    }
+    if (type === "system" && message.subtype === "compact_boundary") {
+      const metadata = message.compact_metadata as { post_tokens?: number } | undefined;
+      this.#compacted = true;
+      this.#compactedTokens = metadata?.post_tokens;
+      if (!this.#manualCompaction) this.#emit({ type: "compacted", contextTokens: metadata?.post_tokens });
+      return;
+    }
+
+    if (type === "system" && ["task_started", "task_progress", "task_notification"].includes(String(message.subtype))) {
+      const id = String(message.tool_use_id ?? message.task_id ?? "");
+      if (message.task_type === "local_agent" && !this.#agents.has(id)) this.#agents.set(id, { title: String(message.description ?? "Subagent"), prompt: typeof message.prompt === "string" ? message.prompt : undefined });
+      const agent = this.#agents.get(id);
+      if (!agent) return;
+      const status = message.status;
+      this.#emit({ type: "subagent", id, ...agent, status: message.subtype === "task_notification" ? status === "failed" ? "error" : status === "stopped" ? "stopped" : "idle" : "working", result: typeof message.summary === "string" ? message.summary : undefined });
+      return;
+    }
+    if (message.parent_tool_use_id) return;
+
+    if (type === "system" && message.subtype === "init") {
+      this.#emit({
+        type: "session",
+        externalId: String(message.session_id ?? ""),
+        model: typeof message.model === "string" ? message.model : undefined,
+        contextMax: this.#contextMax,
+      });
+      return;
+    }
+
+    if (type === "system" && message.subtype === "status") {
+      if (message.status === "requesting") this.#emit({ type: "status", status: "thinking" });
+      return;
+    }
+
+    if (type === "stream_event") {
+      this.#stream(message.event as StreamEvent);
+      return;
+    }
+
+    if (type === "assistant") {
+      const content = (message.message as { content?: unknown[] } | undefined)?.content ?? [];
+      if (message.local_command_source && !this.#manualCompaction) {
+        const text = content.filter((block) => (block as { type?: string }).type === "text").map((block) => String((block as { text?: string }).text ?? "")).join("\n");
+        if (text) {
+          const blockId = `command:${String(message.uuid ?? ++this.#turn)}`;
+          this.#emit({ type: "block.start", blockId, block: "text" });
+          this.#emit({ type: "block.delta", blockId, text });
+          this.#emit({ type: "block.end", blockId });
+        }
+      }
+      for (const raw of content) {
+        const block = raw as Record<string, unknown>;
+        if (block.type === "tool_use") {
+          this.#emit({ type: "tool.input", callId: String(block.id), input: block.input });
+          this.#task(String(block.name ?? ""), String(block.id), block.input);
+          if (block.name === "Agent" || block.name === "Task") {
+            const input = (block.input ?? {}) as Record<string, unknown>;
+            const agent = { title: String(input.description ?? input.subagent_type ?? "Subagent"), prompt: typeof input.prompt === "string" ? input.prompt : undefined, model: typeof input.model === "string" ? input.model : undefined };
+            this.#agents.set(String(block.id), agent);
+            this.#emit({ type: "subagent", id: String(block.id), ...agent, status: "working" });
+          }
+        }
+      }
+      return;
+    }
+
+    if (type === "user") {
+      const content = (message.message as { content?: unknown[] } | undefined)?.content ?? [];
+      for (const raw of content) {
+        const block = raw as Record<string, unknown>;
+        if (block.type !== "tool_result") continue;
+        const callId = String(block.tool_use_id);
+        const output = textOf(block.content);
+        const agent = this.#agents.get(callId);
+        if (agent && !/running.*background|launched.*asynchronously/i.test(output)) this.#emit({ type: "subagent", id: callId, ...agent, status: block.is_error ? "error" : "idle", result: output });
+        this.#adopt(callId, output);
+        this.#emit({ type: "tool.end", callId, ok: block.is_error !== true, output });
+      }
+      return;
+    }
+
+    if (type === "result") {
+      const usage = message.usage as Record<string, number> | undefined;
+      const cost = typeof message.total_cost_usd === "number" ? Math.max(this.#usage.totals.costUsd, this.#initialCost + message.total_cost_usd) : this.#usage.totals.costUsd;
+      const modelUsage = message.modelUsage as Record<string, { contextWindow?: number }> | undefined;
+      const contextMax = modelUsage
+        ? Object.values(modelUsage).find((entry) => entry.contextWindow)?.contextWindow
+        : undefined;
+      if (contextMax) this.#contextMax = contextMax;
+      this.#usage.totals.costUsd = cost;
+      this.#emit({
+        type: "usage",
+        usage: {
+          ...this.#usage.totals,
+          costUsd: cost,
+          contextTokens: this.#contextTokens ||
+            (usage?.input_tokens ?? 0) +
+            (usage?.cache_read_input_tokens ?? 0) +
+            (usage?.cache_creation_input_tokens ?? 0) +
+            (usage?.output_tokens ?? 0),
+          contextMax: this.#contextMax,
+        },
+      });
+      const isError = message.is_error === true;
+      if (this.#manualCompaction) {
+        this.#manualCompaction = false;
+        if (this.#compacted && !isError) this.#emit({ type: "compacted", contextTokens: this.#compactedTokens });
+        else this.#emit({ type: "turn.end", error: String(message.result ?? "The provider could not compact this conversation yet.") });
+        return;
+      }
+      this.#emit({
+        type: "turn.end",
+        error: isError ? String(message.result ?? "run failed") : undefined,
+      });
+      return;
+    }
+  }
+
+  #stream(event: StreamEvent | undefined): void {
+    if (!event) return;
+    switch (event.type) {
+      case "message_start":
+        this.#turn += 1;
+        return;
+      case "content_block_start": {
+        const block = event.content_block;
+        if (!block) return;
+        const id = this.#block(event.index);
+        if (block.type === "text" || block.type === "thinking") {
+          this.#openBlocks.add(id);
+          this.#emit({
+            type: "block.start",
+            blockId: id,
+            block: block.type === "thinking" ? "reasoning" : "text",
+          });
+        } else if (block.type === "tool_use") {
+          const name = String(block.name ?? "tool");
+          this.#emit({ type: "tool.start", callId: String(block.id ?? id), name, input: {} });
+          this.#emit({
+            type: "status",
+            status: "working",
+            tool: PLAN_TOOLS.has(name) ? undefined : name,
+          });
+        }
+        return;
+      }
+      case "content_block_delta": {
+        const delta = event.delta;
+        if (!delta) return;
+        const id = this.#block(event.index);
+        if (!this.#openBlocks.has(id)) return;
+        if (delta.type === "text_delta" && delta.text) {
+          this.#emit({ type: "block.delta", blockId: id, text: delta.text });
+        } else if (delta.type === "thinking_delta" && delta.thinking) {
+          this.#emit({ type: "block.delta", blockId: id, text: delta.thinking });
+        }
+        return;
+      }
+      case "content_block_stop": {
+        const id = this.#block(event.index);
+        if (this.#openBlocks.delete(id)) this.#emit({ type: "block.end", blockId: id });
+        return;
+      }
+      default:
+        return;
+    }
+  }
+}
+
+export const claudeProvider: Provider = {
+  id: "claude",
+  label: "Claude Code",
+  binary: "claude",
+  supportsPermissionPrompt: true,
+  steerHint: "Claude Code reads it at its next step.",
+  models: [],
+  listModels: () => discoverModels("claude"),
+  async detect() {
+    try {
+      const { stdout } = await run("claude", ["--version"], { timeout: 8000 });
+      return { available: true, version: stdout.trim().split("\n")[0] };
+    } catch {
+      return { available: false };
+    }
+  },
+  start(options) {
+    return new ClaudeSession(options);
+  },
+};
