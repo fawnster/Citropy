@@ -1,0 +1,29 @@
+appId: com.citropy.desktop
+productName: Citropy
+directories:
+  app: .desktop-build
+  output: release
+asar: false
+files:
+  - desktop/**
+  - server/**
+  - shared/**
+  - skills/**
+  - dist/**
+  - package.json
+  - '!desktop/package.mjs'
+  - '!desktop/electron-builder.yml'
+  - '!desktop/install.mjs'
+  - '!desktop/start.mjs'
+linux:
+  target: AppImage
+  category: Development
+  icon: desktop/assets/citropy.png
+  executableName: citropy
+  syncDesktopName: true
+  artifactName: Citropy-${version}-${arch}.AppImage
+publish:
+  provider: github
+  owner: tinuxongit
+  repo: Citropy
+  private: true

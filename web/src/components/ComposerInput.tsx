@@ -4,6 +4,7 @@ import type { ThreadMeta } from "../../../shared/protocol.ts";
 import type { ProviderCommand, SkillInfo } from "../../../shared/features.ts";
 import { api } from "../lib/api.ts";
 import { providerLabels } from "../lib/format.ts";
+import { useApp } from "../lib/store.ts";
 
 export function ComposerInput({
   value,
@@ -31,6 +32,7 @@ export function ComposerInput({
   const [nativeCommands, setNativeCommands] = useState<ProviderCommand[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const connected = useApp((state) => state.connected);
   const mention = /(?:^|\s)@([\w.:-]*)$/.exec(value.slice(0, caret));
   const slash = /^\/[\w.:-]*$/.test(value) ? value : undefined;
   const query = mention ? `@${mention[1]}` : slash;
@@ -219,9 +221,11 @@ export function ComposerInput({
         }
         disabled={disabled}
         placeholder={
-          thread.running
-            ? "Queue a follow-up…"
-            : "Ask a question or describe a change…"
+          !connected
+            ? "Citropy is reconnecting. Your message will wait…"
+            : thread.running
+              ? "Queue a follow-up…"
+              : "Ask a question or describe a change…"
         }
         spellCheck={false}
         onPaste={(event) => {

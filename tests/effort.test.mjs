@@ -90,6 +90,10 @@ test("Codex app-server streams turns, resumes, reports usage and routes approval
     assert.equal(commandInput[0].text, "/security-review");
     assert.equal(commandInput[1].type, "image");
     assert.match(commandInput[2].text, /SKILL.md/);
+    assert.equal(claudeWire.messages.at(-1).priority, undefined);
+    await sessions[0].steer("Also check the tests");
+    assert.equal(claudeWire.messages.at(-1).priority, "next");
+    assert.equal(claudeWire.messages.at(-1).message.content.at(-1).text, "Also check the tests");
     claudeWire.child.stdout.write(JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "task-a", name: "Agent", input: { description: "Review", prompt: "Read files" } }] } }) + "\n");
     claudeWire.child.stdout.write(JSON.stringify({ type: "stream_event", parent_tool_use_id: "task-a", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Child private stream" } } }) + "\n");
     claudeWire.child.stdout.write(JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "task-a", content: "Reviewed" }] } }) + "\n");
@@ -128,6 +132,15 @@ test("Codex app-server streams turns, resumes, reports usage and routes approval
     assert.equal(turn.params.input[0].text, "Hello");
     assert.deepEqual(turn.params.input.slice(1).map((entry) => entry.type), ["localImage", "mention", "skill"]);
     await reply("turn/start", { turn: { id: "turn1" } });
+    const steering = codex.steer("Also check the tests", [], [{ name: "sample", path: join(directory, "SKILL.md") }]);
+    await tick();
+    assert.deepEqual(wire.messages.findLast((m) => m.method === "turn/steer").params, {
+      threadId: "external",
+      expectedTurnId: "turn1",
+      input: [{ type: "text", text: "Also check the tests", text_elements: [] }, { type: "skill", name: "sample", path: join(directory, "SKILL.md") }],
+    });
+    await reply("turn/steer", { turnId: "turn1" });
+    await steering;
     notify("item/agentMessage/delta", { threadId: "external", itemId: "a", delta: "Hel" });
     notify("item/agentMessage/delta", { threadId: "external", itemId: "a", delta: "lo" });
     notify("item/completed", { threadId: "external", item: { id: "a", type: "agentMessage", text: "Hello" } });
@@ -160,7 +173,9 @@ test("Codex app-server streams turns, resumes, reports usage and routes approval
     assert.equal(invocations.length, 2);
     assert.equal(wire.messages.filter((m) => m.method === "turn/start").length, 2);
     await reply("turn/start", { turn: { id: "turn2" } });
+    codex.send("Not started yet");
     codex.interrupt();
+    assert.match(events.findLast((e) => e.type === "notice").text, /Stopped before Codex started your latest message/);
     assert.equal(wire.messages.find((m) => m.method === "turn/interrupt").params.turnId, "turn2");
     await reply("turn/interrupt", {});
     notify("turn/completed", { threadId: "external", turn: { id: "turn2", status: "interrupted" } });

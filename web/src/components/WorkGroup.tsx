@@ -1,4 +1,5 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo } from "react";
+import { useDisclosure } from "../lib/use-disclosure.ts";
 import { useShallow } from "zustand/react/shallow";
 import { Collapsible } from "./Collapsible.tsx";
 import { AlertTriangle, ChevronRight, shapeIcon } from "./icons.ts";
@@ -8,7 +9,7 @@ import { useApp } from "../lib/store.ts";
 import type { ToolPart, ToolShape } from "../../../shared/protocol.ts";
 
 export const WorkGroup = memo(function WorkGroup({ ids }: { ids: string[] }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useDisclosure(ids[0], "group");
   const tools = useApp(useShallow((state) =>
     ids.map((id) => state.parts[id]).filter((part): part is ToolPart => part?.kind === "tool"),
   ));

@@ -499,3 +499,171 @@
 .setting-row > .btn {
   flex: none;
 }
+
+.provider-card + .provider-card {
+  border-top: 1px solid var(--line-strong);
+}
+.provider-maintenance {
+  padding: 0 22px 16px;
+}
+.provider-update-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+.provider-installation {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-2);
+}
+.provider-installation small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 4px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+.provider-update-row .btn {
+  flex: none;
+}
+.provider-update-row .btn > svg {
+  color: var(--ok);
+}
+.provider-maintenance-note,
+.provider-update-result {
+  margin: 12px 0 0;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.provider-update-result {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.provider-update-result[data-status="success"] {
+  color: var(--ok);
+}
+.provider-update-result[data-status="error"] {
+  color: var(--bad);
+}
+.provider-update-output {
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.provider-update-output summary {
+  cursor: pointer;
+  width: fit-content;
+}
+.provider-update-output code {
+  display: block;
+  overflow-wrap: anywhere;
+  margin: 8px 0;
+}
+.provider-update-output pre {
+  max-height: 180px;
+  margin-top: 8px;
+  padding: 12px;
+  border-radius: var(--r-sm);
+  background: var(--canvas);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.provider-instructions-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px 22px;
+  text-align: left;
+  border-top: 1px solid var(--line);
+  color: var(--text-2);
+  transition: background var(--dur-instant) var(--ease-out);
+}
+.provider-instructions-link:hover {
+  background: var(--raised);
+}
+.provider-instructions-link > svg:first-child {
+  color: var(--file-icon);
+}
+.provider-instructions-link > span {
+  flex: 1;
+}
+.provider-instructions-link strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.provider-instructions-link small {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-3);
+}
+.citropy-dialog.provider-instructions-dialog {
+  width: min(800px, calc(var(--viewport-width) - 48px));
+}
+.provider-instructions-dialog .dialog-symbol {
+  color: var(--file-icon);
+}
+.instruction-file-label {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.instruction-file-label small {
+  color: var(--text-3);
+}
+.instruction-editor {
+  display: block;
+  width: 100%;
+  min-height: 180px;
+  height: min(40vh, 400px);
+  resize: vertical;
+  padding: 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--canvas);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.75;
+  tab-size: 2;
+}
+.instruction-note {
+  margin: 8px 0;
+  font-size: 11px;
+  color: var(--text-3);
+  line-height: 1.6;
+}
+.instruction-reload {
+  margin-right: auto;
+}
+.instruction-save-state {
+  color: var(--text-3);
+  font-size: 11px;
+}
+@media (max-width: 720px) {
+  .provider-maintenance {
+    padding: 0 16px 14px;
+  }
+  .provider-instructions-link {
+    padding: 12px 16px;
+  }
+  .provider-instructions-dialog .dialog-footer {
+    flex-wrap: wrap;
+  }
+  .instruction-save-state {
+    display: none;
+  }
+}
+
+.provider-maintenance-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.provider-maintenance-heading .settings-group-heading { margin: 0; }
+.provider-up-to-date { display: inline-flex; align-items: center; gap: 6px; color: var(--ok); font-size: 12px; white-space: nowrap; }

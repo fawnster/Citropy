@@ -73,6 +73,26 @@ test("native computer capture, input and cancellation on an isolated desktop", {
     return [...context.getImageData(10, 10, 1, 1).data];
   }, screenshot.image);
   assert.ok(Math.abs(pixel[0] - 21) < 5 && Math.abs(pixel[1] - 35) < 5 && Math.abs(pixel[2] - 47) < 5, JSON.stringify(pixel));
+  await page.evaluate(() => {
+    const marker = document.createElement("div");
+    marker.id = "crop-marker";
+    marker.style.cssText = "position:fixed;left:600px;top:400px;width:40px;height:40px;background:rgb(224,96,48);z-index:9999;pointer-events:none";
+    document.body.append(marker);
+    return new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
+  const cropped = await request("computer.screenshot", { displayId: "desktop", maxWidth: 2560, crop: { x: 0.5, y: 0.5, width: 0.25, height: 0.25 } });
+  assert.deepEqual([cropped.width, cropped.height], [300, 200]);
+  assert.deepEqual(cropped.crop, { x: 0.5, y: 0.5, width: 0.25, height: 0.25 });
+  const detail = await page.evaluate(async source => {
+    const image = new Image(); image.src = `data:image/jpeg;base64,${source}`; await image.decode();
+    const canvas = document.createElement("canvas"); canvas.width = image.width; canvas.height = image.height;
+    const context = canvas.getContext("2d"); context.drawImage(image, 0, 0);
+    return { width: image.width, height: image.height, pixel: [...context.getImageData(10, 10, 1, 1).data] };
+  }, cropped.image);
+  assert.deepEqual([detail.width, detail.height], [300, 200]);
+  assert.ok(Math.abs(detail.pixel[0] - 224) < 5 && Math.abs(detail.pixel[1] - 96) < 5 && Math.abs(detail.pixel[2] - 48) < 5);
+  await page.locator("#crop-marker").evaluate(element => element.remove());
+  await assert.rejects(request("computer.screenshot", { displayId: "desktop", crop: { x: 0.9, y: 0, width: 0.2, height: 0.5 } }), /region/);
   const point = async selector => {
     const box = await page.locator(selector).boundingBox();
     return { displayId: "desktop", x: Math.round(box.x + box.width / 2), y: Math.round(box.y + box.height / 2) };

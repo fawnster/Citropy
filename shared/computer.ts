@@ -42,8 +42,18 @@ export interface ComputerFrame {
   height: number;
   sourceWidth: number;
   sourceHeight: number;
+  sourceX?: number;
+  sourceY?: number;
   capturedAt: number;
   image: string;
+}
+
+export interface ComputerRegion {
+  frameId: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
 }
 
 export type ComputerAction =

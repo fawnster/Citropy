@@ -5,6 +5,25 @@ import childProcess from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { syncBuiltinESMExports } from "node:module";
+import { selectedModel } from "../shared/model-options.ts";
+import { modelLabel } from "../web/src/lib/format.ts";
+
+test("runtime context suffixes resolve to the catalog name without changing distinct models", () => {
+  const models = claudeModels([
+    { value: "sonnet", resolvedModel: "claude-sonnet-5", displayName: "Sonnet" },
+    { value: "opus", resolvedModel: "claude-opus-5", displayName: "Opus" },
+    { value: "haiku", resolvedModel: "claude-haiku-4-5-20251001", displayName: "Haiku" },
+  ]);
+  for (const id of ["claude-sonnet-5[1m]", "sonnet[1m]", "claude-sonnet-5"])
+    assert.equal(modelLabel(models, id), "Claude Sonnet 5");
+  assert.equal(modelLabel(models, "claude-opus-5[1M]"), "Claude Opus 5");
+  assert.equal(modelLabel(models, "claude-haiku-4-5-20251001"), "Claude Haiku 4.5");
+  assert.equal(selectedModel(models, "claude-sonnet-5[1m]"), models[0]);
+  const distinct = [{ id: "custom", label: "Custom" }, { id: "custom[1m]", label: "Custom extended" }];
+  assert.equal(modelLabel(distinct, "custom[1m]"), "Custom extended");
+  assert.equal(modelLabel([{ id: "openai/gpt-model", label: "GPT model" }], "openai/gpt-model"), "GPT model");
+  assert.equal(modelLabel(models, "unknown-model"), "unknown-model");
+});
 
 test("catalogs preserve provider-specific efforts and exclude hidden models", () => {
   const models = codexModels([

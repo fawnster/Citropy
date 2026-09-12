@@ -21,7 +21,7 @@ import { SkillsSettings } from "./SkillsSettings.tsx";
 import { BrowserProfiles } from "./BrowserProfiles.tsx";
 import { DiagnosticsSettings } from "./DiagnosticsSettings.tsx";
 import { ComputerSettings } from "./ComputerSettings.tsx";
-import { ProviderIcon } from "./ProviderIcon.tsx";
+import { ProviderSettings } from "./ProviderSettings.tsx";
 import { SectionSidebar } from "./SectionSidebar.tsx";
 import {
   setTheme,
@@ -103,7 +103,6 @@ export function Settings({
   const theme = useApp((state) => state.theme);
   const sidebar = useApp((state) => state.sidebarOpen);
   const inspector = useApp((state) => state.inspectorOpen);
-  const providers = useApp((state) => state.providers);
   const connected = useApp((state) => state.connected);
   const textStreaming = useApp((state) => state.textStreaming);
   const typingAnimation = useApp((state) => state.typingAnimation);
@@ -564,99 +563,7 @@ export function Settings({
               </p>
             </>
           )}
-          {section === "Providers" && (
-            <>
-              <h2 className="settings-group-heading">Installed providers</h2>
-              <div className="settings-group">
-                {providers.map((provider) => (
-                  <div className="provider-setting" key={provider.id}>
-                    <div className="provider-setting-identity">
-                      <span className="provider-setting-icon">
-                        <ProviderIcon provider={provider.id} />
-                      </span>
-                      <div>
-                        <strong>{provider.label}</strong>
-                        <small>
-                          {provider.version ??
-                            (provider.enabled
-                              ? "No version detected"
-                              : "Not checked while disabled")}
-                        </small>
-                      </div>
-                    </div>
-                    <div className="provider-setting-status">
-                      <span
-                        data-available={provider.available && provider.enabled}
-                      >
-                        {!provider.enabled
-                          ? "Disabled"
-                          : provider.available
-                            ? "Enabled"
-                            : "Not installed"}
-                      </span>
-                      <small>
-                        {provider.enabled
-                          ? `${provider.models.length} models`
-                          : "Not in new threads"}
-                      </small>
-                    </div>
-                    <input
-                      className="setting-switch"
-                      type="checkbox"
-                      role="switch"
-                      aria-label={`Enable ${provider.label}`}
-                      checked={provider.enabled}
-                      disabled={!connected}
-                      onChange={async (event) => {
-                        const enabled = event.target.checked;
-                        const active = Object.values(
-                          useApp.getState().threads,
-                        ).filter(
-                          (thread) =>
-                            thread.provider === provider.id && thread.running,
-                        ).length;
-                        if (
-                          !enabled &&
-                          active &&
-                          !(await confirmAction({
-                            title: `Disable ${provider.label}?`,
-                            description: `This stops ${active} active ${active === 1 ? "conversation" : "conversations"}. Saved conversations will remain available.`,
-                            label: "Disable provider",
-                            danger: true,
-                          }))
-                        )
-                          return;
-                        send({
-                          t: "providers.configure",
-                          provider: provider.id,
-                          enabled,
-                        });
-                      }}
-                    />
-                    {provider.enabled && provider.modelsError && (
-                      <p className="provider-setting-error" role="status">
-                        {provider.modelsError}
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-              <p className="settings-note">
-                Disabling a provider stops its active work and removes it from
-                new thread choices. Saved conversations stay available. Provider
-                settings apply to this computer.
-              </p>
-              <p className="settings-note">
-                Models and reasoning options update from your installed
-                providers. Manage sign-in through each provider’s CLI.
-              </p>
-              <p className="settings-connection" role="status">
-                {connected
-                  ? "Connected to Citropy"
-                  : "Disconnected from Citropy"}
-              </p>
-            </>
-          )}
+          {section === "Providers" && <ProviderSettings />}
         </div>
       </div>
     </section>

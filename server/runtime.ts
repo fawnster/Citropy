@@ -1,3 +1,4 @@
+import { assertApplicationReady } from "./update-lock.ts";
 import { basename } from "node:path";
 import { diffLines } from "./diff.ts";
 import { uid } from "./ids.ts";
@@ -9,6 +10,7 @@ import { listSkills } from "./skills.ts";
 import { expandCommand } from "./commands.ts";
 import { describeTool } from "./tools.ts";
 import { providers } from "./providers/index.ts";
+import { assertProviderReady } from "./providers/maintenance.ts";
 import { modelSettings } from "../shared/model-options.ts";
 import { connectTools, disconnectTools } from "./mcp-access.ts";
 import type { AgentEvent } from "./providers/types.ts";
@@ -72,8 +74,13 @@ export class ThreadRuntime {
     return this.#thread.id;
   }
 
+  get busy(): boolean {
+    return this.#preparing || this.#thread.running || this.#thread.status === "awaiting";
+  }
+
   async send(text: string, files: Attachment[] = []): Promise<void> {
     if (typeof text === "string" && text.trim() === "/compact" && Array.isArray(files) && !files.length) return this.compact();
+    if (this.#thread.compacting) throw new Error("Wait for context compaction to finish.");
     if (this.#preparing || this.#thread.running) return this.#enqueue(text, files);
     this.#preparing = true;
     try { await this.#deliver(await this.#prepare(text, files)); }
@@ -143,6 +150,8 @@ export class ThreadRuntime {
   }
 
   async #prepare(text: string, files: Attachment[]): Promise<Prepared> {
+    assertApplicationReady();
+    assertProviderReady(this.#thread.provider);
     if (this.#disposed) throw new Error("This session has stopped. Send your message again.");
     this.#check(text, files);
     if (this.#thread.compacting) throw new Error("Wait for context compaction to finish.");
@@ -152,6 +161,8 @@ export class ThreadRuntime {
     const skills = names.size ? (await listSkills(this.#thread.projectId, this.id)).filter((skill) => skill.enabled && skill.provider === this.#thread.provider && names.has(skill.name)).sort((a, b) => Number(b.scope === "project") - Number(a.scope === "project")).filter((skill, index, entries) => entries.findIndex((entry) => entry.name === skill.name) === index) : [];
     if (this.#disposed || !store.threads.has(this.id)) throw new Error("This conversation has closed.");
     if (store.disabledProviders.has(this.#thread.provider)) throw new Error("This provider is disabled. Enable it in Settings > Providers.");
+    assertApplicationReady();
+    assertProviderReady(this.#thread.provider);
     return { text, attachments, prompt, skills };
   }
 
@@ -211,6 +222,8 @@ export class ThreadRuntime {
   }
 
   async compact(): Promise<void> {
+    assertApplicationReady();
+    assertProviderReady(this.#thread.provider);
     if (this.#disposed || this.#preparing || this.#thread.running || this.#thread.nativeAgentId) throw new Error("Wait for the conversation to finish before compacting.");
     if (!this.#thread.externalId) throw new Error("Send a message before compacting this conversation.");
     if (store.disabledProviders.has(this.#thread.provider)) throw new Error("Enable this provider before compacting.");
@@ -327,10 +340,7 @@ export class ThreadRuntime {
         if (event.contextTokens !== undefined) store.setUsage(this.id, { ...this.#thread.usage, contextTokens: event.contextTokens });
         store.patchThread(this.id, { compacting: false, compactedAt: Date.now(), ...(manual ? { running: false, status: "idle", activeTool: undefined } : {}) });
         this.#add({ id: uid("prt"), kind: "notice", level: "info", text: "Context compacted. Your conversation history is still available here." });
-        if (manual) {
-          this.#messageId = null;
-          this.#pump();
-        }
+        if (manual) this.#messageId = null;
         return;
       }
       case "subagent":
@@ -577,10 +587,14 @@ export function disposeAll(): void {
   runtimes.clear();
 }
 
-export function reloadProviderSkills(providerIds: Set<string>): void {
+export function providerBusy(providerId: string): boolean {
+  return [...store.threads.values()].some((thread) => thread.provider === providerId && (thread.running || thread.status === "awaiting" || runtimes.get(thread.id)?.busy));
+}
+
+export function reloadProviderSessions(providerIds: Set<string>): void {
   for (const [id, runtime] of runtimes) {
     const thread = store.threads.get(id);
-    if (!thread || thread.running || !providerIds.has(thread.provider)) continue;
+    if (!thread || runtime.busy || !providerIds.has(thread.provider)) continue;
     runtime.dispose(true);
     runtimes.delete(id);
   }

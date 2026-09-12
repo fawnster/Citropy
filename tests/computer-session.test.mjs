@@ -6,6 +6,8 @@ import { mkdtempSync, mkdirSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { createServer } from "node:http";
 import { syncBuiltinESMExports } from "node:module";
+import { createHash } from "node:crypto";
+import { writeFile, rename, rm } from "node:fs/promises";
 
 async function until(check) {
   for (let i = 0; i < 100; i++) {
@@ -33,6 +35,8 @@ test("computer sessions enforce ownership, consent, coordinates and cleanup", { 
   const calls = [];
   let delayStart = false;
   let failPause = false;
+  let displays = [{ id: "screen", name: "Monitor", width: 1920, height: 1080 }];
+  let screenshot = { image: "/9j/", width: 960, height: 540 };
   class Desktop extends EventEmitter {
     OPEN = 1;
     readyState = 1;
@@ -42,8 +46,8 @@ test("computer sessions enforce ownership, consent, coordinates and cleanup", { 
       const reply = () => {
         if (method === "computer.stop") this.emit("message", JSON.stringify({ t: "computer.stopped" }));
         const result = method === "computer.capabilities" ? { available: true, platform: "linux", backend: "x11" }
-          : method === "computer.start" ? { displays: [{ id: "screen", name: "Monitor", width: 1920, height: 1080 }], shortcut: true }
-          : method === "computer.screenshot" ? { image: "/9j/", width: 960, height: 540 }
+          : method === "computer.start" ? { displays, shortcut: true }
+          : method === "computer.screenshot" ? screenshot
           : {};
         this.emit("message", JSON.stringify({ id, ...(method === "computer.pause" && failPause ? { error: "Disconnected while pausing" } : { result }) }));
       };
@@ -110,10 +114,74 @@ test("computer sessions enforce ownership, consent, coordinates and cleanup", { 
     assert.equal(JSON.stringify(computer.computerState()).includes("private text"), false);
     await computer.pauseComputer(true);
     assert.throws(() => computer.computerAction(thread.id, { action: "press", key: "Enter" }), /paused/);
-    await computer.computerScreenshot(thread.id, undefined, 1600, true);
+    await computer.computerScreenshot(thread.id, { preview: true });
     await computer.pauseComputer(false);
     assert.throws(() => computer.computerAction(thread.id, { action: "click", frameId: frame.id, x: 1, y: 1 }), /screenshot/);
     await computer.stopComputer();
+  });
+
+  await t.test("Claude capture dimensions survive client resizing and restarted screens reject old IDs", async () => {
+    const previousDisplays = displays;
+    displays = [{ id: "103", name: "Screen 1", width: 2560, height: 1440 }, { id: "121", name: "Screen 2", width: 1920, height: 1080 }];
+    screenshot = { image: "/9j/", width: 2000, height: 1125 };
+    try {
+      const first = await computer.startComputer(thread.id);
+      const frame = await computer.computerScreenshot(thread.id, { displayId: first.displays[0].id, maxWidth: 2560 });
+      assert.deepEqual(calls.at(-1), { method: "computer.screenshot", params: { displayId: "103", maxWidth: 2000 } });
+      assert.deepEqual([frame.width, frame.height, frame.sourceWidth, frame.sourceHeight], [2000, 1125, 2560, 1440]);
+      await computer.computerAction(thread.id, { action: "click", frameId: frame.id, x: 578, y: 17 });
+      assert.ok(Math.abs(calls.at(-1).params.x - 739.84) < 1e-8);
+      assert.ok(Math.abs(calls.at(-1).params.y - 21.76) < 1e-8);
+      screenshot = { image: "/9j/", width: 2560, height: 1440 };
+      const preview = await computer.computerScreenshot(thread.id, { maxWidth: 2560, preview: true });
+      assert.equal(calls.at(-1).params.maxWidth, 2560);
+      assert.equal(preview.width, 2560);
+      await computer.stopComputer();
+      assert.throws(() => computer.computerAction(thread.id, { action: "move", frameId: frame.id, x: 10, y: 10 }), /no active computer session/);
+      displays = [{ ...displays[0], id: "121" }, { ...displays[1], id: "103" }];
+      const second = await computer.startComputer(thread.id);
+      assert.ok(second.displays.every(display => !first.displays.some(old => old.id === display.id)));
+      const before = calls.length;
+      await assert.rejects(computer.computerScreenshot(thread.id, { displayId: first.displays[0].id }), /current displayId/);
+      assert.throws(() => computer.computerAction(thread.id, { action: "click", frameId: frame.id, x: 10, y: 10 }), /new computer screenshot/);
+      assert.equal(calls.length, before);
+      screenshot = { image: "/9j/", width: 2000, height: 1125 };
+      await computer.computerScreenshot(thread.id, { displayId: second.displays[0].id, maxWidth: 2560 });
+      assert.equal(calls.at(-1).params.displayId, "121");
+    } finally {
+      await computer.stopComputer();
+      displays = previousDisplays;
+      screenshot = { image: "/9j/", width: 960, height: 540 };
+    }
+  });
+
+  await t.test("close-up screenshots map clicks, drags and nested regions back to the shared screen", async () => {
+    await computer.startComputer(thread.id);
+    try {
+      const full = await computer.computerScreenshot(thread.id);
+      screenshot = { image: "/9j/", width: 960, height: 540, crop: { x: 0.25, y: 0.25, width: 0.5, height: 0.5 } };
+      const response = await callWorkspaceTool(thread.id, "computer_screenshot", { region: { frameId: full.id, x: 240, y: 135, width: 480, height: 270 } });
+      const cropped = JSON.parse(response[0].text);
+      assert.equal(response[1].type, "image");
+      assert.deepEqual(calls.at(-1).params.crop, screenshot.crop);
+      assert.deepEqual([cropped.sourceX, cropped.sourceY, cropped.sourceWidth, cropped.sourceHeight], [480, 270, 960, 540]);
+      await computer.computerAction(thread.id, { action: "click", frameId: cropped.id, x: 100, y: 50 });
+      assert.deepEqual(calls.at(-1).params, { action: "click", displayId: "screen", x: 580, y: 320, button: "left", count: 1 });
+      await computer.computerAction(thread.id, { action: "drag", frameId: cropped.id, x: 10, y: 20, toX: 900, toY: 500 });
+      assert.deepEqual(calls.at(-1).params, { action: "drag", displayId: "screen", x: 490, y: 290, toX: 1380, toY: 770, durationMs: 500 });
+      screenshot = { image: "/9j/", width: 480, height: 270, crop: { x: 0.25, y: 0.25, width: 0.25, height: 0.25 } };
+      const nested = await computer.computerScreenshot(thread.id, { region: { frameId: cropped.id, x: 0, y: 0, width: 480, height: 270 } });
+      assert.deepEqual(calls.at(-1).params.crop, screenshot.crop);
+      assert.deepEqual([nested.sourceX, nested.sourceY, nested.sourceWidth, nested.sourceHeight], [480, 270, 480, 270]);
+      const before = calls.length;
+      for (const region of [null, {}, { frameId: "old", x: 0, y: 0, width: 10, height: 10 }, { frameId: full.id, x: -1, y: 0, width: 10, height: 10 }, { frameId: full.id, x: 950, y: 0, width: 20, height: 10 }, { frameId: full.id, x: 0, y: 0, width: 0, height: 10 }]) {
+        await assert.rejects(computer.computerScreenshot(thread.id, { region }), /screenshot|region/);
+      }
+      assert.equal(calls.length, before);
+    } finally {
+      await computer.stopComputer();
+      screenshot = { image: "/9j/", width: 960, height: 540 };
+    }
   });
 
   await t.test("approval gates input and pause cancels queued work", async () => {
@@ -184,5 +252,32 @@ test("computer sessions enforce ownership, consent, coordinates and cleanup", { 
     assert.equal((await listSkills()).filter(skill => skill.scope === "builtin").every(skill => skill.enabled), true);
     assert.ok(readFileSync(join(directory, ".citropy/skills/computer-use/SKILL.md"), "utf8").includes("computer_stop"));
     assert.throws(() => readFileSync(join(directory, ".citropy/skills/computer-use/SKILL.md.citropy-disabled")));
+  });
+
+  await t.test("built-in skill updates preserve disabled, deleted and customized copies", async () => {
+    const folder = join(directory, ".citropy/skills/computer-use");
+    const enabled = join(folder, "SKILL.md");
+    const disabled = join(folder, "SKILL.md.citropy-disabled");
+    const marker = join(folder, ".installed");
+    const current = readFileSync(enabled, "utf8");
+    const previous = "Earlier built-in instructions";
+    const fingerprint = createHash("sha256").update(previous).digest("hex");
+    await writeFile(enabled, previous);
+    await writeFile(marker, fingerprint);
+    await installComputerSkill();
+    assert.equal(readFileSync(enabled, "utf8"), current);
+    await rename(enabled, disabled);
+    await writeFile(disabled, previous);
+    await writeFile(marker, fingerprint);
+    await installComputerSkill();
+    assert.equal(readFileSync(disabled, "utf8"), current);
+    assert.throws(() => readFileSync(enabled));
+    await writeFile(disabled, "My customized instructions");
+    await installComputerSkill();
+    assert.equal(readFileSync(disabled, "utf8"), "My customized instructions");
+    await rm(disabled);
+    await installComputerSkill();
+    assert.throws(() => readFileSync(enabled));
+    assert.throws(() => readFileSync(disabled));
   });
 });

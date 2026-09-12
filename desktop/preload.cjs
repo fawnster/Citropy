@@ -1,6 +1,13 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("citropyDesktop", {
+  updateState: () => ipcRenderer.invoke("updates:state"),
+  updateCommand: (action) => ipcRenderer.invoke("updates:command", action),
+  onUpdateState: (callback) => {
+    const listener = (_, state) => callback(state);
+    ipcRenderer.on("updates:state", listener);
+    return () => ipcRenderer.removeListener("updates:state", listener);
+  },
   windowState: () => ipcRenderer.invoke("window:state"),
   windowCommand: (command) => ipcRenderer.invoke("window:command", command),
   onWindowState: (callback) => {

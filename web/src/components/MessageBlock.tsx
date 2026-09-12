@@ -1,12 +1,12 @@
 import { Attachments } from "./Attachments.tsx";
-import { memo, useMemo } from "react";
-import { useShallow } from "zustand/react/shallow";
+import { memo } from "react";
 import { PartView } from "./PartView.tsx";
 import { WorkGroup } from "./WorkGroup.tsx";
-import { buildRows } from "../lib/group.ts";
+import type { TimelineRow } from "../lib/timeline.ts";
 import { useApp } from "../lib/store.ts";
 import { UserRound } from "lucide-react";
 import { ProviderIcon } from "./ProviderIcon.tsx";
+import { selectedModel } from "../../../shared/model-options.ts";
 import {
   clock,
   modelLabel,
@@ -14,19 +14,18 @@ import {
   providerLabels,
 } from "../lib/format.ts";
 
-interface Props {
-  messageId: string;
+interface Props extends Omit<TimelineRow, "key"> {
   streaming: boolean;
 }
 
 export const MessageBlock = memo(function MessageBlock({
   messageId,
   streaming,
+  row,
+  first,
+  last,
 }: Props) {
   const shell = useApp((state) => state.messages[messageId]);
-  const parts = useApp(
-    useShallow((state) => (shell?.partIds ?? []).map((id) => state.parts[id])),
-  );
   const provider = useApp((state) =>
     state.activeThreadId
       ? state.threads[state.activeThreadId]?.provider
@@ -40,7 +39,6 @@ export const MessageBlock = memo(function MessageBlock({
   const providers = useApp((state) => state.providers);
 
   const thread = useApp((state) => state.threads[state.activeThreadId ?? ""]);
-  const rows = useMemo(() => buildRows(parts), [parts]);
 
   if (!shell) return null;
 
@@ -62,7 +60,7 @@ export const MessageBlock = memo(function MessageBlock({
               threadId={thread.id}
             />
           ) : null}
-          <div className="user-card">
+          <div className="message-bubble user-card">
             {shell.partIds.map((id) => (
               <PartView key={id} partId={id} live={false} />
             ))}
@@ -75,31 +73,43 @@ export const MessageBlock = memo(function MessageBlock({
   const catalog = providers.find((entry) => entry.id === provider);
   const modelId = shell.model ?? threadModel;
   const modelName = modelLabel(catalog?.models ?? [], modelId);
-  const model = catalog?.models.find(
-    (entry) => entry.id === modelId || entry.resolvedModel === modelId,
-  );
+  const model = selectedModel(catalog?.models ?? [], modelId);
 
   return (
-    <article id={`message-${messageId}`} className="turn turn-agent">
-      <div className="message-avatar agent-avatar" aria-label={modelName}>
-        {provider && <ProviderIcon provider={provider} />}
-      </div>
-      <div className="message-content">
-        <div className="turn-heading">
-          <strong>{modelName}</strong>
-          {provider && (
-            <span className="turn-provider" title={modelSource(catalog, model)}>
-              {catalog?.label ?? providerLabels[provider]}
-            </span>
-          )}
-          <time>{clock(shell.ts)}</time>
+    <article
+      id={first ? `message-${messageId}` : undefined}
+      className="turn turn-agent"
+      data-continuation={!first || undefined}
+      data-last={last}
+    >
+      {first && (
+        <div className="message-avatar agent-avatar" aria-label={modelName}>
+          {provider && <ProviderIcon provider={provider} />}
         </div>
-        {rows.map((row) =>
-          row.kind === "group" ? (
-            <WorkGroup key={row.ids[0]} ids={row.ids} />
-          ) : (
-            <PartView key={row.id} partId={row.id} live={streaming} />
-          ),
+      )}
+      <div className="message-content">
+        {first && (
+          <div className="turn-heading">
+            <strong>{modelName}</strong>
+            {provider && (
+              <span
+                className="turn-provider"
+                title={modelSource(catalog, model)}
+              >
+                {catalog?.label ?? providerLabels[provider]}
+              </span>
+            )}
+            <time>{clock(shell.ts)}</time>
+          </div>
+        )}
+        {row && (
+          <div className="message-bubble agent-card">
+            {row.kind === "group" ? (
+              <WorkGroup key={row.ids[0]} ids={row.ids} />
+            ) : (
+              <PartView key={row.id} partId={row.id} live={streaming} />
+            )}
+          </div>
         )}
       </div>
     </article>

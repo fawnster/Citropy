@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useDisclosure } from "../../lib/use-disclosure.ts";
 import { AnimatePresence, motion } from "motion/react";
 import { Brain, ChevronRight } from "../icons.ts";
 import { Collapsible } from "../Collapsible.tsx";
 import { useApp } from "../../lib/store.ts";
 
 interface Props {
+  partId: string;
   text: string;
   live: boolean;
 }
@@ -15,8 +16,8 @@ function tail(text: string): string {
   return cut.length < trimmed.length ? `…${cut}` : cut;
 }
 
-export function Reasoning({ text, live }: Props) {
-  const [open, setOpen] = useState(false);
+export function Reasoning({ partId, text, live }: Props) {
+  const [open, setOpen] = useDisclosure(partId, "reasoning");
   const streaming = useApp((state) => state.textStreaming);
   if (!text.trim() || (!streaming && live)) return null;
 

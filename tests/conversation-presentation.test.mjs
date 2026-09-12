@@ -33,17 +33,20 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
   server = await createServer({
     configFile: false, cacheDir: join(directory, "node_modules", ".vite"),
     root: fileURLToPath(new URL("..", import.meta.url)), plugins: [react()], logLevel: "error",
-    server: { host: "127.0.0.1", port: 0 },
+    server: { host: "127.0.0.1", port: 0, watch: null },
   });
   await server.listen();
   browser = await chromium.launch({ headless: true });
-  async function fixture({ preferences = {}, messages = [message("saved", [textPart("saved-text", "Saved conversation.")])], children = [], reducedMotion = "no-preference" } = {}) {
+  async function fixture({ preferences = {}, messages = [message("saved", [textPart("saved-text", "Saved conversation.")])], children = [], histories = {}, reducedMotion = "no-preference" } = {}) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion });
     page.setDefaultTimeout(10000);
     const errors = [];
     const requests = [];
     let connection;
     page.on("pageerror", (error) => errors.push(error.message));
+    page.on("console", (entry) => {
+      if (entry.type() === "error" && /same key|unique.*key/.test(entry.text())) errors.push(entry.text());
+    });
     await page.addInitScript((preferences) => {
       for (const [key, value] of Object.entries({ project: "workspace", thread: "chat", inspector: "0", theme: "dark", uiScale: "120", ...preferences }))
         localStorage.setItem(`citropy.${key}`, value);
@@ -63,8 +66,8 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
       socket.onMessage((raw) => {
         const event = JSON.parse(raw);
         requests.push(event);
-        if (event.t === "thread.send") socket.send(JSON.stringify({ t: "thread.accepted", requestId: event.requestId }));
-        if (event.t === "thread.load") socket.send(JSON.stringify({ t: "thread.messages", threadId: event.id, messages: event.id === "chat" ? messages : [message(`${event.id}-message`, [textPart(`${event.id}-text`, "Subagent result.")])] }));
+        if (event.t === "thread.send" || event.t === "queue.edit") socket.send(JSON.stringify({ t: "thread.accepted", requestId: event.requestId }));
+        if (event.t === "thread.load") socket.send(JSON.stringify({ t: "thread.messages", threadId: event.id, messages: histories[event.id] ?? (event.id === "chat" ? messages : [message(`${event.id}-message`, [textPart(`${event.id}-text`, "Subagent result.")])]) }));
       });
       socket.send(JSON.stringify({ t: "hello", snapshot: {
         projects: [{ id: "workspace", name: "Example workspace", path: "/example", isGit: false, lastOpened: 1 }],
@@ -86,6 +89,281 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     const idle = () => emit({ t: "thread.upsert", thread });
     return { page, emit, begin, complete, idle, requests, close: async () => { assert.deepEqual(errors, []); await page.close(); } };
   }
+
+  await t.test("conversation menus stay visible above the sidebar footer and support keyboard navigation", async () => {
+    const f = await fixture({ preferences: { compactNavigation: "1" }, children: Array.from({ length: 12 }, (_, index) => ({ ...thread, id: `other-${index}`, title: `Other conversation ${index}` })) });
+    const { page } = f;
+    const row = page.locator('.thread-card').last();
+    for (const [width, scale] of [[1440, 120], [960, 150]]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.evaluate(async (scale) => (await import("/web/src/lib/store.ts")).setUiScale(scale), scale);
+      await row.scrollIntoViewIfNeeded();
+      await row.hover();
+      await row.getByRole("button", { name: /Organize Other conversation/ }).click();
+      const menu = page.getByRole("menu");
+      await menu.waitFor();
+      const opening = await menu.boundingBox();
+      assert.ok(opening.y >= 0 && opening.y + opening.height <= 800, JSON.stringify(opening));
+      const last = menu.getByRole("menuitem").last();
+      await menu.press("End");
+      const visible = await last.evaluate((node) => {
+        const rect = node.getBoundingClientRect();
+        return rect.top >= 0 && rect.bottom <= innerHeight && node.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+      });
+      assert.ok(visible, "The last menu action must be visible and clickable above the footer.");
+      assert.equal(await last.evaluate((node) => node === document.activeElement), true);
+      const bounds = await menu.boundingBox();
+      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width);
+      await page.screenshot({ path: `/tmp/citropy-chat-menu-${width}.png`, animations: "disabled" });
+      await page.keyboard.press("Escape");
+      await menu.waitFor({ state: "detached" });
+      assert.equal(await row.getByRole("button", { name: /Organize Other conversation/ }).evaluate((node) => node === document.activeElement), true);
+    }
+    await page.locator(".workspace-select").click();
+    const search = page.getByRole("textbox", { name: "Find a workspace", exact: true });
+    assert.equal(await search.evaluate((node) => node === document.activeElement), true);
+    await page.keyboard.type("Example workspace");
+    await page.getByRole("menuitem", { name: /^Example workspace/ }).waitFor();
+    await page.keyboard.press("Escape");
+    await f.close();
+  });
+
+  await t.test("chat bubbles fit short messages, preserve line breaks and resolve runtime model names", async () => {
+    const f = await fixture({ messages: [
+      { ...message("greeting", [textPart("greeting-text", "Hello!")]), role: "user" },
+      { ...message("reply", [textPart("reply-text", "Hi. What do you need?")]), model: "claude-sonnet-5[1m]" },
+      { ...message("multiline", [textPart("multiline-text", "First line\nSecond line")]), role: "user" },
+      message("work", [textPart("work-start", "I’ll check the workspace."), ...tools, textPart("work-end", "The review is complete.")]),
+    ] });
+    const { page } = f;
+    f.emit(
+      { t: "providers.update", providers: [{ id: "claude", label: "Claude Code", available: true, enabled: true, models: [{ id: "claude-sonnet-5", label: "Claude Sonnet 5", aliases: ["sonnet"] }] }] },
+      { t: "thread.upsert", thread: { ...thread, model: "claude-sonnet-5" } },
+    );
+    await page.locator('[data-part-id="greeting-text"] p').waitFor();
+    const padding = await page.locator("#message-greeting .user-card").evaluate((node) => {
+      const p = node.querySelector("p");
+      return node.offsetHeight - p.offsetHeight;
+    });
+    assert.ok(padding <= 26, `Short user messages have ${padding}px of vertical space beyond their text.`);
+    await page.locator("#message-reply .turn-heading strong").getByText("Claude Sonnet 5", { exact: true }).waitFor();
+    assert.equal(await page.locator("#message-reply .agent-card").count(), 1);
+    const lineCount = await page.locator('[data-part-id="multiline-text"] p').evaluate((node) => node.offsetHeight / parseFloat(getComputedStyle(node).lineHeight));
+    assert.ok(lineCount > 1.8 && lineCount < 2.2);
+    const pieces = page.locator('.turn-agent').filter({ has: page.locator('.agent-card') });
+    assert.equal(await pieces.count(), 4);
+    const continuation = await page.locator('.turn-agent[data-continuation="true"]').first().boundingBox();
+    const beginning = await page.locator('#message-work').boundingBox();
+    assert.ok(Math.abs(beginning.y + beginning.height - continuation.y) < 2);
+    await page.locator(".group-head").click();
+    await page.locator(".group-body").waitFor();
+    await page.waitForFunction(() => {
+      const body = document.querySelector(".group-body");
+      const inner = document.querySelector(".group-body-inner");
+      return body && inner && Math.abs(body.getBoundingClientRect().height - inner.getBoundingClientRect().height) < 1;
+    });
+    for (const width of [1440, 960]) {
+      await page.setViewportSize({ width, height: 1100 });
+      await page.screenshot({ path: `/tmp/citropy-chat-bubbles-${width}.png`, animations: "disabled" });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    }
+    await f.close();
+  });
+
+  await t.test("creating and switching conversations leaves exactly one isolated chat surface", async () => {
+    const f = await fixture({ histories: { "new-1": [], "new-2": [] } });
+    const { page } = f;
+    await page.route("**/api/workspaces?*", (route) => route.fulfill({ json: { hasCommits: false, branches: [], worktrees: [] } }));
+    let created = 0;
+    await page.route("**/api/threads", (route) => {
+      const next = { ...thread, id: `new-${++created}`, title: `Empty conversation ${created}` };
+      f.emit({ t: "thread.upsert", thread: next });
+      return route.fulfill({ json: next });
+    });
+    for (let index = 1; index <= 2; index++) {
+      await page.getByRole("button", { name: "New thread", exact: true }).click();
+      await page.getByRole("menuitem", { name: "Claude Code", exact: true }).click();
+      await page.getByRole("button", { name: "Create conversation", exact: true }).click();
+      await page.getByRole("dialog").waitFor({ state: "detached" });
+      await page.locator(`.thread-row[title="Empty conversation ${index}"][data-active="true"]`).waitFor();
+      assert.equal(await page.locator(".conversation-viewport").count(), 1);
+      assert.equal(await page.locator(".canvas-hint").count(), 1);
+      assert.equal(await page.locator(".turn").count(), 0);
+      assert.equal(await page.getByRole("textbox", { name: "Message", exact: true }).count(), 1);
+    }
+    for (const title of ["Presentation check", "Empty conversation 1", "Presentation check", "Empty conversation 2", "Presentation check"]) {
+      await page.locator(`.thread-row[title="${title}"]`).click();
+      await page.locator(`.thread-row[title="${title}"][data-active="true"]`).waitFor();
+      assert.equal(await page.locator(".conversation-viewport").count(), 1);
+      if (title === "Presentation check") {
+        await page.locator('[data-part-id="saved-text"]').waitFor();
+        assert.equal(await page.locator(".turn").count(), 1);
+        assert.equal(await page.locator(".canvas-hint").count(), 0);
+      } else {
+        assert.equal(await page.locator(".turn").count(), 0);
+        assert.equal(await page.locator(".canvas-hint").count(), 1);
+      }
+    }
+    await f.close();
+  });
+
+  await t.test("thread actions have their own space and compact navigation uses equal button sizes", async () => {
+    const title = "Review the workspace and check the latest changes";
+    const f = await fixture({ preferences: { compactNavigation: "1" }, messages: [
+      { ...message("question", [textPart("question-text", "Please check the changes in this workspace.")]), role: "user" },
+      message("saved", [textPart("saved-text", "The changes are ready to review.\n\n- The conversation history stays separate.\n- The sidebar actions are available below each title.")]),
+    ] });
+    const { page } = f;
+    f.emit({ t: "thread.upsert", thread: { ...thread, title, workspaceBranch: "main", changedFiles: 19 } });
+    const card = page.locator('.thread-card[data-active="true"]');
+    await card.getByText(title, { exact: true }).waitFor();
+    for (const [width, sidebar, scale] of [[1600, 252, 120], [960, 216, 120], [1440, 360, 150]]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate(async ({ sidebar, scale }) => {
+        const { useApp, setUiScale } = await import("/web/src/lib/store.ts");
+        setUiScale(scale);
+        useApp.setState((state) => ({ panelWidths: { ...state.panelWidths, sidebar } }));
+      }, { sidebar, scale });
+      await page.locator(".canvas").hover();
+      const before = await card.boundingBox();
+      await card.hover();
+      await page.waitForFunction(() => getComputedStyle(document.querySelector('.thread-card[data-active="true"] .thread-row-actions')).opacity === "1");
+      const content = await card.locator(".thread-row").boundingBox();
+      const actions = await card.locator(".thread-row-actions").boundingBox();
+      const after = await card.boundingBox();
+      assert.ok(actions.y >= content.y + content.height - 1);
+      assert.ok(actions.x >= after.x && actions.x + actions.width <= after.x + after.width);
+      assert.ok(Math.abs(before.height - after.height) < 1);
+      const buttons = await page.locator(".navigation-actions .rail-action").evaluateAll((nodes) => nodes.map((node) => {
+        const { width, height, y } = node.getBoundingClientRect();
+        return { width, height, y };
+      }));
+      assert.equal(buttons.length, 5);
+      for (const button of buttons) {
+        assert.ok(Math.abs(button.width - buttons[0].width) < 1, JSON.stringify(buttons));
+        assert.ok(Math.abs(button.height - buttons[0].height) < 1, JSON.stringify(buttons));
+        assert.ok(Math.abs(button.y - buttons[0].y) < 1, JSON.stringify(buttons));
+      }
+      const avatar = await page.locator(".agent-avatar").evaluate((node) => {
+        const style = getComputedStyle(node);
+        return { border: style.borderTopWidth, background: style.backgroundColor };
+      });
+      assert.deepEqual(avatar, { border: "0px", background: "rgba(0, 0, 0, 0)" });
+      await page.screenshot({ path: `/tmp/citropy-thread-polish-${width}.png`, animations: "disabled" });
+      const overflow = await page.evaluate(() => ({
+        width: innerWidth,
+        scrollWidth: document.documentElement.scrollWidth,
+        elements: [...document.querySelectorAll(".topbar, .rail, .stage, .thread-card, .thread-row, .navigation-actions, .composer")].map((node) => ({ class: node.className, right: node.getBoundingClientRect().right, width: node.getBoundingClientRect().width })),
+      }));
+      assert.ok(overflow.scrollWidth <= overflow.width, JSON.stringify(overflow));
+    }
+    await card.getByRole("button", { name: `Organize ${title}`, exact: true }).focus();
+    await page.keyboard.press("Enter");
+    await page.getByRole("menuitem", { name: "Rename…", exact: true }).waitFor();
+    await page.keyboard.press("Escape");
+    assert.equal(await card.getByRole("button", { name: `Organize ${title}`, exact: true }).evaluate((node) => node === document.activeElement), true);
+    await card.getByRole("button", { name: `Finish ${title}`, exact: true }).click();
+    await page.waitForTimeout(50);
+    assert.ok(f.requests.some((event) => event.t === "thread.finish" && event.id === "chat" && event.finished));
+    await card.getByRole("button", { name: `Delete ${title}`, exact: true }).click();
+    await page.getByRole("dialog").waitFor();
+    await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await f.close();
+  });
+
+  await t.test("a growing conversation keeps the visible message when its timeline starts windowing", async () => {
+    const f = await fixture({ messages: Array.from({ length: 40 }, (_, index) => message(`short-${index}`, [textPart(`short-text-${index}`, `History ${index}. `.repeat(15))])) });
+    const target = f.page.locator("#message-short-10");
+    await target.scrollIntoViewIfNeeded();
+    await f.page.getByRole("button", { name: "Latest", exact: true }).waitFor();
+    const before = await target.evaluate((node) => node.getBoundingClientRect().top);
+    f.begin("next-row", "The next response.");
+    f.complete("next-row");
+    f.idle();
+    await f.page.waitForTimeout(300);
+    const after = await target.evaluate((node) => node.getBoundingClientRect().top);
+    assert.ok(Math.abs(before - after) < 2, JSON.stringify({ before, after }));
+    await f.close();
+  });
+
+  await t.test("long conversations mount a bounded timeline and keep navigation, search and live following usable", async () => {
+    const history = Array.from({ length: 200 }, (_, index) => message(`history-${index}`, [
+      textPart(`history-text-${index}`, `Paragraph ${index}. `.repeat(20)),
+    ]));
+    history.push(message("long-turn", Array.from({ length: 160 }, (_, index) => textPart(`section-${index}`, `Section ${index}. `.repeat(15)))));
+    history.at(-1).parts.push(...tools, textPart("history-end", "End of saved history."));
+    const f = await fixture({ messages: history });
+    const { page } = f;
+    const bottom = () => page.waitForFunction(() => {
+      const node = document.querySelector(".canvas");
+      return node && node.scrollHeight - node.clientHeight - node.scrollTop < 2;
+    });
+    const mounted = () => page.locator(".timeline-row").count();
+    await page.locator('[data-part-id="history-end"]').waitFor();
+    await bottom();
+    assert.ok(await mounted() < 40);
+    assert.equal(await page.locator('[data-part-id="history-text-0"]').count(), 0);
+    for (let index = 0; index < 6; index++) {
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
+      await page.getByRole("button", { name: "Back to chat", exact: true }).waitFor();
+      assert.equal(await mounted(), 0);
+      await page.getByRole("button", { name: "Back to chat", exact: true }).click();
+      await page.locator('[data-part-id="history-end"]').waitFor();
+      await bottom();
+      assert.ok(await mounted() < 40);
+    }
+    await page.locator(".group-head").click();
+    await page.locator(".group-body").waitFor();
+    await page.evaluate(async () => {
+      const { useApp } = await import("/web/src/lib/store.ts");
+      useApp.setState({ searchMessageId: "history-20" });
+    });
+    await page.locator("#message-history-20").waitFor();
+    await page.waitForFunction(() => {
+      const message = document.querySelector("#message-history-20")?.getBoundingClientRect();
+      const canvas = document.querySelector(".canvas").getBoundingClientRect();
+      return message && message.top >= canvas.top - 2 && message.top < canvas.bottom;
+    });
+    assert.equal(await page.locator('[data-part-id="history-end"]').count(), 0);
+    const position = await page.locator(".canvas").evaluate((node) => node.scrollTop);
+    const anchor = await page.locator("#message-history-20").evaluate((node) => node.getBoundingClientRect().top);
+    f.begin("background-response", "A response while reading older messages.");
+    f.complete("background-response");
+    f.idle();
+    await page.waitForTimeout(200);
+    const afterPosition = await page.locator(".canvas").evaluate((node) => node.scrollTop);
+    const afterAnchor = await page.locator("#message-history-20").evaluate((node) => node.getBoundingClientRect().top);
+    assert.ok(Math.abs(afterAnchor - anchor) < 2, JSON.stringify({ position, afterPosition, anchor, afterAnchor }));
+    await page.getByRole("button", { name: "Latest", exact: true }).click();
+    await bottom();
+    await page.locator('[data-part-id="background-response-text"]').waitFor();
+    await page.locator('.group[data-open="true"]').waitFor();
+    await page.locator(".group-head").click();
+    await page.locator("textarea").fill("Continue with another response.");
+    await page.locator("textarea").press("Enter");
+    f.begin("streaming-response", "Streaming begins.");
+    await page.locator('[data-part-id="streaming-response-text"]').waitFor();
+    await bottom();
+    f.emit({ t: "part.append", threadId: "chat", messageId: "streaming-response", partId: "streaming-response-text", text: "\n\n" + "Growing answer. ".repeat(150) });
+    await page.locator('[data-part-id="streaming-response-text"]').getByText(/Growing answer/).waitFor();
+    await bottom();
+    f.complete("streaming-response");
+    f.idle();
+    for (const [width, scale] of [[1600, 90], [1280, 120], [960, 150]]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate(async (scale) => (await import("/web/src/lib/store.ts")).setUiScale(scale), scale);
+      if (width / (scale / 100) <= 720)
+        await page.getByRole("button", { name: "Close navigation", exact: true }).click();
+      await bottom();
+      assert.ok(await mounted() < 40);
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      await page.screenshot({ path: `/tmp/citropy-chat-windowed-${width}.png`, animations: "disabled" });
+    }
+    await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.waitForFunction(() => window.presentationFrames.size === 0);
+    await f.close();
+  });
 
   await t.test("streaming displays arriving text and buffering waits for the completed block", async () => {
     for (const streaming of ["1", "0"]) {
@@ -397,6 +675,95 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
       await page.locator(".group-head").click();
       await page.locator(".group-body").waitFor({ state: "detached" });
     }
+    await f.close();
+  });
+
+  await t.test("queued follow-ups stay visible and editable, and messages written offline wait for the connection", async () => {
+    const until = async (check) => {
+      for (let index = 0; index < 150; index++) {
+        if (check()) return;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      throw new Error("Expected request was not sent");
+    };
+    const f = await fixture();
+    const { page } = f;
+    const provider = { id: "claude", label: "Claude Code", available: true, enabled: true, models: [{ id: "sample", label: "Example model" }], steerHint: "Claude Code reads it at its next step." };
+    const queue = [
+      { id: "tests", text: "Check the tests too", createdAt: 2 },
+      { id: "review", text: "/review", createdAt: 3, attachments: [{ id: "file", path: "/example/notes.txt", label: "notes.txt" }] },
+    ];
+    f.emit({ t: "providers.update", providers: [provider] }, { t: "thread.upsert", thread: { ...thread, running: true, status: "working", queue } });
+    const list = page.getByRole("list", { name: "Queued messages" });
+    const row = (text) => list.getByRole("listitem").filter({ hasText: text });
+    const summary = page.getByRole("button", { name: "Expand 2 queued messages" });
+    await summary.waitFor();
+    assert.match(await summary.innerText(), /\/review/);
+    assert.equal(await list.isVisible(), false);
+    assert.ok((await page.locator(".composer-queue").boundingBox()).height < 52);
+    await page.screenshot({ path: "/tmp/citropy-queue-compact.png", animations: "disabled" });
+    await page.setViewportSize({ width: 600, height: 900 });
+    await page.getByRole("button", { name: "Toggle sidebar" }).click();
+    await page.screenshot({ path: "/tmp/citropy-queue-compact-narrow.png", animations: "disabled" });
+    assert.ok(await summary.evaluate((element) => element.scrollWidth <= element.clientWidth));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await summary.click();
+    await row("Check the tests too").waitFor();
+    await page.getByText("Sends when Claude Code finishes", { exact: true }).waitFor();
+    assert.equal(await row("Check the tests too").getByRole("button", { name: "Send now" }).getAttribute("title"), "Claude Code reads it at its next step.");
+    assert.equal(await row("/review").getByRole("button", { name: "Send now" }).count(), 0);
+    await page.screenshot({ path: "/tmp/citropy-queue.png", animations: "disabled" });
+    await row("Check the tests too").getByRole("button", { name: "Send now" }).click();
+    await row("/review").getByRole("button", { name: "Move up" }).click();
+    await row("/review").getByRole("button", { name: "Remove" }).click();
+    await until(() => f.requests.filter((event) => event.t.startsWith("queue.")).length === 3);
+    assert.deepEqual(f.requests.filter((event) => event.t.startsWith("queue.")).map(({ t, id, index }) => ({ t, id, index })), [
+      { t: "queue.send", id: "tests", index: undefined },
+      { t: "queue.move", id: "review", index: 0 },
+      { t: "queue.remove", id: "review", index: undefined },
+    ]);
+    const input = page.getByRole("textbox", { name: "Message", exact: true });
+    await row("Check the tests too").getByRole("button", { name: "Edit" }).click();
+    await page.waitForFunction(() => document.querySelector("textarea").value === "Check the tests too");
+    await input.fill("One more thing");
+    await page.getByRole("button", { name: "Queue", exact: true }).click();
+    await until(() => f.requests.some((event) => event.t === "thread.send" && event.text === "One more thing"));
+    await page.evaluate(async () => (await import("/web/src/lib/store.ts")).useApp.setState({ connected: false }));
+    await input.fill("Written while offline");
+    await input.press("Enter");
+    await row("Written while offline").getByText("Waiting for connection", { exact: true }).waitFor();
+    await page.getByText("Sends when Citropy reconnects", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem("citropy.offline")).chat[0].text), "Written while offline");
+    await page.screenshot({ path: "/tmp/citropy-queue-offline.png", animations: "disabled" });
+    await page.evaluate(async () => (await import("/web/src/lib/store.ts")).useApp.setState({ connected: true }));
+    await until(() => f.requests.some((event) => event.t === "thread.send" && event.text === "Written while offline"));
+    await row("Written while offline").waitFor({ state: "detached" });
+    await f.close();
+  });
+
+  await t.test("the thinking indicator loops without a visual reset and respects reduced motion", async () => {
+    const f = await fixture();
+    f.emit({ t: "thread.upsert", thread: { ...thread, running: true, status: "thinking" } });
+    const weave = f.page.locator(".working-weave");
+    await weave.waitFor();
+    const frames = await weave.evaluate((element) => [...element.children].map((line) => {
+      const animation = line.getAnimations()[0];
+      animation.pause();
+      const timing = animation.effect.getTiming();
+      const sample = (offset) => {
+        animation.currentTime = Number(timing.delay) + Number(timing.duration) + offset;
+        const style = getComputedStyle(line);
+        return { opacity: Number(style.opacity), scale: new DOMMatrix(style.transform).a };
+      };
+      return { before: sample(-1), after: sample(1), middle: sample(-Number(timing.duration) / 2), iterations: timing.iterations };
+    }));
+    for (const frame of frames) {
+      assert.ok(Math.abs(frame.before.opacity - frame.after.opacity) < 0.005);
+      assert.ok(Math.abs(frame.before.scale - frame.after.scale) < 0.005);
+      assert.ok(frame.middle.opacity - frame.before.opacity > 0.5);
+    }
+    await f.page.emulateMedia({ reducedMotion: "reduce" });
+    assert.equal(await weave.locator("i").first().evaluate((line) => getComputedStyle(line).animationIterationCount), "1");
     await f.close();
   });
 });

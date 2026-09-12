@@ -37,7 +37,7 @@ export function useMarkdown(text: string, live: boolean): { html: string; ready:
     latest.current = key;
     const cached = cache.get(key);
     if (cached !== undefined) {
-      setRendered({ html: cached, key });
+      setRendered((current) => current.key === key ? current : { html: cached, key });
       return;
     }
     let cancelled = false;

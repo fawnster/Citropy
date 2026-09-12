@@ -1,5 +1,12 @@
 import { NewConversation } from "./components/NewConversation.tsx";
-import { lazy, Suspense, useEffect, useState, type CSSProperties } from "react";
+import {
+  Fragment,
+  lazy,
+  Suspense,
+  useEffect,
+  useState,
+  type CSSProperties,
+} from "react";
 import { Titlebar } from "./components/Titlebar.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
 import { Conversation } from "./components/Conversation.tsx";
@@ -232,17 +239,16 @@ export function App() {
                 onBack={() => openView("chat")}
               />
             ) : hasProject && activeThreadId ? (
-              <>
+              <Fragment key={activeThreadId}>
                 <Conversation />
                 <Composer
-                  key={activeThreadId}
                   onUsage={() => openView("usage")}
                   onSkills={() => {
                     setSettingsSection("Skills");
                     openView("settings");
                   }}
                 />
-              </>
+              </Fragment>
             ) : (
               <Welcome />
             )}

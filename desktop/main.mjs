@@ -1,7 +1,13 @@
+import { randomBytes } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+import { createAppUpdater } from "./updates.mjs";
+import { packagedBackend } from "./backend.mjs";
 import { initializeProfiles, browserProfile, handleProfiles } from "./browser-profiles.mjs";
 import { computerRequest, connectComputerEvents, stopComputer } from "./computer.mjs";
 import {
   app,
+  dialog,
   BrowserWindow,
   WebContentsView,
   ipcMain,
@@ -12,22 +18,10 @@ import {
 } from "electron";
 import { WebSocket } from "ws";
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { migrateDesktopData } from "./migrate-data.mjs";
 
-const base = new URL(process.env.CITROPY_URL ?? "http://127.0.0.1:4177");
-const ui = new URL(process.env.CITROPY_UI_URL ?? base.href);
-if (
-  ![base, ui].every(
-    (url) =>
-      ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) &&
-      url.protocol === "http:",
-  )
-)
-  throw new Error("Citropy desktop requires a local server");
-const token = process.env.CITROPY_DESKTOP_TOKEN;
-if (!token) throw new Error("Start Citropy desktop through npm run desktop");
 app.setName("Citropy");
 app.setPath(
   "userData",
@@ -42,6 +36,29 @@ app.on("second-instance", () => {
   }
 });
 if (process.platform === "linux") app.setDesktopName("citropy.desktop");
+if (app.isPackaged) {
+  process.env.CITROPY_PORT ||= "4177";
+  process.env.CITROPY_HOST = "127.0.0.1";
+  process.env.CITROPY_URL = `http://127.0.0.1:${process.env.CITROPY_PORT}`;
+  process.env.CITROPY_UI_URL = process.env.CITROPY_URL;
+  process.env.CITROPY_DESKTOP_TOKEN = randomBytes(32).toString("hex");
+}
+const backend = app.isPackaged ? packagedBackend(process.env) : undefined;
+let updates;
+let applyingUpdate = false;
+let connectDesktop;
+const base = new URL(process.env.CITROPY_URL ?? "http://127.0.0.1:4177");
+const ui = new URL(process.env.CITROPY_UI_URL ?? base.href);
+if (
+  ![base, ui].every(
+    (url) =>
+      ["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) &&
+      url.protocol === "http:",
+  )
+)
+  throw new Error("Citropy desktop requires a local server");
+const token = process.env.CITROPY_DESKTOP_TOKEN;
+if (!token) throw new Error("Start Citropy desktop through npm run desktop");
 const windowFile = join(app.getPath("userData"), "window.json");
 const { version } = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
@@ -692,6 +709,7 @@ async function request(method, params) {
 app
   .whenReady()
   .then(async () => {
+    await backend?.start();
     await initializeProfiles(app.getPath("userData"));
     let saved = {};
     try {
@@ -727,6 +745,57 @@ app
       event.sender === window.webContents &&
       event.senderFrame === window.webContents.mainFrame &&
       new URL(event.senderFrame.url).origin === ui.origin;
+    const unavailableUpdate = !app.isPackaged
+      ? "Development build. Live source changes are enabled; release updates require an installed Citropy build."
+      : process.platform === "linux" && !(process.env.APPIMAGE && process.env.APPDIR && resolve(process.execPath).startsWith(`${resolve(process.env.APPDIR)}${sep}`))
+        ? "Install the Citropy AppImage to download and apply release updates."
+        : undefined;
+    const autoUpdater = unavailableUpdate ? undefined : (await import("electron-updater").then(module => module.default || module)).autoUpdater;
+    updates = createAppUpdater({
+      updater: autoUpdater,
+      version,
+      unavailable: unavailableUpdate,
+      emit: (state) => { if (!window.isDestroyed()) window.webContents.send("updates:state", state); },
+      authenticate: async () => {
+        let token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
+        if (!token) {
+          token = await promisify(execFile)("gh", ["auth", "token", "--hostname", "github.com"], { timeout: 8000, maxBuffer: 16000 }).then(result => result.stdout.trim()).catch(() => undefined);
+        }
+        if (!token) throw new Error("GitHub token unavailable");
+        autoUpdater.setFeedURL({ provider: "github", owner: "tinuxongit", repo: "Citropy", private: true, token });
+      },
+      prepareInstall: async () => {
+        const response = await fetch(new URL("/api/updates/prepare", base), { method: "POST", headers: { "x-citropy-desktop-token": token }, signal: AbortSignal.timeout(10000) });
+        if (!response.ok) {
+          const error = new Error("Update is blocked");
+          error.userMessage = (await response.json()).error;
+          throw error;
+        }
+        applyingUpdate = true;
+        for (const profile of new Set([session.defaultSession, ...[...tabs.values()].map(tab => tab.view.webContents.session)])) {
+          await profile.cookies.flushStore();
+          profile.flushStorageData();
+        }
+        await backend.stop();
+        app.releaseSingleInstanceLock();
+      },
+      recoverInstall: async () => {
+        if (!applyingUpdate) return;
+        if (!app.requestSingleInstanceLock()) throw new Error("Another Citropy instance is already open.");
+        await backend.start();
+        await fetch(new URL("/api/updates/cancel", base), { method: "POST", headers: { "x-citropy-desktop-token": token }, signal: AbortSignal.timeout(10000) });
+        if (!socket || socket.readyState !== WebSocket.OPEN) connectDesktop();
+        applyingUpdate = false;
+      },
+    });
+    ipcMain.handle("updates:state", (event) => {
+      if (!trusted(event)) throw new Error("Unavailable outside Citropy");
+      return updates.state();
+    });
+    ipcMain.handle("updates:command", (event, action) => {
+      if (!trusted(event)) throw new Error("Unavailable outside Citropy");
+      return updates.command(action);
+    });
     const windowState = () => ({
       maximized: window.isMaximized(),
       fullscreen: window.isFullScreen(),
@@ -876,7 +945,8 @@ app
       if (quitting) return;
       event.preventDefault();
       quitting = true;
-      void stopComputer().finally(() => {
+      void stopComputer().then(() => backend?.stop()).finally(() => {
+        updates?.dispose();
         for (const notification of notifications) notification.close();
         for (const tab of tabs.values())
           tab.view.webContents.close({ waitForBeforeUnload: false });
@@ -884,11 +954,14 @@ app
         app.quit();
       });
     });
+    connectDesktop = () => {
     const wsUrl = new URL("/socket", base);
     wsUrl.protocol = "ws:";
     wsUrl.searchParams.set("desktop", token);
-    socket = new WebSocket(wsUrl);
-    socket.on("message", async (raw) => {
+    const connection = new WebSocket(wsUrl);
+    socket = connection;
+    connection.on("message", async (raw) => {
+      if (socket !== connection) return;
       let message;
       try {
         message = JSON.parse(String(raw));
@@ -904,15 +977,19 @@ app
         emit({ id: message.id, error: error.message });
       }
     });
-    socket.on("error", () => {
-      if (!quitting) app.quit();
+    connection.on("error", () => {
+      if (socket === connection && !quitting && !applyingUpdate) app.quit();
     });
-    socket.on("close", () => {
-      if (!quitting) app.quit();
+    connection.on("close", () => {
+      if (socket === connection && !quitting && !applyingUpdate) app.quit();
     });
+    };
+    connectDesktop();
     await window.loadURL(ui.href);
   })
-  .catch((error) => {
+  .catch(async (error) => {
     process.stderr.write(`${error.message}\n`);
+    if (app.isPackaged) dialog.showErrorBox("Citropy could not open", error.message);
+    await backend?.stop().catch(() => {});
     app.quit();
   });

@@ -2,7 +2,10 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { store } from "./store.ts";
 import { dev } from "./config.ts";
 import { desktopRequest } from "./desktop.ts";
-import { reloadProviderSkills, runtimeFor } from "./runtime.ts";
+import { reloadProviderSessions, providerBusy, runtimeFor } from "./runtime.ts";
+import { providerMaintenance, startProviderUpdate, assertProviderReady } from "./providers/maintenance.ts";
+import { readGlobalInstructions, saveGlobalInstructions } from "./providers/instructions.ts";
+import { waitForStoppedProcesses } from "./providers/process.ts";
 import { openPanel } from "./panels.ts";
 import * as terminals from "./terminals.ts";
 import { modelSettings } from "../shared/model-options.ts";
@@ -23,7 +26,7 @@ import { usageReport } from "./usage.ts";
 import { listCommands } from "./commands.ts";
 import { computerState, computerCapabilities, configureComputer, startComputer, stopComputer, pauseComputer, computerScreenshot, computerAction } from "./computer.ts";
 import type { ComputerAction } from "../shared/computer.ts";
-import type { ProjectSettings, ProviderInfo } from "../shared/protocol.ts";
+import type { ProjectSettings, ProviderId, ProviderInfo } from "../shared/protocol.ts";
 
 async function body(req: IncomingMessage): Promise<Record<string, any>> {
   let size = 0;
@@ -116,10 +119,11 @@ export async function handleFeatures(
   req: IncomingMessage,
   res: ServerResponse,
   providers: ProviderInfo[],
+  refreshProviders: () => Promise<void> = async () => {},
 ): Promise<boolean> {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (
-    !/^\/api\/(attachments|assets|preview|workspaces|projects|threads|commands|skills|usage|diagnostics|browser|computer)(\/|$)/.test(
+    !/^\/api\/(attachments|assets|preview|workspaces|projects|threads|commands|skills|usage|diagnostics|browser|computer|providers)(\/|$)/.test(
       url.pathname,
     )
   )
@@ -155,7 +159,29 @@ export async function handleFeatures(
       .end(JSON.stringify(value));
   };
   try {
-    if (url.pathname === "/api/computer" && req.method === "GET") respond({ state: computerState(), capabilities: await computerCapabilities().catch((error) => ({ available: false, platform: process.platform, backend: "unavailable", reason: error.message })) });
+    if (url.pathname === "/api/providers/maintenance" && req.method === "GET") respond(await providerMaintenance(url.searchParams.get("refresh") === "1"));
+    else if (url.pathname === "/api/providers/update" && req.method === "POST") {
+      const input = await body(req);
+      if (!["claude", "codex", "opencode"].includes(input.provider)) throw new Error("Unknown provider.");
+      const provider = input.provider as ProviderId;
+      if (providerBusy(provider)) throw new Error("Finish or stop this provider’s active conversations before updating.");
+      respond(startProviderUpdate(provider, async () => {
+        reloadProviderSessions(new Set([provider]));
+        await waitForStoppedProcesses();
+      }, refreshProviders));
+    } else if (url.pathname === "/api/providers/instructions" && ["GET", "PUT"].includes(req.method || "")) {
+      const provider = url.searchParams.get("provider") as ProviderId;
+      if (!["claude", "codex", "opencode"].includes(provider)) throw new Error("Unknown provider.");
+      if (req.method === "GET") respond(readGlobalInstructions(provider));
+      else {
+        const input = await body(req);
+        assertProviderReady(provider);
+        if (providerBusy(provider)) throw new Error("Finish or stop this provider’s active conversations before saving global instructions.");
+        const saved = saveGlobalInstructions(provider, input.content, input.revision);
+        reloadProviderSessions(new Set([provider]));
+        respond(saved);
+      }
+    } else if (url.pathname === "/api/computer" && req.method === "GET") respond({ state: computerState(), capabilities: await computerCapabilities().catch((error) => ({ available: false, platform: process.platform, backend: "unavailable", reason: error.message })) });
     else if (url.pathname === "/api/computer" && req.method === "PATCH") {
       const input = await body(req);
       respond(await configureComputer(input.enabled));
@@ -165,7 +191,7 @@ export async function handleFeatures(
       const input = await body(req);
       if (typeof input.paused !== "boolean") throw new Error("Choose whether to pause control.");
       respond(await pauseComputer(input.paused));
-    } else if (url.pathname === "/api/computer/screenshot" && req.method === "GET") respond(await computerScreenshot(threadId ?? "", url.searchParams.get("displayId") || undefined, Number(url.searchParams.get("maxWidth") || 1600), true));
+    } else if (url.pathname === "/api/computer/screenshot" && req.method === "GET") respond(await computerScreenshot(threadId ?? "", { displayId: url.searchParams.get("displayId") || undefined, maxWidth: Number(url.searchParams.get("maxWidth") || 1600), preview: true }));
     else if (url.pathname === "/api/computer/action" && req.method === "POST") respond(await computerAction(threadId ?? "", await body(req) as ComputerAction, true));
     else if (url.pathname === "/api/computer/skill" && req.method === "POST") {
       await restoreComputerSkill();
@@ -354,7 +380,7 @@ export async function handleFeatures(
       );
     } else if (url.pathname === "/api/skills" && req.method === "PATCH") {
       const input = await body(req);
-      reloadProviderSkills(
+      reloadProviderSessions(
         await changeSkill(projectId, input.id, input.action),
       );
       respond(await listSkills(projectId));

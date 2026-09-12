@@ -20,16 +20,32 @@ def number(value, low, high, name):
     return value
 
 
-def encode(data, width, height, stride, maximum):
+def encode(data, width, height, stride, maximum, crop=None):
     from gi.repository import GdkPixbuf, GLib
     image = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(data), GdkPixbuf.Colorspace.RGB, False, 8, width, height, stride)
-    scale = min(1, maximum / width, 1600 / height)
+    bounds = None
+    if crop is not None:
+        if not isinstance(crop, dict):
+            raise ValueError("Choose a screen region.")
+        x = number(crop.get("x"), 0, 1, "region x")
+        y = number(crop.get("y"), 0, 1, "region y")
+        w = number(crop.get("width"), 0, 1, "region width")
+        h = number(crop.get("height"), 0, 1, "region height")
+        if w <= 0 or h <= 0 or x + w > 1 + 1e-9 or y + h > 1 + 1e-9:
+            raise ValueError("The region must fit inside the screen.")
+        left, top = math.floor(x * width), math.floor(y * height)
+        right, bottom = min(width, math.ceil((x + w) * width)), min(height, math.ceil((y + h) * height))
+        if right <= left or bottom <= top:
+            raise ValueError("The screen region is empty.")
+        image = image.new_subpixbuf(left, top, right - left, bottom - top)
+        bounds = {"x": left / width, "y": top / height, "width": (right - left) / width, "height": (bottom - top) / height}
+    scale = min(1, maximum / image.get_width(), 1600 / image.get_height())
     if scale < 1:
-        image = image.scale_simple(max(1, round(width * scale)), max(1, round(height * scale)), GdkPixbuf.InterpType.BILINEAR)
+        image = image.scale_simple(max(1, round(image.get_width() * scale)), max(1, round(image.get_height() * scale)), GdkPixbuf.InterpType.BILINEAR)
     ok, output = image.save_to_bufferv("jpeg", ["quality"], ["82"])
     if not ok:
         raise RuntimeError("The screen image could not be encoded.")
-    return {"image": base64.b64encode(output).decode("ascii"), "width": image.get_width(), "height": image.get_height()}
+    return {"image": base64.b64encode(output).decode("ascii"), "width": image.get_width(), "height": image.get_height(), **({"crop": bounds} if bounds else {})}
 
 
 def dependencies():
@@ -173,7 +189,7 @@ class Portal:
             entry["width"], entry["height"] = info.width, info.height
         return sample, info
 
-    def screenshot(self, display_id, maximum):
+    def screenshot(self, display_id, maximum, crop=None):
         entry = self.streams.get(display_id)
         if not entry:
             raise ValueError("Choose one of the shared screens.")
@@ -183,7 +199,7 @@ class Portal:
         if not ok:
             raise RuntimeError("The screen image could not be read.")
         try:
-            return encode(bytes(mapped.data), info.width, info.height, info.stride[0], maximum)
+            return encode(bytes(mapped.data), info.width, info.height, info.stride[0], maximum, crop)
         finally:
             buffer.unmap(mapped)
 
@@ -295,7 +311,7 @@ class X11:
         self.size = self.geometry()
         return [{"id": "desktop", "name": "Desktop", "width": self.size[0], "height": self.size[1]}]
 
-    def screenshot(self, display_id, maximum):
+    def screenshot(self, display_id, maximum, crop=None):
         if display_id != "desktop":
             raise ValueError("Unknown screen")
         width, height = self.geometry()
@@ -315,7 +331,7 @@ class X11:
                 raw = b"".join(raw[y * item.bytes_per_line:y * item.bytes_per_line + width * 4] for y in range(height))
             rgb = bytearray(width * height * 3)
             rgb[0::3], rgb[1::3], rgb[2::3] = raw[2::4], raw[1::4], raw[0::4]
-            return encode(bytes(rgb), width, height, width * 3, maximum)
+            return encode(bytes(rgb), width, height, width * 3, maximum, crop)
         finally:
             self.x.XDestroyImage(image)
 
@@ -504,7 +520,7 @@ def main():
                 elif not driver:
                     raise ValueError("Start a computer session first.")
                 elif method == "screenshot":
-                    result = driver.screenshot(data.get("displayId"), number(data.get("maxWidth", 1600), 320, 2560, "image width"))
+                    result = driver.screenshot(data.get("displayId"), number(data.get("maxWidth", 1600), 320, 2560, "image width"), data.get("crop"))
                 elif method == "action":
                     if paused:
                         raise RuntimeError("Computer control is paused.")

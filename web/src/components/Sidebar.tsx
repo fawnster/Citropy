@@ -206,153 +206,161 @@ export function Sidebar({
           setDragging(undefined);
         }}
       >
-        <button
-          type="button"
-          className="thread-row"
-          data-active={thread.id === activeThreadId}
-          title={thread.title}
-          onClick={() => {
-            onConversation();
-            if (thread.projectId !== activeProjectId)
-              selectProject(thread.projectId);
-            selectThread(thread.id);
-            loadThread(thread.id);
-            useApp.setState({
-              searchMessageId:
-                matches?.find((result) => result.threadId === thread.id)
-                  ?.messageId ?? null,
-            });
-          }}
-        >
-          <span className="thread-row-body">
-            <span
-              className="thread-provider"
-              title={`${providerName} · ${name}`}
-            >
-              <ProviderIcon provider={thread.provider} />
-              <span>{providerName}</span>
-              <span aria-hidden="true">·</span>
-              <span className="truncate">{name}</span>
-            </span>
-            <span className="thread-row-title truncate">{thread.title}</span>
-            {query.trim() && allProjects && (
-              <span className="thread-row-meta">
-                <Folder size={12} />
-                {projects.find((entry) => entry.id === thread.projectId)?.name}
-              </span>
-            )}
-            <span className="thread-row-meta">
-              {thread.pinned && <Pin size={12} aria-label="Pinned" />}
-              <time
-                dateTime={new Date(thread.updatedAt).toISOString()}
-                title={new Date(thread.updatedAt).toLocaleString()}
-              >
-                {new Date(thread.updatedAt).toLocaleDateString(undefined, {
-                  month: "short",
-                  day: "numeric",
-                })}{" "}
-                ·{" "}
-                {new Date(thread.updatedAt).toLocaleTimeString(undefined, {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </time>
-              {Boolean(thread.changedFiles) && (
-                <span>
-                  {thread.changedFiles}{" "}
-                  {thread.changedFiles === 1 ? "file" : "files"}
-                </span>
-              )}
-              {thread.status !== "idle" && (
-                <span className="thread-status" title={thread.status}>
-                  <ThreadPulse status={thread.status} />
-                  {thread.status === "error"
-                    ? "Failed"
-                    : thread.status === "awaiting"
-                      ? "Approval"
-                      : thread.status.charAt(0).toUpperCase() +
-                        thread.status.slice(1)}
-                </span>
-              )}
-            </span>
-            {thread.workspaceBranch && (
-              <span className="thread-row-meta">
-                <GitBranch size={12} />
-                {thread.workspaceBranch}
-              </span>
-            )}
-            {thread.snoozedUntil && (
-              <span className="thread-row-meta">
-                <Clock size={12} />
-                Until{" "}
-                {new Date(thread.snoozedUntil).toLocaleString(undefined, {
-                  month: "short",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </span>
-            )}
-            {query.trim() && (
-              <span className="search-snippet">
-                {
-                  matches?.find((result) => result.threadId === thread.id)
-                    ?.snippet
-                }
-              </span>
-            )}
-          </span>
-        </button>
-        <div className="thread-row-actions">
-          <ConversationMenu
-            thread={thread}
-            onMove={(direction) => {
-              const group = thread.archived
-                ? archived
-                : thread.snoozedUntil
-                  ? snoozed
-                  : thread.finished
-                    ? finished
-                    : current;
-              const next =
-                group[
-                  group.findIndex((entry) => entry.id === thread.id) + direction
-                ];
-              if (next) void reorder(thread.id, next.id);
-            }}
-          />
+        <div className="thread-card" data-active={thread.id === activeThreadId}>
           <button
-            className="thread-row-finish"
             type="button"
-            title={
-              thread.running || thread.status === "awaiting"
-                ? "Stop this conversation before finishing"
-                : `${thread.finished ? "Reopen" : "Finish"} ${thread.title}`
-            }
-            aria-label={`${thread.finished ? "Reopen" : "Finish"} ${thread.title}`}
-            disabled={
-              !connected ||
-              thread.running ||
-              thread.status === "awaiting" ||
-              Object.values(threadMap).some(
-                (child) => child.parentThreadId === thread.id && child.running,
-              )
-            }
+            className="thread-row"
+            data-active={thread.id === activeThreadId}
+            title={thread.title}
             onClick={() => {
-              finishThread(thread.id, !thread.finished);
-              if (!thread.finished) setFinishedOpen(true);
+              onConversation();
+              if (thread.projectId !== activeProjectId)
+                selectProject(thread.projectId);
+              selectThread(thread.id);
+              loadThread(thread.id);
+              useApp.setState({
+                searchMessageId:
+                  matches?.find((result) => result.threadId === thread.id)
+                    ?.messageId ?? null,
+              });
             }}
           >
-            {thread.finished ? <RotateCcw size={14} /> : <Check size={15} />}
+            <span className="thread-row-body">
+              <span
+                className="thread-provider"
+                title={`${providerName} · ${name}`}
+              >
+                <ProviderIcon provider={thread.provider} />
+                <span>{providerName}</span>
+                <span aria-hidden="true">·</span>
+                <span className="truncate">{name}</span>
+              </span>
+              <span className="thread-row-title truncate">{thread.title}</span>
+              {query.trim() && allProjects && (
+                <span className="thread-row-meta">
+                  <Folder size={12} />
+                  {projects.find((entry) => entry.id === thread.projectId)?.name}
+                </span>
+              )}
+              {(thread.pinned ||
+                thread.changedFiles ||
+                thread.status !== "idle") && (
+                <span className="thread-row-meta">
+                  {thread.pinned && <Pin size={12} aria-label="Pinned" />}
+                  {Boolean(thread.changedFiles) && (
+                    <span>
+                      {thread.changedFiles}{" "}
+                      {thread.changedFiles === 1 ? "file" : "files"}
+                    </span>
+                  )}
+                  {thread.status !== "idle" && (
+                    <span className="thread-status" title={thread.status}>
+                      <ThreadPulse status={thread.status} />
+                      {thread.status === "error"
+                        ? "Failed"
+                        : thread.status === "awaiting"
+                          ? "Approval"
+                          : thread.status.charAt(0).toUpperCase() +
+                            thread.status.slice(1)}
+                    </span>
+                  )}
+                </span>
+              )}
+              {thread.workspaceBranch && (
+                <span className="thread-row-meta">
+                  <GitBranch size={12} />
+                  {thread.workspaceBranch}
+                </span>
+              )}
+              {thread.snoozedUntil && (
+                <span className="thread-row-meta">
+                  <Clock size={12} />
+                  Until{" "}
+                  {new Date(thread.snoozedUntil).toLocaleString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              )}
+              {query.trim() && (
+                <span className="search-snippet">
+                  {
+                    matches?.find((result) => result.threadId === thread.id)
+                      ?.snippet
+                  }
+                </span>
+              )}
+            </span>
           </button>
-          <button
-            className="thread-row-kill"
-            type="button"
-            title={`Delete ${thread.title}`}
-            onClick={() => removeThread(thread.id)}
-          >
-            <Trash2 size={13} />
-          </button>
+          <div className="thread-row-footer">
+            <time
+              dateTime={new Date(thread.updatedAt).toISOString()}
+              title={new Date(thread.updatedAt).toLocaleString()}
+            >
+              {new Date(thread.updatedAt).toLocaleDateString(undefined, {
+                month: "short",
+                day: "numeric",
+              })}{" "}
+              ·{" "}
+              {new Date(thread.updatedAt).toLocaleTimeString(undefined, {
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </time>
+            <div className="thread-row-actions">
+              <ConversationMenu
+                thread={thread}
+                onMove={(direction) => {
+                  const group = thread.archived
+                    ? archived
+                    : thread.snoozedUntil
+                      ? snoozed
+                      : thread.finished
+                        ? finished
+                        : current;
+                  const next =
+                    group[
+                      group.findIndex((entry) => entry.id === thread.id) + direction
+                    ];
+                  if (next) void reorder(thread.id, next.id);
+                }}
+              />
+              <button
+                className="thread-row-finish"
+                type="button"
+                title={
+                  thread.running || thread.status === "awaiting"
+                    ? "Stop this conversation before finishing"
+                    : `${thread.finished ? "Reopen" : "Finish"} ${thread.title}`
+                }
+                aria-label={`${thread.finished ? "Reopen" : "Finish"} ${thread.title}`}
+                disabled={
+                  !connected ||
+                  thread.running ||
+                  thread.status === "awaiting" ||
+                  Object.values(threadMap).some(
+                    (child) => child.parentThreadId === thread.id && child.running,
+                  )
+                }
+                onClick={() => {
+                  finishThread(thread.id, !thread.finished);
+                  if (!thread.finished) setFinishedOpen(true);
+                }}
+              >
+                {thread.finished ? <RotateCcw size={14} /> : <Check size={15} />}
+              </button>
+              <button
+                className="thread-row-kill"
+                type="button"
+                title={`Delete ${thread.title}`}
+                onClick={() => removeThread(thread.id)}
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+          </div>
         </div>
         {thread.pullRequest && (
           <a

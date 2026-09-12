@@ -21,11 +21,36 @@
 .canvas-inner {
   width: min(var(--reading), 100%);
   margin: 0 auto;
-  padding: 30px 0 8px;
+  padding: 0 0 8px;
 }
 
 .canvas-tail {
   height: 12px;
+}
+
+.timeline-rows {
+  position: relative;
+}
+
+.timeline-row {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+}
+
+.timeline-row .turn {
+  margin-bottom: 0;
+  padding-bottom: 26px;
+  animation: none;
+}
+
+.timeline-row .turn-agent[data-last="false"] {
+  padding-bottom: 0;
+}
+
+.turn[data-continuation="true"] .message-content {
+  grid-column: 2;
 }
 
 .canvas-hint {
@@ -50,7 +75,6 @@
 
 .user-card {
   color: var(--text);
-  white-space: pre-wrap;
   word-break: break-word;
 }
 
@@ -63,10 +87,6 @@
   color: var(--text-4);
   font-size: 10.5px;
   letter-spacing: 0.02em;
-}
-
-.turn-agent .message-content > * + * {
-  margin-top: 10px;
 }
 
 .reason {
@@ -553,27 +573,30 @@
   display: block;
   height: 2px;
   border-radius: var(--r-full);
-  background: linear-gradient(
-    90deg,
-    var(--accent-soft),
-    var(--accent),
-    var(--accent-soft)
-  );
-  background-size: 220% 100%;
-  animation: citropy-shift 1.5s var(--ease-in-out) infinite;
+  background: var(--text-2);
+  transform-origin: left center;
+  animation: citropy-weave 1.8s ease-in-out infinite;
+  animation-delay: -1.2s;
 }
 
-@keyframes citropy-shift {
-  0% {
-    background-position: 120% 0;
-    opacity: 0.45;
+.working-weave i:nth-child(2) {
+  width: 72%;
+  animation-delay: -0.6s;
+}
+
+.working-weave i:nth-child(3) {
+  width: 86%;
+  animation-delay: 0s;
+}
+
+@keyframes citropy-weave {
+  0%, 100% {
+    transform: scaleX(0.62);
+    opacity: 0.35;
   }
   50% {
+    transform: scaleX(1);
     opacity: 1;
-  }
-  100% {
-    background-position: -20% 0;
-    opacity: 0.45;
   }
 }
 
@@ -666,8 +689,8 @@
   color: var(--text-2);
 }
 .agent-avatar {
-  background: var(--panel);
-  border: 1px solid var(--line);
+  background: none;
+  border-radius: 0;
 }
 .message-content {
   min-width: 0;
@@ -685,23 +708,46 @@
 .turn-user .turn-heading {
   justify-content: flex-end;
 }
-.user-card {
+.message-bubble {
   padding: 10px 15px;
-  border-radius: 14px 5px 14px 14px;
+  border-radius: 14px;
+  max-width: 100%;
+}
+.user-card {
+  width: fit-content;
+  margin-left: auto;
   background: var(--raised);
 }
-.user-card .prose > :first-child {
-  margin-top: 0;
+.user-card .prose p {
+  white-space: pre-wrap;
 }
-.user-card .prose > :last-child {
-  margin-bottom: 0;
+.user-card > * + * {
+  margin-top: 10px;
+}
+.agent-card {
+  border: 1px solid var(--line);
+  background: var(--panel);
+}
+.agent-card:empty {
+  display: none;
+}
+.turn-agent:not([data-continuation])[data-last="true"] .agent-card {
+  width: fit-content;
+}
+.turn-agent[data-last="false"] .agent-card {
+  border-bottom: 0;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.turn-agent[data-continuation="true"] .agent-card {
+  padding-top: 0;
+  border-top: 0;
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 @container application (max-width: 720px) {
   .canvas {
     padding: 0 16px;
-  }
-  .canvas-inner {
-    padding-top: 24px;
   }
   .turn {
     gap: 8px;

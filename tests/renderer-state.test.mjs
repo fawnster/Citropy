@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-globalThis.localStorage = { getItem: () => null };
-const { useApp, applyEvents } = await import("../web/src/lib/store.ts");
+globalThis.localStorage = { getItem: () => null, setItem() {}, removeItem() {} };
+const { useApp, applyEvents, selectThread } = await import("../web/src/lib/store.ts");
 const { awaitResponse, resolveResponse, rejectResponses } = await import("../web/src/lib/requests.ts");
 const initial = useApp.getState();
 const message = (id, text = "Saved text") => ({ id, role: "assistant", ts: 1, parts: [{ id: `${id}-text`, kind: "text", text }] });
 
 test("streaming changes only its part and preserves unrelated subscriptions", () => {
   const before = applyEvents(initial, [
+    { t: "thread.messages", threadId: "first", messages: [] },
+    { t: "thread.messages", threadId: "second", messages: [] },
     { t: "message.add", threadId: "first", message: message("first") },
     { t: "message.add", threadId: "second", message: message("second") },
   ]);
@@ -27,7 +29,7 @@ test("streaming changes only its part and preserves unrelated subscriptions", ()
 });
 
 test("replacing or deleting conversations releases obsolete messages and parts", () => {
-  let state = applyEvents(initial, [{ t: "message.add", threadId: "keep", message: message("keep") }]);
+  let state = applyEvents(initial, [{ t: "thread.messages", threadId: "keep", messages: [message("keep")] }]);
   for (let index = 0; index < 500; index++) {
     state = applyEvents(state, [{ t: "thread.messages", threadId: "replace", messages: [message(`revision-${index}`)] }]);
     assert.equal(Object.keys(state.messages).length, 2);
@@ -47,6 +49,52 @@ test("replacing or deleting conversations releases obsolete messages and parts",
     state = applyEvents(state, [{ t: "part.add", threadId: "unloaded", messageId: "unloaded-message", part: { id: `orphan-${index}`, kind: "text", text: "Background update" } }]);
   assert.deepEqual(state.parts, {});
   assert.deepEqual(state.reveals, {});
+});
+
+test("history cache evicts old conversations and their presentation state without touching saved data", () => {
+  let state = { ...initial, activeThreadId: "active" };
+  const load = (id, text) => ({ t: "thread.messages", threadId: id, messages: [message(id, text)] });
+  state = applyEvents(state, [load("active"), load("old")]);
+  state = { ...state, disclosures: { "old-text": { group: true } } };
+  const previous = state;
+  for (let index = 0; index < 50; index++) {
+    state = applyEvents(state, [load(`chat-${index}`)]);
+    assert.ok(Object.keys(state.loaded).length <= 5);
+    assert.ok(state.loaded.active);
+  }
+  assert.equal(Object.keys(state.messages).length, 5);
+  assert.equal(Object.keys(state.parts).length, 5);
+  assert.equal(state.disclosures["old-text"], undefined);
+  assert.ok(previous.parts["old-text"]);
+  assert.equal(previous.disclosures["old-text"].group, true);
+  const cached = state;
+  state = applyEvents(state, [
+    { t: "message.add", threadId: "old", message: message("ignored") },
+    { t: "part.append", threadId: "old", messageId: "ignored", partId: "ignored-text", text: "more" },
+  ]);
+  assert.equal(state.parts, cached.parts);
+  assert.equal(state.messages, cached.messages);
+  state = applyEvents(state, [load("old", "The complete history comes from the server.")]);
+  assert.equal(state.parts["old-text"].text, "The complete history comes from the server.");
+  const content = "x".repeat(5 * 1024 * 1024);
+  state = applyEvents(state, [load("large-first", content), load("large-second", content)]);
+  assert.equal(state.loaded["large-first"], undefined);
+  assert.ok(state.loaded["large-second"]);
+  assert.ok(state.loaded.active);
+  assert.ok(Object.values(state.historyBytes).reduce((sum, bytes) => sum + bytes, 0) <= 16 * 1024 * 1024);
+});
+
+test("revisiting a cached conversation retains it ahead of older entries", () => {
+  const load = (id) => ({ t: "thread.messages", threadId: id, messages: [message(id)] });
+  useApp.setState(applyEvents(initial, ["a", "b", "c", "d", "e"].map(load)), true);
+  selectThread("a");
+  selectThread("e");
+  const next = applyEvents(useApp.getState(), [load("f")]);
+  assert.ok(next.loaded.a);
+  assert.ok(next.loaded.e);
+  assert.equal(next.loaded.b, undefined);
+  assert.ok(next.loaded.f);
+  useApp.setState(initial, true);
 });
 
 test("requests settle on replies, timeouts and disconnects without retaining timers", async (t) => {

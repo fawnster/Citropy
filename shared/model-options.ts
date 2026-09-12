@@ -6,12 +6,16 @@ export function selectedModel(
 ): ModelOption | undefined {
   if (!id || id === "default")
     return models.find((model) => model.isDefault) ?? models[0];
-  return models.find(
-    (model) =>
-      model.id === id ||
-      model.resolvedModel === id ||
-      model.aliases?.includes(id),
-  );
+  for (const candidate of [id, id.replace(/\[1m\]$/i, "")]) {
+    const model = models.find(
+      (model) =>
+        model.id === candidate ||
+        model.resolvedModel === candidate ||
+        model.aliases?.includes(candidate),
+    );
+    if (model) return model;
+  }
+  return undefined;
 }
 
 export function effectiveEffort(

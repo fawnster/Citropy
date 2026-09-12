@@ -33,9 +33,9 @@ export function Working({ status, tool }: Props) {
       transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
     >
       <span className="working-weave" aria-hidden="true">
-        <i style={{ width: "100%", animationDelay: "0ms" }} />
-        <i style={{ width: "72%", animationDelay: "140ms" }} />
-        <i style={{ width: "86%", animationDelay: "280ms" }} />
+        <i />
+        <i />
+        <i />
       </span>
       <span className="working-text">{text}</span>
       <span className="working-time mono">{duration(now - start)}</span>

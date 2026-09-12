@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import type { WebSocket } from "ws";
 import { dev, origin } from "./config.ts";
 
-const token = randomBytes(32).toString("hex");
+const token = process.env.CITROPY_DESKTOP_TOKEN || randomBytes(32).toString("hex");
 const require = createRequire(import.meta.url);
 const entry = fileURLToPath(new URL("../desktop/main.mjs", import.meta.url));
 export const desktopEvents = new EventEmitter();

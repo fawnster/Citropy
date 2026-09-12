@@ -15,6 +15,7 @@
   );
   position: relative;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: var(--topbar) minmax(0, 1fr);
   height: 100%;
   isolation: isolate;

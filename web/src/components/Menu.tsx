@@ -52,37 +52,55 @@ export function Menu({
   const [open, setOpen] = useState(false);
   const wrap = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
-  const [left, setLeft] = useState(0);
   const id = useId();
 
   useLayoutEffect(() => {
-    if (!open) return;
+    const element = menu.current;
+    if (!open || !element) return;
+    element.showPopover();
     const position = () => {
       const anchor = wrap.current?.getBoundingClientRect();
       if (!anchor) return;
       const scale = uiScale / 100;
       const anchorLeft = anchor.left / scale;
       const menuWidth = Math.min(width, viewportWidth() - 24);
-      const preferred = align === "end" ? anchor.width / scale - menuWidth : 0;
-      setLeft(
-        Math.max(
-          12 - anchorLeft,
-          Math.min(preferred, viewportWidth() - 12 - anchorLeft - menuWidth),
-        ),
-      );
+      const preferred = align === "end" ? anchor.right / scale - menuWidth : anchorLeft;
+      element.style.width = `${menuWidth}px`;
+      element.style.maxHeight = "";
+      const height = element.offsetHeight;
+      const above = Math.max(0, anchor.top / scale - 18);
+      const below = Math.max(0, (innerHeight - anchor.bottom) / scale - 18);
+      const upwards = height > below && above > below;
+      const available = upwards ? above : below;
+      element.style.maxHeight = `${available}px`;
+      element.style.left = `${Math.max(12, Math.min(preferred, viewportWidth() - menuWidth - 12))}px`;
+      element.style.top = `${upwards ? anchor.top / scale - Math.min(height, available) - 6 : anchor.bottom / scale + 6}px`;
     };
     position();
-    if (!searchable) {
+    if (searchable) {
+      element.querySelector<HTMLInputElement>(".menu-search")?.focus({ preventScroll: true });
+    } else {
       const selected = menu.current?.querySelector<HTMLButtonElement>(
         '[data-selected="true"]',
       );
       (
         selected ??
         menu.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')
-      )?.focus();
+      )?.focus({ preventScroll: true });
     }
+    const resize = new ResizeObserver(position);
+    resize.observe(element);
+    if (wrap.current) resize.observe(wrap.current);
+    const scroll = (event: Event) => {
+      if (!element.contains(event.target as Node)) position();
+    };
     window.addEventListener("resize", position);
-    return () => window.removeEventListener("resize", position);
+    window.addEventListener("scroll", scroll, true);
+    return () => {
+      resize.disconnect();
+      window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", scroll, true);
+    };
   }, [open, width, align, searchable, uiScale]);
 
   useEffect(() => {
@@ -121,12 +139,11 @@ export function Menu({
           <motion.div
             ref={menu}
             className="menu"
+            popover="manual"
             data-align={align}
             style={{
               width,
               maxWidth: "calc(var(--viewport-width) - 24px)",
-              left,
-              right: "auto",
             }}
             role="menu"
             aria-labelledby={id}
@@ -173,7 +190,6 @@ export function Menu({
                 placeholder={searchPlaceholder}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                autoFocus
               />
             )}
             <div className="menu-list scroll">

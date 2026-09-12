@@ -1,7 +1,8 @@
 import { ComposerInput } from "./ComposerInput.tsx";
 import { Attachments } from "./Attachments.tsx";
+import { QueueList } from "./QueueList.tsx";
 import { api, reportError } from "../lib/api.ts";
-import type { Attachment } from "../../../shared/protocol.ts";
+import type { Attachment, QueuedMessage } from "../../../shared/protocol.ts";
 import type { ComposerDraft } from "../../../shared/features.ts";
 import type { PanelTab } from "../../../shared/workbench.ts";
 import { useEffect, useRef, useState } from "react";
@@ -173,13 +174,18 @@ export function Composer({
         method: "POST",
       }).catch(reportError);
   };
+  const restore = (item: QueuedMessage) => {
+    setValue((previous) =>
+      previous.trim() ? `${item.text}\n\n${previous}` : item.text,
+    );
+    setAttachments((previous) => [...(item.attachments ?? []), ...previous]);
+  };
   const effortButton = useRef<HTMLButtonElement>(null);
   const permissionButton = useRef<HTMLButtonElement>(null);
 
   const running = thread?.running ?? false;
   const provider = providers.find((entry) => entry.id === thread?.provider);
   const canSend =
-    connected &&
     !sending &&
     !thread?.compacting &&
     !uploading &&
@@ -361,6 +367,7 @@ export function Composer({
           {provider.modelsError}
         </div>
       )}
+      <QueueList thread={thread} provider={provider} onEdit={restore} />
       <div
         className="composer-shell"
         data-dragging={dragging}
@@ -599,15 +606,27 @@ export function Composer({
             </button>
 
             {running ? (
-              <button
-                className="btn"
-                type="button"
-                data-variant="danger"
-                onClick={stopThread}
-              >
-                <Square size={11} fill="currentColor" />
-                Stop
-              </button>
+              <>
+                <button
+                  className="btn"
+                  type="button"
+                  data-variant="primary"
+                  onClick={submit}
+                  disabled={(!value.trim() && !attachments.length) || !canSend}
+                >
+                  <ArrowUp size={13} />
+                  Queue
+                </button>
+                <button
+                  className="btn"
+                  type="button"
+                  data-variant="danger"
+                  onClick={stopThread}
+                >
+                  <Square size={11} fill="currentColor" />
+                  Stop
+                </button>
+              </>
             ) : (
               <button
                 className="btn"

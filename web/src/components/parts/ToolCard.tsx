@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
+import { useDisclosure } from "../../lib/use-disclosure.ts";
 import { Collapsible } from "../Collapsible.tsx";
 import { AlertTriangle, Ban, Check, ChevronRight, ExternalLink, shapeIcon } from "../icons.ts";
 import { DiffView } from "../DiffView.tsx";
@@ -32,7 +33,7 @@ function label(name: string, status: ToolPart["status"]): string {
 }
 
 export function ToolCard({ part }: { part: ToolPart }) {
-  const [open, setOpen] = useState(Boolean(part.patch));
+  const [open, setOpen] = useDisclosure(part.id, "tool", Boolean(part.patch));
   const Icon = shapeIcon[part.shape];
   const elapsed = part.endedAt ? part.endedAt - part.startedAt : null;
   const output = part.output ?? "";
@@ -80,8 +81,8 @@ export function ToolCard({ part }: { part: ToolPart }) {
               <ExternalLink size={11} />
             </a>
           )}
-          {part.patch && <DiffView patch={part.patch} showHeader={false} />}
-          {!part.patch && output && <Output text={output} shape={part.shape} />}
+          {part.patch && <DiffView patch={part.patch} showHeader={false} partId={part.id} />}
+          {!part.patch && output && <Output text={output} shape={part.shape} partId={part.id} />}
           {!part.patch && !output && part.status === "running" && (
             <div className="tool-waiting">
               <span className="tool-waiting-bar" />
@@ -104,8 +105,8 @@ function StatusMark({ status }: { status: ToolPart["status"] }) {
   return <AlertTriangle size={12} className="tool-bad" aria-label="failed" />;
 }
 
-function Output({ text, shape }: { text: string; shape: ToolPart["shape"] }) {
-  const [expanded, setExpanded] = useState(false);
+function Output({ text, shape, partId }: { text: string; shape: ToolPart["shape"]; partId: string }) {
+  const [expanded, setExpanded] = useDisclosure(partId, "output");
   const lines = useMemo(() => text.split("\n"), [text]);
   const cap = shape === "command" ? 18 : 14;
   const shown = expanded ? lines : lines.slice(0, cap);

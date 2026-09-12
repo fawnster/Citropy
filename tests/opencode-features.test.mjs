@@ -106,6 +106,10 @@ test(
     pending.end("{}");
     pending = undefined;
     await until(() => events.some((event) => event.type === "turn.end"));
+    await session.steer("Also check the tests", [], [{ name: "review", path: "/tmp/SKILL.md" }]);
+    assert.equal(requests.at(-1).path, "/session/fixture/prompt_async");
+    assert.match(requests.at(-1).body.parts[0].text, /^Use the review skill[\s\S]*Also check the tests$/);
+    assert.equal(requests.at(-1).body.model.modelID, "model");
     const beforeCommand = events.filter(event => event.type === "turn.end").length;
     session.send("/test core", [{ path: "/tmp/notes.txt", label: "notes.txt", mime: "text/plain" }], [{ name: "review", path: "/tmp/SKILL.md" }]);
     await until(() => pending);

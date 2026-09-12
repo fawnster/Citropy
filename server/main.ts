@@ -1,3 +1,5 @@
+import { assertApplicationReady, lockForAppUpdate, unlockAppUpdate } from "./update-lock.ts";
+import { providerUpdating } from "./providers/maintenance.ts";
 import { handleFeatures } from "./features.ts";
 import { computerState, stopComputer } from "./computer.ts";
 import { workspacePath, chooseThreadWorkspace } from "./workspaces.ts";
@@ -29,12 +31,14 @@ import {
 import { panelList, openPanel, closePanel } from "./panels.ts";
 import { describeProviders } from "./providers/index.ts";
 import { waitForStoppedProcesses } from "./providers/process.ts";
-import { disposeAll, disposeRuntime, runtimeFor } from "./runtime.ts";
+import { disposeAll, disposeRuntime, runtimeFor, providerBusy } from "./runtime.ts";
 import { serveStatic } from "./static.ts";
 import { store } from "./store.ts";
 import { modelSettings, selectedModel } from "../shared/model-options.ts";
 import * as terminals from "./terminals.ts";
 import type { ClientEvent, ProviderInfo, ServerEvent, Snapshot } from "../shared/protocol.ts";
+
+if (process.versions.electron) delete process.env.ELECTRON_RUN_AS_NODE;
 
 const here = dirname(fileURLToPath(import.meta.url));
 const distDir = join(here, "..", "dist");
@@ -44,6 +48,8 @@ let refreshingProviders: Promise<void> | null = null;
 let lastProviderRefresh = 0;
 let development: Promise<void> | null = null;
 let shuttingDown = false;
+let activeCommands = 0;
+const activeRequests = new Set<IncomingMessage>();
 
 function startDevelopment(): Promise<void> {
   if (development) return development;
@@ -93,9 +99,9 @@ function startDevelopment(): Promise<void> {
   return development;
 }
 
-function refreshProviders(): Promise<void> {
-  if (refreshingProviders) return refreshingProviders;
-  if (Date.now() - lastProviderRefresh < 30_000) return Promise.resolve();
+function refreshProviders(force = false): Promise<void> {
+  if (refreshingProviders) return force ? refreshingProviders.then(() => refreshProviders(true)) : refreshingProviders;
+  if (!force && Date.now() - lastProviderRefresh < 30_000) return Promise.resolve();
   refreshingProviders = describeProviders().then((info) => {
     providerInfo = info.map((provider) => ({ ...provider, enabled: !store.disabledProviders.has(provider.id) }));
     lastProviderRefresh = Date.now();
@@ -521,7 +527,34 @@ async function handle(event: ClientEvent, send: (event: ServerEvent) => void): P
 
 const server = createServer(async (req, res) => {
   const url = req.url ?? "/";
-  if (await handleFeatures(req, res, providerInfo)) return;
+  if (["/api/updates/prepare", "/api/updates/cancel"].includes(url) && req.method === "POST") {
+    if (!authorizeDesktop(String(req.headers["x-citropy-desktop-token"] || ""))) { res.writeHead(403).end(); return; }
+    if (url.endsWith("/cancel")) { unlockAppUpdate(); res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ready: false })); return; }
+    try {
+      const busy = (["claude", "codex", "opencode"] as const).some(id => providerBusy(id) || providerUpdating(id));
+      if (busy || activeCommands || activeRequests.size || pendingRequests().length)
+        throw new Error("Finish active conversations, updates, and Git operations before applying the update.");
+      if (terminals.hasActiveTerminals()) throw new Error("Close your terminals before restarting to apply the update.");
+      if (computerState().status !== "idle") throw new Error("End computer use before restarting to apply the update.");
+      store.flush();
+      lockForAppUpdate();
+      res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ready: true }));
+    } catch (error) {
+      res.writeHead(409, { "content-type": "application/json" }).end(JSON.stringify({ error: (error as Error).message }));
+    }
+    return;
+  }
+  if (!["GET", "HEAD", "OPTIONS"].includes(req.method || "GET")) {
+    try { assertApplicationReady(); } catch (error) {
+      res.writeHead(503, { "content-type": "application/json" }).end(JSON.stringify({ error: (error as Error).message }));
+      return;
+    }
+    activeRequests.add(req);
+    const done = () => { activeRequests.delete(req); res.off("finish", done); res.off("close", done); };
+    res.once("finish", done);
+    res.once("close", done);
+  }
+  if (await handleFeatures(req, res, providerInfo, () => refreshProviders(true))) return;
 
   if (url.startsWith("/mcp/")) {
     const threadId = url.slice(5).split("?")[0] ?? "";
@@ -615,7 +648,9 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
       return;
     }
     try {
-      await handle(event, send);
+      assertApplicationReady();
+      activeCommands++;
+      try { await handle(event, send); } finally { activeCommands--; }
     } catch (error) {
       if ("requestId" in event && event.requestId)
         send({ t: "request.error", requestId: event.requestId, error: (error as Error).message });
@@ -642,6 +677,7 @@ server.listen(port, host, async () => {
       process.stderr.write(`${error.message}\n`),
     );
   await refreshProviders();
+  process.send?.({ t: "ready" });
   const available = providerInfo.filter((entry) => entry.available).map((entry) => entry.label);
   process.stdout.write(`\n  Citropy listening on ${origin}\n`);
   process.stdout.write(`  providers: ${available.join(", ") || "none detected"}\n`);

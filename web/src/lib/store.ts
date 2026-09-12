@@ -17,6 +17,7 @@ import type {
   ProviderInfo,
   ServerEvent,
   ThreadMeta,
+  QueuedMessage,
   AppNotification,
   NotificationPreferences,
   NotificationTarget,
@@ -63,6 +64,7 @@ export interface AppState {
   } | null;
   searchMessageId: string | null;
   connected: boolean;
+  offline: Record<string, QueuedMessage[]>;
   choosingWorkspace: boolean;
   home: string;
   projects: Project[];
@@ -74,6 +76,8 @@ export interface AppState {
   reveals: Record<string, true>;
   order: Record<string, string[]>;
   loaded: Record<string, boolean>;
+  historyBytes: Record<string, number>;
+  disclosures: Record<string, Record<string, boolean>>;
   git: Record<string, GitStatus>;
   permissions: PermissionRequest[];
   toasts: Toast[];
@@ -128,6 +132,17 @@ function readPanelWidths(): Partial<Record<PanelId, number>> {
   }
 }
 
+function readOffline(): Record<string, QueuedMessage[]> {
+  try {
+    const stored = JSON.parse(readPref("citropy.offline", "{}"));
+    return stored && typeof stored === "object" && !Array.isArray(stored)
+      ? stored
+      : {};
+  } catch {
+    return {};
+  }
+}
+
 export const useApp = create<AppState>(() => ({
   newThreadProvider: null,
   notifications: [],
@@ -136,6 +151,7 @@ export const useApp = create<AppState>(() => ({
   searchResult: null,
   searchMessageId: null,
   connected: false,
+  offline: readOffline(),
   choosingWorkspace: false,
   home: "",
   projects: [],
@@ -147,6 +163,8 @@ export const useApp = create<AppState>(() => ({
   reveals: {},
   order: {},
   loaded: {},
+  historyBytes: {},
+  disclosures: {},
   git: {},
   permissions: [],
   toasts: [],
@@ -218,6 +236,18 @@ function normalize(
   }
   state.order[threadId] = ids;
   state.loaded[threadId] = true;
+  state.historyBytes[threadId] = contentBytes(messages);
+}
+
+function contentBytes(value: unknown): number {
+  if (typeof value === "string") return value.length * 2;
+  if (!value || typeof value !== "object") return 8;
+  if (Array.isArray(value))
+    return value.reduce((size, item) => size + contentBytes(item), 24);
+  return Object.entries(value).reduce(
+    (size, [key, item]) => size + key.length * 2 + contentBytes(item),
+    32,
+  );
 }
 
 function removeMessages(state: AppState, threadId: string): void {
@@ -225,22 +255,52 @@ function removeMessages(state: AppState, threadId: string): void {
     for (const partId of state.messages[id]?.partIds ?? []) {
       delete state.parts[partId];
       delete state.reveals[partId];
+      delete state.disclosures[partId];
     }
     delete state.messages[id];
   }
   delete state.order[threadId];
   delete state.loaded[threadId];
+  delete state.historyBytes[threadId];
 }
 
-type HistoryCollection = "messages" | "parts" | "order" | "loaded" | "reveals";
+type HistoryCollection = "messages" | "parts" | "order" | "loaded" | "reveals" | "historyBytes" | "disclosures";
+const allHistory: HistoryCollection[] = [
+  "messages", "parts", "order", "loaded", "reveals", "historyBytes", "disclosures",
+];
 const historyChanges: Partial<Record<ServerEvent["t"], HistoryCollection[]>> = {
-  "thread.remove": ["messages", "parts", "order", "loaded", "reveals"],
-  "thread.messages": ["messages", "parts", "order", "loaded", "reveals"],
-  "message.add": ["messages", "parts", "order", "reveals"],
-  "part.add": ["messages", "parts", "reveals"],
-  "part.append": ["parts"],
-  "part.patch": ["parts"],
+  "thread.remove": allHistory,
+  "thread.messages": allHistory,
+  "message.add": ["messages", "parts", "order", "reveals", "historyBytes"],
+  "part.add": ["messages", "parts", "reveals", "historyBytes"],
+  "part.append": ["parts", "historyBytes"],
+  "part.patch": ["parts", "historyBytes"],
 };
+
+function trimHistories(state: AppState): void {
+  const ids = Object.keys(state.loaded);
+  let bytes = Object.values(state.historyBytes).reduce((sum, size) => sum + size, 0);
+  let count = ids.length;
+  const evict: string[] = [];
+  for (const id of ids) {
+    if (count <= 5 && bytes <= 16 * 1024 * 1024) break;
+    if (id === state.activeThreadId) continue;
+    evict.push(id);
+    bytes -= state.historyBytes[id] ?? 0;
+    count -= 1;
+  }
+  if (!evict.length) return;
+  for (const key of allHistory) Object.assign(state, { [key]: { ...state[key] } });
+  for (const id of evict) removeMessages(state, id);
+}
+
+function unloadedDelta(state: AppState, event: ServerEvent): boolean {
+  return (
+    (event.t === "message.add" || event.t === "part.add" ||
+      event.t === "part.append" || event.t === "part.patch") &&
+    !state.loaded[event.threadId]
+  );
+}
 
 export function applyEvents(
   previous: AppState,
@@ -249,6 +309,7 @@ export function applyEvents(
   const state = { ...previous };
   const copied = new Set<HistoryCollection>();
   for (const event of events) {
+    if (unloadedDelta(state, event)) continue;
     for (const key of historyChanges[event.t] ?? []) {
       if (copied.has(key)) continue;
       Object.assign(state, { [key]: { ...state[key] } });
@@ -256,6 +317,7 @@ export function applyEvents(
     }
     applyEvent(state, event);
   }
+  trimHistories(state);
   return state;
 }
 
@@ -266,6 +328,7 @@ function sortThreads(state: AppState): void {
 }
 
 export function applyEvent(state: AppState, event: ServerEvent): void {
+  if (unloadedDelta(state, event)) return;
   if (event.t === "computer.state") {
     state.computer = event.computer;
     return;
@@ -417,6 +480,8 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
       state.reveals = {};
       state.order = {};
       state.loaded = {};
+      state.historyBytes = {};
+      state.disclosures = {};
       state.activePanels = Object.fromEntries(
         Object.entries(state.activePanels).filter(([, id]) =>
           state.panels.some((panel) => panel.id === id),
@@ -499,6 +564,7 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
       return;
     }
     case "message.add": {
+      state.historyBytes[event.threadId] = (state.historyBytes[event.threadId] ?? 0) + contentBytes(event.message);
       const partIds: string[] = [];
       for (const part of event.message.parts) {
         state.parts[part.id] = part;
@@ -523,6 +589,7 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
     case "part.add": {
       const shell = state.messages[event.messageId];
       if (!shell) return;
+      state.historyBytes[event.threadId] = (state.historyBytes[event.threadId] ?? 0) + contentBytes(event.part);
       state.parts[event.part.id] = event.part;
       if (shell.role === "assistant" && event.part.kind === "text")
         state.reveals[event.part.id] = true;
@@ -535,13 +602,16 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
     case "part.append": {
       const part = state.parts[event.partId];
       if (!part || (part.kind !== "text" && part.kind !== "reasoning")) return;
+      state.historyBytes[event.threadId] = (state.historyBytes[event.threadId] ?? 0) + event.text.length * 2;
       state.parts[event.partId] = { ...part, text: part.text + event.text };
       return;
     }
     case "part.patch": {
       const part = state.parts[event.partId];
       if (!part) return;
-      state.parts[event.partId] = { ...part, ...event.patch } as Part;
+      const updated = { ...part, ...event.patch } as Part;
+      state.historyBytes[event.threadId] = (state.historyBytes[event.threadId] ?? 0) + contentBytes(updated) - contentBytes(part);
+      state.parts[event.partId] = updated;
       return;
     }
     case "permission.request": {
@@ -602,14 +672,25 @@ export function selectThread(id: string | null): void {
     const git = { ...state.git };
     const projectId = id ? state.threads[id]?.projectId : state.activeProjectId;
     if (projectId) delete git[projectId];
-    return { activeThreadId: id, git };
+    const next = { ...state, activeThreadId: id, git };
+    if (id && state.loaded[id]) {
+      next.loaded = { ...state.loaded };
+      delete next.loaded[id];
+      next.loaded[id] = true;
+    }
+    trimHistories(next);
+    return next;
   });
   if (id) localStorage.setItem("citropy.thread", id);
   else localStorage.removeItem("citropy.thread");
 }
 
 export function selectProject(id: string): void {
-  useApp.setState({ activeProjectId: id, activeThreadId: null });
+  useApp.setState((state) => {
+    const next = { ...state, activeProjectId: id, activeThreadId: null };
+    trimHistories(next);
+    return next;
+  });
   localStorage.removeItem("citropy.thread");
   localStorage.setItem("citropy.project", id);
 }

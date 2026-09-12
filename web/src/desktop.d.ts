@@ -14,6 +14,9 @@ declare global {
   interface Window {
     loomDesktop?: Window["citropyDesktop"];
     citropyDesktop?: {
+      updateState(): Promise<import("../../shared/app-update.ts").AppUpdateState>;
+      updateCommand(action: "check" | "download" | "install"): Promise<import("../../shared/app-update.ts").AppUpdateState>;
+      onUpdateState(callback: (state: import("../../shared/app-update.ts").AppUpdateState) => void): () => void;
       windowState(): Promise<DesktopWindowState>;
       windowCommand(
         command: "minimize" | "maximize" | "close" | "reload" | "restart",

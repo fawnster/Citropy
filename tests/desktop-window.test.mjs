@@ -55,6 +55,10 @@ test(
     });
     const page = await desktop.firstWindow();
     await page.waitForLoadState();
+    const update = await page.evaluate(() => window.citropyDesktop.updateState());
+    assert.equal(update.status, "unsupported");
+    assert.match(update.message, /Development build/);
+    assert.equal((await page.evaluate(() => window.citropyDesktop.updateCommand("install"))).status, "unsupported");
     await desktop.evaluate(async ({ BrowserWindow }) => {
       const window = BrowserWindow.getAllWindows()[0];
       if (!window.isVisible())

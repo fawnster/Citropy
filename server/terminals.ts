@@ -91,3 +91,7 @@ export function closeAll(): void {
   outputs.clear();
   directories.clear();
 }
+
+export function hasActiveTerminals(): boolean {
+  return sessions.size > 0;
+}

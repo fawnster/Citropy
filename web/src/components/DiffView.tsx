@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from "react";
 import { highlightTokens, escapeHtml } from "../lib/highlight.ts";
 import { langFor } from "../lib/format.ts";
 import { useApp } from "../lib/store.ts";
+import { useDisclosure } from "../lib/use-disclosure.ts";
 import type { FilePatch, PatchLine } from "../../../shared/protocol.ts";
 
 interface Props {
   patch: FilePatch;
   limit?: number;
   showHeader?: boolean;
+  partId?: string;
 }
 
 interface Row extends PatchLine {
@@ -42,22 +44,23 @@ function rows(patch: FilePatch): Row[] {
   return out;
 }
 
-export function DiffView({ patch, limit = 26, showHeader = true }: Props) {
+export function DiffView({ patch, limit = 26, showHeader = true, partId }: Props) {
   const theme = useApp((state) => state.theme);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useDisclosure(partId, "diff");
   const [oldLines, setOldLines] = useState<string[] | null>(null);
   const [newLines, setNewLines] = useState<string[] | null>(null);
 
   const all = useMemo(() => rows(patch), [patch]);
+  const visible = useMemo(() => expanded ? all : all.slice(0, limit), [all, expanded, limit]);
   const lang = langFor(patch.path);
 
   useEffect(() => {
     let cancelled = false;
-    const oldText = all
+    const oldText = visible
       .filter((row) => row.side !== "new" && row.index >= 0)
       .map((row) => row.text)
       .join("\n");
-    const newText = all
+    const newText = visible
       .filter((row) => row.side !== "old" && row.index >= 0)
       .map((row) => row.text)
       .join("\n");
@@ -72,9 +75,8 @@ export function DiffView({ patch, limit = 26, showHeader = true }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [all, lang, theme]);
+  }, [visible, lang, theme]);
 
-  const visible = expanded ? all : all.slice(0, limit);
   const hidden = all.length - visible.length;
 
   const render = (row: Row): string => {

@@ -6,6 +6,7 @@ import type {
 import { selectThread, selectPanel, useApp, confirmAction } from "./store.ts";
 import { awaitResponse } from "./requests.ts";
 import { requestId, send } from "./socket.ts";
+import { flushHeld, holdMessage } from "./offline.ts";
 import type {
   FileEntry,
   FilePatch,
@@ -98,11 +99,24 @@ export async function sendMessage(
   const threadId = useApp.getState().activeThreadId;
   if (!threadId || (!text.trim() && !attachments.length)) return;
   useApp.setState((state) => ({ followRequest: state.followRequest + 1 }));
-  const id = requestId();
-  const accepted = awaitResponse(id);
-  send({ t: "thread.send", threadId, text, attachments, requestId: id });
-  await accepted;
+  const state = useApp.getState();
+  if (!state.connected || state.offline[threadId]?.length) {
+    holdMessage(threadId, text, attachments);
+    void flushHeld();
+  } else {
+    const id = requestId();
+    const accepted = awaitResponse(id);
+    send({ t: "thread.send", threadId, text, attachments, requestId: id });
+    await accepted;
+  }
   localStorage.removeItem(`citropy.draft.${threadId}`);
+}
+
+export async function editQueued(threadId: string, id: string): Promise<void> {
+  const request = requestId();
+  const accepted = awaitResponse(request);
+  send({ t: "queue.edit", threadId, id, requestId: request });
+  await accepted;
 }
 
 export function stopThread(): void {

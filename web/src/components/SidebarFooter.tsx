@@ -1,13 +1,8 @@
 import { useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import {
-  GitBranch,
-  Github,
-  Settings,
-  BarChart3,
-  ChevronDown,
-  ChevronUp,
-} from "lucide-react";
+import { GitBranch, Github, Settings, BarChart3 } from "lucide-react";
+
+import { AppUpdateControl } from "./AppUpdateControl.tsx";
 
 export function SidebarFooter({
   onGit,
@@ -31,10 +26,10 @@ export function SidebarFooter({
     localStorage.setItem("citropy.compactNavigation", value ? "1" : "0");
   };
   const actions = [
-    { name: "Source control", icon: GitBranch, run: onGit },
-    { name: "GitHub", icon: Github, run: onGitHub },
-    { name: "Settings", icon: Settings, run: onSettings },
-    { name: "Usage", icon: BarChart3, run: onUsage },
+    { name: "Source control", icon: GitBranch, run: onGit, tone: "git" },
+    { name: "GitHub", icon: Github, run: onGitHub, tone: "github" },
+    { name: "Settings", icon: Settings, run: onSettings, tone: "settings" },
+    { name: "Usage", icon: BarChart3, run: onUsage, tone: "usage" },
   ];
   return (
     <div className="rail-footer navigation-footer" data-compact={compact}>
@@ -54,7 +49,7 @@ export function SidebarFooter({
           const distance = event.clientY - drag.current;
           if (Math.abs(distance) >= 20) {
             moved.current = true;
-            if (compact !== (distance > 0)) change(distance > 0);
+            if (compact !== distance > 0) change(distance > 0);
           }
         }}
         onPointerUp={() => {
@@ -68,17 +63,14 @@ export function SidebarFooter({
           if (!moved.current) change(!compact);
           moved.current = false;
         }}
-      >
-        <span />
-        {compact ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-        <span />
-      </button>
+      />
       <nav className="navigation-actions" aria-label="Workspace navigation">
-        {actions.map(({ name, icon: Icon, run }) => (
+        {actions.map(({ name, icon: Icon, run, tone }) => (
           <motion.button
             layout="position"
             type="button"
             className="rail-action"
+            data-tone={tone}
             key={name}
             onClick={run}
             aria-label={name}
@@ -92,6 +84,8 @@ export function SidebarFooter({
             <span>{name}</span>
           </motion.button>
         ))}
+        <span className="navigation-update-divider" aria-hidden="true" />
+        <AppUpdateControl />
       </nav>
     </div>
   );

@@ -192,6 +192,12 @@ class PortalTests(unittest.TestCase):
             loader.close()
             pixel = loader.get_pixbuf().get_pixels()[:3]
             self.assertTrue(pixel[0] > 240 and pixel[1] < 15 and pixel[2] < 15)
+            cropped = portal.screenshot("42", 2560, {"x": 0.25, "y": 0.25, "width": 0.5, "height": 0.5})
+            self.assertEqual((cropped["width"], cropped["height"]), (400, 300))
+            self.assertEqual(cropped["crop"], {"x": 0.25, "y": 0.25, "width": 0.5, "height": 0.5})
+            rounded = portal.screenshot("42", 2560, {"x": 0.2501, "y": 0.2501, "width": 0.5, "height": 0.5})
+            self.assertEqual((rounded["width"], rounded["height"]), (401, 301))
+            self.assertEqual(rounded["crop"], {"x": 0.25, "y": 0.25, "width": 401 / 800, "height": 301 / 600})
             computer.act(portal, {"action": "click", "displayId": "42", "x": 200, "y": 150}, displays)
             self.assertIn(("move", 42, 200.0, 150.0), self.desktop.calls)
             self.assertEqual([call for call in self.desktop.calls if call[0] == "button"][-2:], [("button", 272, 1), ("button", 272, 0)])
