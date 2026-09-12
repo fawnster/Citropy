@@ -5,6 +5,7 @@ import { join, basename, resolve } from "node:path";
 import { bus } from "./bus.ts";
 import { uid } from "./ids.ts";
 import { emptyUsage } from "../shared/protocol.ts";
+import { defaultAssistance, gitActionBusy, type AssistanceSettings } from "../shared/assistance.ts";
 import type {
   ProviderId,
   Message,
@@ -54,6 +55,7 @@ export class Store {
   threads = new Map<string, Thread>();
   disabledProviders = new Set<ProviderId>();
   computerEnabled = false;
+  assistance: AssistanceSettings = { ...defaultAssistance };
   notifications: AppNotification[] = [];
   notificationPreferences: NotificationPreferences = {
     toasts: true,
@@ -73,6 +75,12 @@ export class Store {
       try {
         const settings = JSON.parse(readFileSync(settingsFile, "utf8"));
         this.computerEnabled = settings.computerEnabled === true;
+        if (typeof settings.assistance?.automaticTitles === "boolean") this.assistance.automaticTitles = settings.assistance.automaticTitles;
+        for (const key of ["titleModel", "commitModel"] as const) {
+          const model = settings.assistance?.[key];
+          if (model && ["claude", "codex", "opencode"].includes(model.provider) && typeof model.model === "string" && model.model.trim())
+            this.assistance[key] = { provider: model.provider, model: model.model };
+        }
         for (const key of ["toasts", "desktop", "sound"] as const) {
           if (typeof settings.notifications?.[key] === "boolean")
             this.notificationPreferences[key] = settings.notifications[key];
@@ -119,6 +127,7 @@ export class Store {
         thread.running = false;
         thread.compacting = false;
         thread.activeTool = undefined;
+        if (gitActionBusy(thread.gitAction)) thread.gitAction = { ...thread.gitAction!, status: "error", message: "Citropy restarted during the Git action. Check source control before retrying." };
         for (const message of thread.messages) for (const part of message.parts)
           if ((part.kind === "text" || part.kind === "reasoning") && part.complete === false)
             part.complete = true;
@@ -165,6 +174,7 @@ export class Store {
       disabledProviders: [...disabled],
       notifications: this.notificationPreferences,
       computerEnabled: this.computerEnabled,
+      assistance: this.assistance,
     });
     this.disabledProviders = disabled;
   }
@@ -174,6 +184,7 @@ export class Store {
       disabledProviders: [...this.disabledProviders],
       notifications: this.notificationPreferences,
       computerEnabled: enabled,
+      assistance: this.assistance,
     });
     this.computerEnabled = enabled;
   }
@@ -224,9 +235,21 @@ export class Store {
       disabledProviders: [...this.disabledProviders],
       notifications: preferences,
       computerEnabled: this.computerEnabled,
+      assistance: this.assistance,
     });
     this.notificationPreferences = preferences;
     bus.emit({ t: "notifications.preferences", preferences });
+  }
+
+  configureAssistance(settings: AssistanceSettings): void {
+    save(settingsFile, {
+      disabledProviders: [...this.disabledProviders],
+      notifications: this.notificationPreferences,
+      computerEnabled: this.computerEnabled,
+      assistance: settings,
+    });
+    this.assistance = settings;
+    bus.emit({ t: "assistance.settings", settings });
   }
 
   openProject(path: string): Project {

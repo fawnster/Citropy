@@ -1,4 +1,6 @@
 import { ComposerInput } from "./ComposerInput.tsx";
+import { GitActions } from "./GitActions.tsx";
+import { gitActionBusy } from "../../../shared/assistance.ts";
 import { Attachments } from "./Attachments.tsx";
 import { QueueList } from "./QueueList.tsx";
 import { api, reportError } from "../lib/api.ts";
@@ -190,6 +192,7 @@ export function Composer({
   const canSend =
     !sending &&
     !thread?.compacting &&
+    !gitActionBusy(thread?.gitAction) &&
     !uploading &&
     Boolean(provider?.enabled && provider.available);
   const mode =
@@ -585,6 +588,7 @@ export function Composer({
           />
 
           <div className="composer-actions">
+            <GitActions key={thread.id} thread={thread} />
             <ContextUsage onCompact={compact} />
             <button
               className="icon-btn"

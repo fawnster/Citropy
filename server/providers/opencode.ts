@@ -1,4 +1,4 @@
-import { stopProcess } from "./process.ts";
+import { stopProcess, waitForStoppedProcesses } from "./process.ts";
 import { MessageUsage } from "./message-usage.ts";
 import { discoverOpenCodeModels } from "./models.ts";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
@@ -17,11 +17,11 @@ interface Instance {
   child: ChildProcess;
 }
 
-function launch(options: StartOptions, signal: AbortSignal): Promise<Instance> {
+function launch(options: StartOptions, signal: AbortSignal, textOnly = false): Promise<Instance> {
   return new Promise((resolve, reject) => {
     const inherited = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || "{}");
     const permission = options.permissionMode === "bypass" ? { "*": "allow" } : { "*": options.permissionMode === "plan" ? "deny" : "ask", read: "allow", glob: "allow", grep: "allow", list: "allow", task: "allow", edit: options.permissionMode === "acceptEdits" ? "allow" : options.permissionMode === "plan" ? "deny" : "ask", "citropy_*": "allow" };
-    const config = { ...inherited, permission, mcp: { ...inherited.mcp, ...(options.mcp ? { citropy: { type: "remote", ...options.mcp, oauth: false, enabled: true } } : {}) } };
+    const config = { ...inherited, permission: textOnly ? { "*": "deny" } : permission, mcp: { ...inherited.mcp, ...(options.mcp ? { citropy: { type: "remote", ...options.mcp, oauth: false, enabled: true } } : {}) } };
     const child = spawn("opencode", ["serve", "--port", "0", "--hostname", "127.0.0.1"], {
       cwd: options.cwd,
       env: { ...process.env, NO_COLOR: "1", OPENCODE_CONFIG_CONTENT: JSON.stringify(config) },
@@ -36,7 +36,7 @@ function launch(options: StartOptions, signal: AbortSignal): Promise<Instance> {
       stopProcess(child);
       reject(error);
     };
-    const abort = () => fail(new Error("OpenCode startup cancelled"));
+    const abort = () => fail(signal.reason instanceof Error ? signal.reason : new Error("OpenCode startup cancelled"));
     const timer = setTimeout(() => fail(new Error("opencode server did not start in 30s")), 30_000);
     signal.addEventListener("abort", abort, { once: true });
     child.once("error", fail);
@@ -54,6 +54,34 @@ function launch(options: StartOptions, signal: AbortSignal): Promise<Instance> {
     onLines(child.stderr, scan);
     if (signal.aborted) abort();
   });
+}
+
+export async function generateOpenCodeText(cwd: string, model: string, prompt: string, signal: AbortSignal): Promise<string> {
+  const [providerID, ...modelParts] = model.split("/");
+  if (!providerID || !modelParts.length) throw new Error("Select an OpenCode model with a provider.");
+  const instance = await launch({ cwd, threadId: "writing", permissionMode: "plan", emit: () => {} }, signal, true);
+  let sessionId: string | undefined;
+  try {
+    const request = async (path: string, value: unknown) => {
+      const response = await fetch(`${instance.base}${path}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(value), signal });
+      if (!response.ok) throw new Error(`OpenCode text generation failed (${response.status}).`);
+      return response.json();
+    };
+    const session = await request("/session", { title: "Citropy writing", permission: [{ permission: "*", pattern: "*", action: "deny" }] });
+    if (typeof session.id !== "string") throw new Error("OpenCode did not create a writing session.");
+    sessionId = session.id;
+    const result = await request(`/session/${encodeURIComponent(sessionId!)}/message`, {
+      model: { providerID, modelID: modelParts.join("/") },
+      parts: [{ type: "text", text: prompt }],
+      tools: { "*": false },
+    });
+    if (result.info?.error) throw new Error(result.info.error.data?.message || "OpenCode could not generate text.");
+    return (result.parts ?? []).filter((part: OcPart) => part.type === "text").map((part: OcPart) => part.text ?? "").join("\n");
+  } finally {
+    if (sessionId) await fetch(`${instance.base}/session/${encodeURIComponent(sessionId)}`, { method: "DELETE", signal: AbortSignal.timeout(2000) }).catch(() => {});
+    stopProcess(instance.child);
+    await waitForStoppedProcesses();
+  }
 }
 
 export async function discoverOpenCodeCommands(cwd: string): Promise<ProviderCommand[]> {

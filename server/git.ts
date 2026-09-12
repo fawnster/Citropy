@@ -1,12 +1,15 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { FilePatch, GitFile, GitStatus } from "../shared/protocol.ts";
 import { parseUnifiedDiff } from "./diff.ts";
 
 const run = promisify(execFile);
 
-async function git(cwd: string, args: string[]): Promise<string> {
-  const { stdout } = await run("git", args, { cwd, timeout: 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0" }, maxBuffer: 32 * 1024 * 1024 });
+async function git(cwd: string, args: string[], env: NodeJS.ProcessEnv = {}): Promise<string> {
+  const { stdout } = await run("git", args, { cwd, timeout: 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env }, maxBuffer: 32 * 1024 * 1024 });
   return stdout;
 }
 
@@ -208,10 +211,78 @@ async function runOperation(cwd: string, operation: import("../shared/protocol.t
 
 const operations = new Map<string, Promise<unknown>>();
 
-export async function manage(cwd: string, operation: import("../shared/protocol.ts").GitOperation, value = "", offset = 0, remote = "") {
+async function serialized<T>(cwd: string, action: () => Promise<T>): Promise<T> {
   const previous = operations.get(cwd) ?? Promise.resolve();
-  const next = previous.catch(() => {}).then(() => runOperation(cwd, operation, value, offset, remote));
+  const next = previous.catch(() => {}).then(action);
   operations.set(cwd, next);
   try { return await next; }
   finally { if (operations.get(cwd) === next) operations.delete(cwd); }
+}
+
+export function manage(cwd: string, operation: import("../shared/protocol.ts").GitOperation, value = "", offset = 0, remote = "") {
+  return serialized(cwd, () => runOperation(cwd, operation, value, offset, remote));
+}
+
+async function pushTarget(cwd: string): Promise<{ remote: string; ref: string }> {
+  const branch = (await git(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"])).trim();
+  const remote = (await tryGit(cwd, ["config", "--get", `branch.${branch}.remote`])).trim();
+  const ref = (await tryGit(cwd, ["config", "--get", `branch.${branch}.merge`])).trim();
+  if (!remote || !ref.startsWith("refs/heads/")) throw new Error("Publish this branch in Source control before pushing.");
+  return { remote, ref };
+}
+
+export function pushCurrentBranch(cwd: string, checkReady: () => void): Promise<string> {
+  return serialized(cwd, async () => {
+    checkReady();
+    const target = await pushTarget(cwd);
+    const head = (await git(cwd, ["rev-parse", "HEAD"])).trim();
+    return git(cwd, ["push", "--", target.remote, `${head}:${target.ref}`]);
+  });
+}
+
+export function assistedCommit(
+  cwd: string,
+  scope: "staged" | "all",
+  push: boolean,
+  generate: (context: { summary: string; diff: string; recentSubjects: string; truncated: boolean }) => Promise<string>,
+  checkReady: () => void,
+  progress: (status: "committing" | "pushing", message: string, commit?: string) => void,
+): Promise<void> {
+  return serialized(cwd, async () => {
+    checkReady();
+    if (!await isRepo(cwd)) throw new Error("This workspace is not a Git repository.");
+    const target = push ? await pushTarget(cwd) : undefined;
+    const directory = await mkdtemp(join(tmpdir(), "citropy-commit-"));
+    const env = { GIT_INDEX_FILE: join(directory, "index") };
+    try {
+      const head = (await tryGit(cwd, ["rev-parse", "--verify", "HEAD"])).trim();
+      const branch = (await tryGit(cwd, ["symbolic-ref", "--quiet", "HEAD"])).trim();
+      const originalIndex = (await git(cwd, ["write-tree"])).trim();
+      const snapshot = async () => {
+        await git(cwd, ["read-tree", originalIndex], env);
+        if (scope === "all") await git(cwd, ["add", "-A"], env);
+        return (await git(cwd, ["write-tree"], env)).trim();
+      };
+      const tree = await snapshot();
+      const summary = await git(cwd, ["diff", "--cached", "--stat", "--no-ext-diff", "--no-textconv"], env);
+      if (!summary.trim()) throw new Error(scope === "staged" ? "There are no staged changes to commit." : "There are no changes to commit.");
+      const diff = await git(cwd, ["diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3"], env);
+      const recentSubjects = await tryGit(cwd, ["log", "-5", "--format=%s"]);
+      const message = await generate({ summary: summary.slice(0, 12000), diff: diff.slice(0, 60000), recentSubjects: recentSubjects.slice(0, 2000), truncated: diff.length > 60000 || summary.length > 12000 });
+      checkReady();
+      if ((await tryGit(cwd, ["rev-parse", "--verify", "HEAD"])).trim() !== head ||
+          (await tryGit(cwd, ["symbolic-ref", "--quiet", "HEAD"])).trim() !== branch ||
+          (await git(cwd, ["write-tree"])).trim() !== originalIndex ||
+          (scope === "all" && await snapshot() !== tree))
+        throw new Error("The changes moved while the commit message was being generated. Review them and try again.");
+      progress("committing", message);
+      if (scope === "all") await git(cwd, ["read-tree", tree]);
+      await runOperation(cwd, "commit", message);
+      const commit = (await git(cwd, ["rev-parse", "HEAD"])).trim();
+      progress(push ? "pushing" : "committing", message, commit);
+      if (target) await git(cwd, ["push", "--", target.remote, `${commit}:${target.ref}`]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
 }

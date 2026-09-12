@@ -10,6 +10,7 @@ import {
   PinOff,
   ArrowUp,
   ArrowDown,
+  RefreshCw,
 } from "lucide-react";
 import { Menu } from "./Menu.tsx";
 import { Modal } from "./Modal.tsx";
@@ -36,6 +37,13 @@ export function ConversationMenu({
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [generatingTitle, setGeneratingTitle] = useState(false);
+  const regenerateTitle = async () => {
+    setGeneratingTitle(true);
+    try { await api(`threads/title?threadId=${encodeURIComponent(thread.id)}`, { method: "POST" }); }
+    catch (error) { reportError(error); }
+    finally { setGeneratingTitle(false); }
+  };
   const edit = (field: typeof editing) => {
     setEditing(field);
     setValue(
@@ -87,6 +95,13 @@ export function ConversationMenu({
             icon: <Pencil size={15} />,
             onSelect: () => edit("title"),
           },
+          ...(!thread.parentThreadId ? [{
+            id: "generate-title",
+            label: generatingTitle ? t("Naming conversation…") : t("Generate title"),
+            icon: <RefreshCw size={15} />,
+            disabled: generatingTitle,
+            onSelect: () => void regenerateTitle(),
+          }] : []),
           {
             id: "up",
             label: t("Move up"),

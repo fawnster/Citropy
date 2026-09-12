@@ -50,6 +50,12 @@ export function Conversation() {
     threadId ? state.threads[threadId]?.activeTool : undefined,
   );
   const compacting = useApp((state) => Boolean(threadId && state.threads[threadId]?.compacting));
+  const startedAt = useApp((state) => {
+    if (!threadId) return 0;
+    return state.threads[threadId]?.runStartedAt ??
+      state.messages[(state.order[threadId] ?? []).findLast((id) => state.messages[id]?.role === "user") ?? ""]?.ts ??
+      state.threads[threadId]?.updatedAt ?? 0;
+  });
   const connected = useApp((state) => state.connected);
   const followRequest = useApp((state) => state.followRequest);
   const [selectedMessageId, setSelectedMessageId] = useState<string>();
@@ -189,7 +195,7 @@ export function Conversation() {
               {error}
             </div>
           )}
-          {busy && <Working status={status} tool={activeTool} compacting={compacting} />}
+          {busy && <Working status={status} tool={activeTool} compacting={compacting} startedAt={startedAt} />}
           <div className="canvas-tail" />
         </div>
       </div>

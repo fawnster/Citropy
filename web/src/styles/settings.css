@@ -101,6 +101,10 @@
   background-color: var(--canvas);
 }
 
+.assistance-model-row > select {
+  flex-basis: 260px;
+}
+
 .setting-row[data-disabled="true"],
 .typing-speed-setting[data-disabled="true"] {
   opacity: 0.5;
@@ -382,6 +386,15 @@
   .setting-row {
     padding: 18px 16px;
     gap: 20px;
+  }
+  .assistance-model-row {
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+  .assistance-model-row > span,
+  .assistance-model-row > select {
+    flex: 1 1 100%;
+    width: 100%;
   }
   .theme-options {
     gap: 12px;

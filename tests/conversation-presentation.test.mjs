@@ -37,7 +37,7 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
   });
   await server.listen();
   browser = await chromium.launch({ headless: true });
-  async function fixture({ preferences = {}, messages = [message("saved", [textPart("saved-text", "Saved conversation.")])], children = [], histories = {}, githubAccount, reducedMotion = "no-preference" } = {}) {
+  async function fixture({ preferences = {}, messages = [message("saved", [textPart("saved-text", "Saved conversation.")])], children = [], histories = {}, githubAccount, reducedMotion = "no-preference", isGit = false } = {}) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion });
     page.setDefaultTimeout(10000);
     const errors = [];
@@ -71,7 +71,7 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
         if (event.t === "thread.load") socket.send(JSON.stringify({ t: "thread.messages", threadId: event.id, messages: histories[event.id] ?? (event.id === "chat" ? messages : [message(`${event.id}-message`, [textPart(`${event.id}-text`, "Subagent result.")])]) }));
       });
       socket.send(JSON.stringify({ t: "hello", snapshot: {
-        projects: [{ id: "workspace", name: "Example workspace", path: "/example", isGit: false, lastOpened: 1 }],
+        projects: [{ id: "workspace", name: "Example workspace", path: "/example", isGit, lastOpened: 1 }],
         threads: [thread, ...children], providers: [{ id: "claude", label: "Claude Code", available: true, enabled: true, models: [{ id: "sample", label: "Example model" }] }], permissions: [], home: "/example",
       } }));
     });
@@ -702,8 +702,9 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     const notice = (id, threadId = "chat", kind = "chat", level = "success") => ({
       t: "notification.add", notification: { id, kind, level, read: false, title: "Task complete", text: id, createdAt: Date.now(), target: { view: kind === "chat" ? "chat" : "git", threadId } },
     });
+    await page.evaluate(async () => { window.presentationStore = (await import("/web/src/lib/store.ts")).useApp; });
     f.emit(notice("already-reading"));
-    await page.waitForFunction(async () => (await import("/web/src/lib/store.ts")).useApp.getState().notifications.length === 1);
+    await page.waitForFunction(() => window.presentationStore.getState().notifications.length === 1);
     assert.equal(await page.locator(".toast").count(), 0);
     assert.equal(await page.evaluate(async () => (await import("/web/src/lib/store.ts")).useApp.getState().notifications[0].read), true);
     assert.ok(f.requests.some((event) => event.t === "notifications.read" && event.ids.includes("already-reading")));
@@ -864,6 +865,87 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     }
     await f.page.emulateMedia({ reducedMotion: "reduce" });
     assert.equal(await weave.locator("i").first().evaluate((line) => getComputedStyle(line).animationIterationCount), "1");
+    await f.close();
+  });
+
+  await t.test("the elapsed turn time survives settings navigation and resets only for a new run", async () => {
+    const f = await fixture();
+    const { page } = f;
+    const runStartedAt = Date.now() - 125000;
+    f.emit({ t: "thread.upsert", thread: { ...thread, running: true, status: "thinking", runStartedAt } });
+    await page.locator(".working-time").filter({ hasText: "2m" }).waitFor();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Back to chat", exact: true }).click();
+    await page.locator(".working-time").filter({ hasText: "2m" }).waitFor();
+    f.emit({ t: "thread.upsert", thread: { ...thread, running: true, status: "working", activeTool: "Read", runStartedAt } });
+    await page.locator(".working-text").filter({ hasText: "Read" }).waitFor();
+    assert.match(await page.locator(".working-time").innerText(), /^2m/);
+    f.emit({ t: "thread.upsert", thread: { ...thread, running: true, status: "thinking", runStartedAt: Date.now() } });
+    await page.waitForFunction(() => !document.querySelector(".working-time")?.textContent.includes("m"));
+    await f.close();
+  });
+
+  await t.test("AI Git controls keep their state, settings choose writing models, and UI text stays unselected", async () => {
+    const f = await fixture({ isGit: true, children: [{ ...thread, id: "pinned", title: "Pinned conversation", pinned: true }] });
+    const { page } = f;
+    let settings = { automaticTitles: true, titleModel: null, commitModel: null };
+    const calls = [];
+    await page.route("**/api/providers/assistance", async (route) => {
+      settings = { ...settings, ...route.request().postDataJSON() };
+      f.emit({ t: "assistance.settings", settings });
+      await route.fulfill({ json: settings });
+    });
+    const job = { ...thread, gitAction: { action: "commit", status: "generating" } };
+    await page.route("**/api/threads/git-action?**", async (route) => {
+      calls.push(route.request().postDataJSON());
+      f.emit({ t: "thread.upsert", thread: job });
+      await route.fulfill({ json: job.gitAction });
+    });
+    f.emit({ t: "git.status", projectId: "workspace", threadId: "chat", status: { branch: "main", ahead: 0, behind: 0, clean: false, files: [{ path: "source.ts", staged: true, index: "M", work: " ", added: 1, removed: 1, untracked: false }] } });
+    const pinnedColor = await page.locator('[data-category="pinned"] .category-icon').evaluate((node) => getComputedStyle(node).color);
+    const activeColor = await page.locator('[data-category="active"] .category-icon').evaluate((node) => getComputedStyle(node).color);
+    assert.notEqual(pinnedColor, activeColor);
+    await page.getByRole("button", { name: "Git actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: /^AI commit Commit staged/ }).click();
+    await page.getByRole("button", { name: "Git actions", exact: true }).filter({ hasText: "Writing commit" }).waitFor();
+    assert.deepEqual(calls, [{ action: "commit", scope: "staged" }]);
+    await page.getByRole("textbox", { name: "Message", exact: true }).fill("A follow-up after the commit");
+    assert.equal(await page.getByRole("button", { name: "Send", exact: true }).isDisabled(), true);
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "AI assistance", exact: true }).click();
+    await page.getByRole("combobox", { name: "Title model", exact: true }).selectOption(JSON.stringify({ provider: "claude", model: "sample" }));
+    await page.getByRole("combobox", { name: "Commit model", exact: true }).selectOption(JSON.stringify({ provider: "claude", model: "sample" }));
+    await page.getByRole("switch", { name: /^Automatic titles/ }).uncheck();
+    assert.equal(settings.automaticTitles, false);
+    assert.deepEqual(settings.commitModel, { provider: "claude", model: "sample" });
+    assert.deepEqual(settings.titleModel, settings.commitModel);
+    const description = page.getByText("Choose the model that names your conversations.", { exact: true });
+    assert.equal(await description.evaluate((node) => getComputedStyle(node).userSelect), "none");
+    for (const width of [1440, 600]) {
+      await page.setViewportSize({ width, height: 900 });
+      if (width === 600) await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+      await page.screenshot({ path: `/tmp/citropy-ai-settings-${width}.png`, animations: "disabled" });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+    await page.getByRole("button", { name: "Back to chat", exact: true }).click();
+    await page.getByRole("button", { name: "Git actions", exact: true }).filter({ hasText: "Writing commit" }).waitFor();
+    assert.equal(await page.getByRole("textbox", { name: "Message", exact: true }).evaluate((node) => getComputedStyle(node).userSelect), "text");
+    assert.equal(await page.locator(".message-bubble").first().evaluate((node) => getComputedStyle(node).userSelect), "text");
+    f.emit({ t: "thread.upsert", thread: { ...job, gitAction: { action: "commit", status: "success", message: "Fix workspace selection", commit: "1234567890123456789012345678901234567890" } } });
+    await page.getByRole("button", { name: "Git actions", exact: true }).filter({ hasText: "Committed" }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Send", exact: true }).isEnabled(), true);
+    for (const width of [1440, 600]) {
+      await page.setViewportSize({ width, height: 900 });
+      if (width === 600) await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+      await page.getByRole("button", { name: "Git actions", exact: true }).click();
+      await page.getByText("Fix workspace selection", { exact: true }).waitFor();
+      const menu = await page.getByRole("menu").boundingBox();
+      assert.ok(menu.x >= 0 && menu.x + menu.width <= width + 1);
+      await page.screenshot({ path: `/tmp/citropy-ai-git-${width}.png`, animations: "disabled" });
+      await page.keyboard.press("Escape");
+    }
     await f.close();
   });
 });

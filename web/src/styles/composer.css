@@ -148,6 +148,53 @@
   outline-offset: -2px;
 }
 
+.menu-item:disabled {
+  opacity: 0.45;
+  cursor: default;
+  background: transparent;
+}
+
+.menu-footer {
+  border-top: 1px solid var(--line);
+  padding: 10px;
+  margin-top: 5px;
+}
+
+.chat-git-trigger {
+  max-width: 140px;
+}
+
+.chat-git-trigger > svg {
+  flex: none;
+}
+
+.chat-git-trigger .spin {
+  animation: citropy-spin 1s linear infinite;
+}
+
+.chat-git-trigger[data-error],
+.chat-git-details[data-error] > strong {
+  color: var(--bad);
+}
+
+.chat-git-details {
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.chat-git-details small {
+  color: var(--text-3);
+}
+
+.chat-git-message {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 160px;
+  overflow: auto;
+  user-select: text;
+}
+
 .menu-item[data-danger] {
   color: var(--text-3);
 }

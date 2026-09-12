@@ -6,6 +6,10 @@ Settings > Providers checks the installed version against the provider’s relea
 
 Messages sent during a reply appear in a compact queue above the composer. The collapsed card shows the newest queued message and pending count. Expand it to send, edit, reorder, or remove messages; delivery stays in queue order. Messages queued while offline wait for reconnection.
 
+Settings > AI assistance selects separate models for conversation titles and commit messages. Both default to the conversation's model and use the provider's existing account. Automatic titles name new conversations from their first message; you can disable this or choose Generate title from a conversation's menu. A title generated in the background never replaces a name you entered while it was being generated.
+
+The Git button beside the chat's send controls offers AI commit, AI commit & push, and Push. Commit uses staged changes when present, otherwise all changes in that conversation's workspace. The menu shows which scope will be used. The writing model receives a bounded diff in a separate session. Git actions run only after you click them and require agents in the same workspace to finish first. If the diff, index, or branch changes during generation, the action stops. Normal Git hooks still run. Push sends only the current branch to its configured upstream, without force. If pushing fails after a commit, use Push to retry without creating another commit. Progress and the result remain available in chat when you return from another view.
+
 Use Node.js 22.18 or newer. Install dependencies with `npm install`, then open the app with `npm run desktop`. If the Electron download was skipped during installation, run `npm run setup:desktop` once.
 
 The desktop window embeds Chromium. Open the workspace panel and choose Browser, Computer, Terminal, Files, Changes, Subagents, or Tools. Browser and terminal tabs stay open when you switch panels. Providers use Citropy's MCP tools to work with those same sessions, subject to the conversation's permission setting. Subagents stay attached to their parent conversation and can be opened from its disclosure or the Subagents tab.

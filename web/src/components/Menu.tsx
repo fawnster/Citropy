@@ -21,6 +21,7 @@ export interface MenuItem {
   icon?: ReactNode;
   selected?: boolean;
   danger?: boolean;
+  disabled?: boolean;
   section?: string;
   onSelect: () => void;
 }
@@ -38,6 +39,7 @@ interface Props {
   searchable?: boolean;
   searchPlaceholder?: string;
   className?: string;
+  footer?: ReactNode;
 }
 
 export function Menu({
@@ -49,6 +51,7 @@ export function Menu({
   searchable = false,
   searchPlaceholder = "Search models",
   className = "",
+  footer,
 }: Props) {
   const t = useI18n();
   const uiScale = useApp((state) => state.uiScale);
@@ -85,11 +88,11 @@ export function Menu({
       element.querySelector<HTMLInputElement>(".menu-search")?.focus({ preventScroll: true });
     } else {
       const selected = menu.current?.querySelector<HTMLButtonElement>(
-        '[data-selected="true"]',
+        '[data-selected="true"]:not(:disabled)',
       );
       (
         selected ??
-        menu.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')
+        menu.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')
       )?.focus({ preventScroll: true });
     }
     const resize = new ResizeObserver(position);
@@ -165,7 +168,7 @@ export function Menu({
                 return;
               const buttons = Array.from(
                 menu.current?.querySelectorAll<HTMLButtonElement>(
-                  '[role="menuitem"]',
+                  '[role="menuitem"]:not(:disabled)',
                 ) ?? [],
               );
               if (!buttons.length) return;
@@ -212,6 +215,7 @@ export function Menu({
                     <button
                       key={item.id}
                       type="button"
+                      disabled={item.disabled}
                       role="menuitem"
                       tabIndex={-1}
                       className="menu-item"
@@ -254,6 +258,7 @@ export function Menu({
                 </div>
               )}
             </div>
+            {footer && <div className="menu-footer">{footer}</div>}
           </motion.div>
         )}
       </AnimatePresence>

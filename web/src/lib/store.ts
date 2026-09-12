@@ -2,6 +2,7 @@ import { resolveResponse } from "./requests.ts";
 import type { ComputerState } from "../../../shared/computer.ts";
 import "./migrate-preferences.ts";
 import { create } from "zustand";
+import { defaultAssistance, type AssistanceSettings } from "../../../shared/assistance.ts";
 import type { Language } from "./translations.ts";
 import type { GitHubUser } from "../../../shared/github.ts";
 import type {
@@ -55,6 +56,8 @@ export type Theme = "dark" | "light";
 export type PanelId = "sidebar" | "inspector" | "git" | "github";
 
 export interface AppState {
+  assistance: AssistanceSettings;
+  activeView: "chat" | "git" | "github" | "settings" | "usage";
   newThreadProvider: import("../../../shared/protocol.ts").ProviderId | null;
   notifications: AppNotification[];
   notificationPreferences: NotificationPreferences;
@@ -151,6 +154,8 @@ function readOffline(): Record<string, QueuedMessage[]> {
 export const useApp = create<AppState>(() => ({
   newThreadProvider: null,
   notifications: [],
+  assistance: { ...defaultAssistance },
+  activeView: "chat",
   notificationPreferences: { toasts: true, desktop: true, sound: false },
   confirmation: null,
   searchResult: null,
@@ -348,6 +353,9 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
     return;
   }
   switch (event.t) {
+    case "assistance.settings":
+      state.assistance = event.settings;
+      return;
     case "request.error":
       resolveResponse(event.requestId, undefined, event.error);
       return;
@@ -356,10 +364,14 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
         state.notifications.some((entry) => entry.id === event.notification.id)
       )
         return;
-      const seen =
-        event.notification.kind === "chat" &&
-        event.notification.level === "success" &&
-        event.notification.target.threadId === state.readingThreadId;
+      const target = event.notification.target;
+      const focused = typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus();
+      const seen = event.notification.level === "success" && (
+        (event.notification.kind === "chat" && target.threadId === state.readingThreadId) ||
+        (focused && ["git", "github"].includes(event.notification.kind) &&
+          target.view === state.activeView && target.projectId === state.activeProjectId &&
+          (!target.threadId || target.threadId === state.activeThreadId))
+      );
       state.notifications = [
         seen ? { ...event.notification, read: true } : event.notification,
         ...state.notifications,
@@ -461,6 +473,7 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
       state.searchResult = event;
       return;
     case "hello": {
+      state.assistance = event.snapshot.assistance ?? { ...defaultAssistance };
       state.computer = event.snapshot.computer ?? { enabled: false, status: "idle", control: false, displays: [], activity: [] };
       state.notifications = event.snapshot.notifications ?? [];
       state.notificationPreferences = event.snapshot

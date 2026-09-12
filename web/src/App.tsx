@@ -53,9 +53,8 @@ const UsageView = lazy(() =>
 
 export function App() {
   const t = useI18n();
-  const [view, setView] = useState<
-    "chat" | "git" | "github" | "settings" | "usage"
-  >("chat");
+  const view = useApp((state) => state.activeView);
+  const setView = (activeView: typeof view) => useApp.setState({ activeView });
   const [settingsSection, setSettingsSection] = useState("General");
   const [sectionSidebarOpen, setSectionSidebarOpen] = useState(
     viewportWidth() > 720,

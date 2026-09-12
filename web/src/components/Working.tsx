@@ -8,6 +8,7 @@ interface Props {
   status: ThreadStatus | undefined;
   tool?: string;
   compacting?: boolean;
+  startedAt: number;
 }
 
 const LABEL: Partial<Record<ThreadStatus, string>> = {
@@ -16,10 +17,9 @@ const LABEL: Partial<Record<ThreadStatus, string>> = {
   working: "Working",
 };
 
-export function Working({ status, tool, compacting }: Props) {
+export function Working({ status, tool, compacting, startedAt }: Props) {
   const t = useI18n();
-  const [start] = useState(() => Date.now());
-  const [now, setNow] = useState(start);
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 100);
@@ -41,7 +41,7 @@ export function Working({ status, tool, compacting }: Props) {
         <i />
       </span>
       <span className="working-text" role="status">{text}</span>
-      <span className="working-time mono">{duration(now - start)}</span>
+      <span className="working-time mono">{duration(Math.max(0, now - startedAt))}</span>
     </motion.div>
   );
 }

@@ -208,6 +208,8 @@ export interface ThreadMeta {
   permissionMode: PermissionMode;
   externalId?: string;
   running: boolean;
+  runStartedAt?: number;
+  gitAction?: import("./assistance.ts").GitActionState;
   finished?: boolean;
   pinned?: boolean;
   position?: number;
@@ -316,6 +318,7 @@ export interface AppNotification {
 }
 
 export interface Snapshot {
+  assistance?: import("./assistance.ts").AssistanceSettings;
   computer?: ComputerState;
   notifications?: AppNotification[];
   notificationPreferences?: NotificationPreferences;
@@ -332,6 +335,7 @@ export interface Snapshot {
 }
 
 export type ServerEvent =
+  | { t: "assistance.settings"; settings: import("./assistance.ts").AssistanceSettings }
   | { t: "computer.state"; computer: ComputerState }
   | { t: "thread.accepted"; requestId: string }
   | { t: "request.error"; requestId: string; error: string }

@@ -15,6 +15,7 @@ import {
   FolderCog,
   Globe,
   Activity,
+  PencilLine,
 } from "lucide-react";
 import { ProjectSettings } from "./ProjectSettings.tsx";
 import { SkillsSettings } from "./SkillsSettings.tsx";
@@ -22,6 +23,7 @@ import { BrowserProfiles } from "./BrowserProfiles.tsx";
 import { DiagnosticsSettings } from "./DiagnosticsSettings.tsx";
 import { ComputerSettings } from "./ComputerSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
+import { AssistanceSettings } from "./AssistanceSettings.tsx";
 import { AppUpdateControl } from "./AppUpdateControl.tsx";
 import { SectionSidebar } from "./SectionSidebar.tsx";
 import {
@@ -72,6 +74,12 @@ const sections = [
     group: "Providers & tools",
     icon: BookOpen,
     description: "Browse and manage the skills available to your providers.",
+  },
+  {
+    name: "AI assistance",
+    group: "Providers & tools",
+    icon: PencilLine,
+    description: "Choose models for conversation titles and commit messages.",
   },
   {
     name: "Browser",
@@ -231,6 +239,7 @@ export function Settings({
           </header>
           {section === "Projects" && <ProjectSettings onRun={onBack} />}
           {section === "Skills" && <SkillsSettings />}
+          {section === "AI assistance" && <AssistanceSettings />}
           {section === "Browser" && <BrowserProfiles />}
           {section === "Computer use" && <ComputerSettings />}
           {section === "Resources" && <DiagnosticsSettings />}

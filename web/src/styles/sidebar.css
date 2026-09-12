@@ -528,6 +528,7 @@
 }
 
 .category-icon { color: var(--task-icon); }
+.thread-category[data-category="pinned"] .category-icon { color: var(--warn); }
 .category-finished { color: var(--ok); }
 .thread-category:first-child .finished-toggle { margin-top: 0; border-top: 0; }
 .workspace-menu .workspace-folder-icon { color: var(--file-icon); }

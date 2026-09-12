@@ -23,6 +23,7 @@ import {
 import { changeSkill, listSkills, readSkill, restoreComputerSkill } from "./skills.ts";
 import { diagnostics } from "./diagnostics.ts";
 import { usageReport } from "./usage.ts";
+import { configureAssistance, generateThreadTitle, startGitAction } from "./assistance.ts";
 import { listCommands } from "./commands.ts";
 import { computerState, computerCapabilities, configureComputer, startComputer, stopComputer, pauseComputer, computerScreenshot, computerAction } from "./computer.ts";
 import type { ComputerAction } from "../shared/computer.ts";
@@ -159,7 +160,15 @@ export async function handleFeatures(
       .end(JSON.stringify(value));
   };
   try {
-    if (url.pathname === "/api/providers/maintenance" && req.method === "GET") respond(await providerMaintenance(url.searchParams.get("refresh") === "1"));
+    if (url.pathname === "/api/providers/assistance" && req.method === "GET") respond(store.assistance);
+    else if (url.pathname === "/api/providers/assistance" && req.method === "PATCH") respond(configureAssistance(await body(req), providers));
+    else if (url.pathname === "/api/threads/git-action" && req.method === "POST") {
+      const input = await body(req);
+      respond(startGitAction(threadId ?? "", input.action, input.scope));
+    } else if (url.pathname === "/api/threads/title" && req.method === "POST") {
+      await generateThreadTitle(threadId ?? "");
+      respond({ ok: true });
+    } else if (url.pathname === "/api/providers/maintenance" && req.method === "GET") respond(await providerMaintenance(url.searchParams.get("refresh") === "1"));
     else if (url.pathname === "/api/providers/update" && req.method === "POST") {
       const input = await body(req);
       if (!["claude", "codex", "opencode"].includes(input.provider)) throw new Error("Unknown provider.");

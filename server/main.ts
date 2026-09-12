@@ -1,4 +1,5 @@
 import { assertApplicationReady, lockForAppUpdate, unlockAppUpdate } from "./update-lock.ts";
+import { assistanceBusy } from "./assistance.ts";
 import { providerUpdating, providerMaintenance } from "./providers/maintenance.ts";
 import { notifyUpdateAvailable } from "./update-notifications.ts";
 import { handleFeatures } from "./features.ts";
@@ -122,6 +123,7 @@ bus.subscribe((event) => {
 
 function snapshot(): Snapshot {
   return {
+    assistance: store.assistance,
     computer: computerState(),
     notifications: store.notifications,
     notificationPreferences: store.notificationPreferences,
@@ -428,7 +430,7 @@ async function handle(event: ClientEvent, send: (event: ServerEvent) => void): P
             level: "success",
             title: titles[event.operation]!,
             text: project.name,
-            target: { view: "git", projectId: project.id },
+            target: { view: "git", projectId: project.id, threadId: event.threadId },
           });
       } catch (error) {
         send({ t: "git.manage", requestId: event.requestId, error: (error as Error).message });
@@ -438,7 +440,7 @@ async function handle(event: ClientEvent, send: (event: ServerEvent) => void): P
             level: "error",
             title: "Git action failed",
             text: (error as Error).message,
-            target: { view: "git", projectId: project.id },
+            target: { view: "git", projectId: project.id, threadId: event.threadId },
           });
       }
       await refreshGit(event.projectId, true, event.threadId);
@@ -486,7 +488,7 @@ async function handle(event: ClientEvent, send: (event: ServerEvent) => void): P
           level: "success",
           title: "Changes committed",
           text: out.split("\n")[0] ?? project.name,
-          target: { view: "git", projectId: project.id },
+          target: { view: "git", projectId: project.id, threadId: event.threadId },
         });
       } catch (error) {
         bus.emit({ t: "toast", level: "error", text: (error as Error).message.split("\n")[0] ?? "Commit failed" });
@@ -534,7 +536,7 @@ const server = createServer(async (req, res) => {
     if (url.endsWith("/cancel")) { unlockAppUpdate(); res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ready: false })); return; }
     try {
       const busy = (["claude", "codex", "opencode"] as const).some(id => providerBusy(id) || providerUpdating(id));
-      if (busy || activeCommands || activeRequests.size || pendingRequests().length)
+      if (busy || assistanceBusy() || activeCommands || activeRequests.size || pendingRequests().length)
         throw new Error("Finish active conversations, updates, and Git operations before applying the update.");
       if (terminals.hasActiveTerminals()) throw new Error("Close your terminals before restarting to apply the update.");
       if (computerState().status !== "idle") throw new Error("End computer use before restarting to apply the update.");

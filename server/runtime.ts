@@ -1,4 +1,6 @@
 import { assertApplicationReady } from "./update-lock.ts";
+import { generateThreadTitle, workspaceGitBusy } from "./assistance.ts";
+import { stopTextGeneration, textGenerationBusy } from "./text-generation.ts";
 import { basename } from "node:path";
 import { diffLines } from "./diff.ts";
 import { uid } from "./ids.ts";
@@ -179,13 +181,18 @@ export class ThreadRuntime {
     if (!this.#thread.title || this.#thread.title === "New thread") {
       const title = (text.trim().split("\n")[0] || attachments.map((file) => file.label).join(", ")).slice(0, 64);
       store.patchThread(this.#thread.id, { title: title || "New thread" });
+      void generateThreadTitle(this.id, true);
     }
     this.#messageId = null;
   }
 
-  async #deliver(prepared: Prepared): Promise<void> {
+  async #deliver(prepared: Prepared, queued?: { item: QueuedMessage; index: number }): Promise<void> {
+    if (workspaceGitBusy(this.#cwd)) {
+      if (queued) this.#requeue(queued.item, queued.index);
+      throw new Error("Wait for the Git action to finish before sending a message.");
+    }
     this.#addUserMessage(prepared);
-    store.patchThread(this.#thread.id, { status: "queued", running: true, error: undefined, archived: false, snoozedUntil: undefined });
+    store.patchThread(this.#thread.id, { status: "queued", running: true, runStartedAt: Date.now(), error: undefined, archived: false, snoozedUntil: undefined });
     try { await this.#ensureSession().send(prepared.prompt, prepared.attachments, prepared.skills); }
     catch (error) { store.patchThread(this.id, { status: "error", running: false, error: (error as Error).message }); throw error; }
   }
@@ -205,7 +212,7 @@ export class ThreadRuntime {
         this.#requeue(item, index);
         throw error;
       });
-      await this.#deliver(prepared);
+      await this.#deliver(prepared, { item, index });
     } catch (error) {
       this.#resume = false;
       store.patchThread(this.id, { status: "error", running: false, error: (error as Error).message });
@@ -229,7 +236,7 @@ export class ThreadRuntime {
     if (store.disabledProviders.has(this.#thread.provider)) throw new Error("Enable this provider before compacting.");
     const session = this.#ensureSession();
     if (!session.compact) throw new Error("This provider does not support manual compaction.");
-    store.patchThread(this.id, { compacting: true, status: "working", running: true, activeTool: "Compacting context" });
+    store.patchThread(this.id, { compacting: true, status: "working", running: true, runStartedAt: Date.now(), activeTool: "Compacting context" });
     this.#compactionTimer = setTimeout(() => {
       if (!this.#thread.compacting) return;
       this.stop();
@@ -583,12 +590,13 @@ function stopChildren(threadId: string): void {
 }
 
 export function disposeAll(): void {
+  stopTextGeneration();
   for (const runtime of runtimes.values()) runtime.dispose();
   runtimes.clear();
 }
 
 export function providerBusy(providerId: string): boolean {
-  return [...store.threads.values()].some((thread) => thread.provider === providerId && (thread.running || thread.status === "awaiting" || runtimes.get(thread.id)?.busy));
+  return textGenerationBusy(providerId) || [...store.threads.values()].some((thread) => thread.provider === providerId && (thread.running || thread.status === "awaiting" || runtimes.get(thread.id)?.busy));
 }
 
 export function reloadProviderSessions(providerIds: Set<string>): void {

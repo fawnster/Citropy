@@ -7,6 +7,28 @@ const { awaitResponse, resolveResponse, rejectResponses } = await import("../web
 const initial = useApp.getState();
 const message = (id, text = "Saved text") => ({ id, role: "assistant", ts: 1, parts: [{ id: `${id}-text`, kind: "text", text }] });
 
+test("successful Git notifications stay quiet in the matching focused view while failures and background results remain visible", () => {
+  const original = globalThis.document;
+  globalThis.document = { visibilityState: "visible", hasFocus: () => true };
+  try {
+    const state = { ...initial, activeView: "git", activeProjectId: "workspace", activeThreadId: "thread", notifications: [], toasts: [] };
+    const notification = { id: "push", kind: "git", level: "success", title: "Push finished", text: "workspace", createdAt: 1, read: false, target: { view: "git", projectId: "workspace", threadId: "thread" } };
+    const apply = (patch = {}, context = {}) => applyEvents({ ...state, ...context }, [{ t: "notification.add", notification: { ...notification, ...patch } }]);
+    assert.equal(apply().toasts.length, 0);
+    assert.equal(apply().notifications[0].read, true);
+    assert.equal(apply({ level: "error" }).toasts.length, 1);
+    assert.equal(apply({}, { activeView: "settings" }).toasts.length, 1);
+    assert.equal(apply({}, { activeProjectId: "other" }).toasts.length, 1);
+    assert.equal(apply({}, { activeThreadId: "other-worktree" }).toasts.length, 1);
+    assert.equal(apply({ target: { ...notification.target, view: "chat" } }, { activeView: "chat" }).toasts.length, 0);
+    globalThis.document.hasFocus = () => false;
+    assert.equal(apply().toasts.length, 1);
+  } finally {
+    if (original) globalThis.document = original;
+    else delete globalThis.document;
+  }
+});
+
 test("streaming changes only its part and preserves unrelated subscriptions", () => {
   const before = applyEvents(initial, [
     { t: "thread.messages", threadId: "first", messages: [] },
