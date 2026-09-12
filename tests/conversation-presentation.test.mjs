@@ -37,7 +37,7 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
   });
   await server.listen();
   browser = await chromium.launch({ headless: true });
-  async function fixture({ preferences = {}, messages = [message("saved", [textPart("saved-text", "Saved conversation.")])], children = [], histories = {}, reducedMotion = "no-preference" } = {}) {
+  async function fixture({ preferences = {}, messages = [message("saved", [textPart("saved-text", "Saved conversation.")])], children = [], histories = {}, githubAccount, reducedMotion = "no-preference" } = {}) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion });
     page.setDefaultTimeout(10000);
     const errors = [];
@@ -66,6 +66,7 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
       socket.onMessage((raw) => {
         const event = JSON.parse(raw);
         requests.push(event);
+        if (event.t === "github.request") socket.send(JSON.stringify({ t: "github.result", requestId: event.requestId, result: event.request.operation === "status" ? { installed: true, account: githubAccount, repositories: [] } : { items: [], more: false } }));
         if (event.t === "thread.send" || event.t === "queue.edit") socket.send(JSON.stringify({ t: "thread.accepted", requestId: event.requestId }));
         if (event.t === "thread.load") socket.send(JSON.stringify({ t: "thread.messages", threadId: event.id, messages: histories[event.id] ?? (event.id === "chat" ? messages : [message(`${event.id}-message`, [textPart(`${event.id}-text`, "Subagent result.")])]) }));
       });
@@ -89,6 +90,45 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     const idle = () => emit({ t: "thread.upsert", thread });
     return { page, emit, begin, complete, idle, requests, close: async () => { assert.deepEqual(errors, []); await page.close(); } };
   }
+
+  await t.test("GitHub identity is optional and every section keeps workspace navigation available", async () => {
+    const account = { login: "octocat", name: "The Octocat", avatar_url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Crect width='40' height='40' rx='20' fill='%239890cd'/%3E%3C/svg%3E", html_url: "https://github.com/octocat" };
+    const f = await fixture({ githubAccount: account, preferences: { compactNavigation: "1" }, messages: [
+      { ...message("question", [textPart("question-text", "Could you review the navigation?")]), role: "user" },
+      message("answer", [textPart("answer-text", "The sections stay within reach. You can switch directly between GitHub, source control, usage, and settings.")]),
+    ] });
+    const { page } = f;
+    await page.locator('#message-question .turn-heading strong').getByText("octocat", { exact: true }).waitFor();
+    assert.equal(await page.locator('#message-question .user-avatar img').getAttribute("src"), account.avatar_url);
+    const search = await page.getByRole("textbox", { name: "Find a conversation", exact: true }).boundingBox();
+    const newThread = await page.getByRole("button", { name: "New thread", exact: true }).boundingBox();
+    assert.ok(newThread.x > search.x && Math.abs(newThread.y + newThread.height / 2 - search.y - search.height / 2) < 2);
+    for (const width of [1440, 960]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.screenshot({ path: `/tmp/citropy-navigation-chat-${width}.png`, animations: "disabled" });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    }
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("switch", { name: /^Use GitHub profile in chat/ }).uncheck();
+    assert.equal(await page.evaluate(() => localStorage.getItem("citropy.showGitHubIdentity")), "0");
+    await page.screenshot({ path: "/tmp/citropy-navigation-settings-960.png", animations: "disabled" });
+    for (const [name, view] of [["Usage", "usage"], ["Source control", "git"], ["GitHub", "github"], ["Settings", "settings"], ["GitHub", "github"]]) {
+      await page.getByRole("navigation", { name: "Workspace navigation", exact: true }).getByRole("button", { name, exact: true }).click();
+      await page.locator(`.navigation-actions [data-tone="${view}"][aria-current="page"]`).waitFor();
+      assert.equal(await page.getByRole("button", { name: "Back to chat", exact: true }).count(), 1);
+    }
+    assert.equal(await page.getByRole("button", { name: "Account", exact: true }).count(), 0);
+    await page.getByRole("button", { name: "Account settings for octocat", exact: true }).click();
+    await page.getByRole("heading", { name: "The Octocat", exact: true }).waitFor();
+    await page.screenshot({ path: "/tmp/citropy-navigation-account-960.png", animations: "disabled" });
+    await page.getByRole("button", { name: "Back to chat", exact: true }).click();
+    await page.locator('#message-question .turn-heading strong').getByText("You", { exact: true }).waitFor();
+    assert.equal(await page.locator('#message-question .user-avatar img').count(), 0);
+    assert.equal(f.requests.filter(event => event.t === "github.request" && event.request.operation === "status").length, 1);
+    await page.reload();
+    await page.locator('#message-question .turn-heading strong').getByText("You", { exact: true }).waitFor();
+    await f.close();
+  });
 
   await t.test("conversation menus stay visible above the sidebar footer and support keyboard navigation", async () => {
     const f = await fixture({ preferences: { compactNavigation: "1" }, children: Array.from({ length: 12 }, (_, index) => ({ ...thread, id: `other-${index}`, title: `Other conversation ${index}` })) });
@@ -314,10 +354,13 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     }
     await page.locator(".group-head").click();
     await page.locator(".group-body").waitFor();
-    await page.evaluate(async () => {
-      const { useApp } = await import("/web/src/lib/store.ts");
-      useApp.setState({ searchMessageId: "history-20" });
-    });
+    const rail = page.getByRole("navigation", { name: "Conversation messages", exact: true });
+    assert.equal(await rail.getByRole("button").count(), history.length);
+    const marker = rail.getByRole("button", { name: "Go to message 21", exact: true });
+    await marker.hover();
+    await page.getByRole("tooltip").getByText(/Paragraph 20/).waitFor();
+    await page.screenshot({ path: "/tmp/citropy-message-navigator.png", animations: "disabled" });
+    await marker.click();
     await page.locator("#message-history-20").waitFor();
     await page.waitForFunction(() => {
       const message = document.querySelector("#message-history-20")?.getBoundingClientRect();
@@ -325,6 +368,12 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
       return message && message.top >= canvas.top - 2 && message.top < canvas.bottom;
     });
     assert.equal(await page.locator('[data-part-id="history-end"]').count(), 0);
+    assert.ok(await mounted() < 40);
+    await marker.focus();
+    await marker.press("ArrowUp");
+    assert.equal(await rail.getByRole("button", { name: "Go to message 20", exact: true }).evaluate(node => node === document.activeElement), true);
+    await page.keyboard.press("Escape");
+    assert.equal(await page.getByRole("tooltip").count(), 0);
     const position = await page.locator(".canvas").evaluate((node) => node.scrollTop);
     const anchor = await page.locator("#message-history-20").evaluate((node) => node.getBoundingClientRect().top);
     f.begin("background-response", "A response while reading older messages.");
@@ -368,10 +417,14 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
   await t.test("streaming displays arriving text and buffering waits for the completed block", async () => {
     for (const streaming of ["1", "0"]) {
       const f = await fixture({ preferences: { textStreaming: streaming } });
+      const left = (await f.page.locator("#message-saved").boundingBox()).x;
       f.begin("response", "The first words");
       await f.page.locator("#message-response").waitFor();
+      assert.equal((await f.page.locator("#message-saved").boundingBox()).x, left, "Adding the message rail must not shift existing messages.");
       if (streaming === "1") await f.page.locator('[data-part-id="response-text"]').getByText("The first words", { exact: true }).waitFor();
       else assert.equal(await f.page.locator('[data-part-id="response-text"]').count(), 0);
+      await f.page.getByRole("button", { name: "Go to message 2", exact: true }).hover();
+      await f.page.getByRole("tooltip").getByText(streaming === "1" ? "The first words" : "Response in progress…", { exact: true }).waitFor();
       f.emit({ t: "part.append", threadId: "chat", messageId: "response", partId: "response-text", text: " are now complete." });
       f.complete("response");
       await f.page.locator('[data-part-id="response-text"]').getByText("The first words are now complete.", { exact: true }).waitFor();
@@ -514,6 +567,18 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     await page.getByRole("option", { name: /@review/ }).waitFor();
     await input.press("Enter");
     assert.equal(await input.inputValue(), "Please use @review ");
+    await page.locator('.composer-highlights .skill-mention').getByText("@review", { exact: true }).waitFor();
+    await page.screenshot({ path: "/tmp/citropy-skill-mention.png", animations: "disabled" });
+    await input.fill("Use @review with @disabled, unknown @missing and mail@example.com.\n" + "A line that wraps in a narrower editor. ".repeat(140) + "\n@review ");
+    assert.equal(await page.locator('.composer-highlights .skill-mention').count(), 2);
+    await input.press("Control+End");
+    await page.waitForFunction(() => {
+      const box = document.querySelector('.composer-input');
+      const highlights = document.querySelector('.composer-highlights');
+      return box.scrollTop > 0 && Math.abs(box.scrollTop - highlights.scrollTop) < 1 && Math.abs(box.clientWidth - highlights.clientWidth) < 1;
+    });
+    await page.screenshot({ path: "/tmp/citropy-skill-mention-scrolled.png", animations: "disabled" });
+    await input.fill("Please use @review ");
     assert.equal(f.requests.some(event => event.t === "thread.send"), false);
     await input.press("Enter");
     await page.waitForFunction(() => document.querySelector('textarea').value === "");

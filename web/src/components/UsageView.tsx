@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { BarChart3, RefreshCw } from "lucide-react";
 import { api } from "../lib/api.ts";
 import { tokens, cost, providerLabels } from "../lib/format.ts";
@@ -9,9 +9,11 @@ import type { UsageReport } from "../../../shared/features.ts";
 export function UsageView({
   sidebarOpen,
   onBack,
+  navigation,
 }: {
   sidebarOpen: boolean;
   onBack: () => void;
+  navigation?: ReactNode;
 }) {
   const [data, setData] = useState<UsageReport>();
   const [error, setError] = useState("");
@@ -35,7 +37,7 @@ export function UsageView({
   return (
     <section className="section-view" aria-label="Usage">
       {sidebarOpen && (
-        <SectionSidebar title="Usage" onBack={onBack}>
+        <SectionSidebar title="Usage" onBack={onBack} navigation={navigation}>
           <button className="section-link" aria-current="page">
             <BarChart3 size={17} />
             <span>Overview</span>

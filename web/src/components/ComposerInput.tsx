@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { BookOpen, TerminalSquare } from "lucide-react";
 import type { ThreadMeta } from "../../../shared/protocol.ts";
 import type { ProviderCommand, SkillInfo } from "../../../shared/features.ts";
@@ -24,6 +30,7 @@ export function ComposerInput({
   commands: Array<{ id: string; label: string; hint: string; icon: ReactNode }>;
 }) {
   const box = useRef<HTMLTextAreaElement>(null);
+  const highlights = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
   const [caret, setCaret] = useState(value.length);
   const [selected, setSelected] = useState(0);
@@ -37,21 +44,37 @@ export function ComposerInput({
   const slash = /^\/[\w.:-]*$/.test(value) ? value : undefined;
   const query = mention ? `@${mention[1]}` : slash;
   const mode = mention ? "skills" : slash ? "commands" : undefined;
+  const hasMentions = /(?:^|\s)@([\w.:-]+)/.test(value);
+  const catalogMode = mode === "commands"
+    ? "commands"
+    : mode === "skills" || hasMentions ? "skills" : undefined;
   useEffect(() => {
     box.current?.focus();
   }, [thread.id]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const node = box.current;
     if (!node) return;
     node.style.height = "0px";
     node.style.height = `${Math.min(node.scrollHeight, 320)}px`;
+    if (highlights.current) highlights.current.scrollTop = node.scrollTop;
   }, [value]);
   useEffect(() => {
-    if (!mode) return;
+    const node = box.current;
+    if (!node) return;
+    const observer = new ResizeObserver(() => {
+      if (highlights.current) {
+        highlights.current.style.width = `${node.clientWidth}px`;
+        highlights.current.scrollTop = node.scrollTop;
+      }
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!catalogMode) return;
     const controller = new AbortController();
     setLoading(true);
     setError("");
-    setSkills([]);
     setNativeCommands([]);
     const params = new URLSearchParams({
       projectId: thread.projectId,
@@ -63,7 +86,7 @@ export function ComposerInput({
       if (!controller.signal.aborted) setSkills(value);
     });
     const requests =
-      mode === "commands"
+      catalogMode === "commands"
         ? [
             readSkills,
             api<ProviderCommand[]>(`commands?${params}`, {
@@ -81,7 +104,7 @@ export function ComposerInput({
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [mode, thread.id, thread.provider, thread.projectId]);
+  }, [catalogMode, thread.id, thread.provider, thread.projectId]);
   useEffect(() => {
     setSelected(0);
     setDismissed(undefined);
@@ -104,6 +127,18 @@ export function ComposerInput({
     "__remote-workflow",
     "workflow-launch-exec",
   ]);
+  const highlighted: ReactNode[] = [];
+  let end = 0;
+  for (const match of value.matchAll(/(?:^|\s)@([\w.:-]+)(?![\w./:-])/g)) {
+    if (!enabled.some((skill) => skill.name === match[1])) continue;
+    const start = match.index + match[0].indexOf("@");
+    highlighted.push(value.slice(end, start));
+    highlighted.push(
+      <mark key={start} className="skill-mention">@{match[1]}</mark>,
+    );
+    end = match.index + match[0].length;
+  }
+  highlighted.push(value.slice(end));
   const options =
     mode === "skills"
       ? enabled
@@ -208,76 +243,85 @@ export function ComposerInput({
           </div>
         </div>
       )}
-      <textarea
-        ref={box}
-        className="composer-input scroll"
-        value={value}
-        rows={1}
-        aria-label="Message"
-        aria-autocomplete="list"
-        aria-controls={visible ? "composer-suggestions" : undefined}
-        aria-activedescendant={
-          visible && options.length ? `composer-option-${index}` : undefined
-        }
-        disabled={disabled}
-        placeholder={
-          !connected
-            ? "Citropy is reconnecting. Your message will wait…"
-            : thread.running
-              ? "Queue a follow-up…"
-              : "Ask a question or describe a change…"
-        }
-        spellCheck={false}
-        onPaste={(event) => {
-          const files = Array.from(event.clipboardData.items)
-            .filter((item) => item.kind === "file")
-            .map((item) => item.getAsFile())
-            .filter((file): file is File => Boolean(file));
-          if (files.length) {
-            event.preventDefault();
-            onFiles(files);
+      <div className="composer-editor" data-highlighted={highlighted.length > 1}>
+        <div className="composer-highlights" ref={highlights} aria-hidden="true">
+          {highlighted}{"\n"}
+        </div>
+        <textarea
+          ref={box}
+          className="composer-input scroll"
+          value={value}
+          rows={1}
+          aria-label="Message"
+          aria-autocomplete="list"
+          aria-controls={visible ? "composer-suggestions" : undefined}
+          aria-activedescendant={
+            visible && options.length ? `composer-option-${index}` : undefined
           }
-        }}
-        onChange={(event) => {
-          setCaret(event.target.selectionStart);
-          onChange(event.target.value);
-        }}
-        onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
-        onKeyDown={(event) => {
-          if (event.nativeEvent.isComposing) return;
-          if (visible && event.key === "Escape") {
-            event.preventDefault();
-            setDismissed(query);
-            return;
+          disabled={disabled}
+          placeholder={
+            !connected
+              ? "Citropy is reconnecting. Your message will wait…"
+              : thread.running
+                ? "Queue a follow-up…"
+                : "Ask a question or describe a change…"
           }
-          if (visible && activeOption) {
-            if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          spellCheck={false}
+          onScroll={(event) => {
+            if (highlights.current)
+              highlights.current.scrollTop = event.currentTarget.scrollTop;
+          }}
+          onPaste={(event) => {
+            const files = Array.from(event.clipboardData.items)
+              .filter((item) => item.kind === "file")
+              .map((item) => item.getAsFile())
+              .filter((file): file is File => Boolean(file));
+            if (files.length) {
               event.preventDefault();
-              setSelected(
-                (index +
-                  (event.key === "ArrowDown" ? 1 : -1) +
-                  options.length) %
-                  options.length,
-              );
+              onFiles(files);
+            }
+          }}
+          onChange={(event) => {
+            setCaret(event.target.selectionStart);
+            onChange(event.target.value);
+          }}
+          onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
+          onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) return;
+            if (visible && event.key === "Escape") {
+              event.preventDefault();
+              setDismissed(query);
               return;
             }
-            if (
-              event.key === "Tab" ||
-              (event.key === "Enter" &&
-                !event.shiftKey &&
-                (mode === "skills" || activeOption.label !== value.trim()))
-            ) {
-              event.preventDefault();
-              choose(activeOption.label);
-              return;
+            if (visible && activeOption) {
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                setSelected(
+                  (index +
+                    (event.key === "ArrowDown" ? 1 : -1) +
+                    options.length) %
+                    options.length,
+                );
+                return;
+              }
+              if (
+                event.key === "Tab" ||
+                (event.key === "Enter" &&
+                  !event.shiftKey &&
+                  (mode === "skills" || activeOption.label !== value.trim()))
+              ) {
+                event.preventDefault();
+                choose(activeOption.label);
+                return;
+              }
             }
-          }
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            onSubmit();
-          }
-        }}
-      />
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              onSubmit();
+            }
+          }}
+        />
+      </div>
     </div>
   );
 }

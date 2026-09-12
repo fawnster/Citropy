@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { AnimatePresence, motion } from "motion/react";
 import { ChevronDown } from "./icons.ts";
 import { MessageBlock } from "./MessageBlock.tsx";
+import { MessageNavigator } from "./MessageNavigator.tsx";
 import { Working } from "./Working.tsx";
 import { useApp } from "../lib/store.ts";
 import { loadThread, refreshGit } from "../lib/actions.ts";
@@ -126,6 +127,11 @@ export function Conversation() {
   const busy =
     status === "thinking" || status === "working" || status === "queued";
   const messages = ids ?? [];
+  const virtualItems = timeline.getVirtualItems();
+  const visibleItem = virtualItems.find((item) => item.end > (timeline.scrollOffset ?? 0) + 30);
+  const jumpToMessage = useCallback((messageId: string) => {
+    useApp.setState({ searchMessageId: messageId });
+  }, []);
 
   return (
     <div className="conversation-viewport">
@@ -146,7 +152,7 @@ export function Conversation() {
             className="timeline-rows"
             style={{ height: timeline.getTotalSize() }}
           >
-            {timeline.getVirtualItems().map((item) => {
+            {virtualItems.map((item) => {
               const row = rows[item.index]!;
               return (
                 <div
@@ -178,6 +184,12 @@ export function Conversation() {
           <div className="canvas-tail" />
         </div>
       </div>
+
+      <MessageNavigator
+        rows={rows}
+        activeMessageId={atBottom ? messages.at(-1) : visibleItem && rows[visibleItem.index]?.messageId}
+        onSelect={jumpToMessage}
+      />
 
       <div className="conversation-jump">
         <AnimatePresence>

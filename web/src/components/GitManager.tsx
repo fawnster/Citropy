@@ -174,10 +174,12 @@ export function GitManager({
   sidebarOpen,
   onCloseSidebar,
   onBack,
+  navigation,
 }: {
   sidebarOpen: boolean;
   onCloseSidebar: () => void;
   onBack: () => void;
+  navigation?: ReactNode;
 }) {
   const projectId = useApp((state) => state.activeProjectId);
   const thread = useApp((state) => state.threads[state.activeThreadId ?? ""]);
@@ -551,7 +553,7 @@ export function GitManager({
   return (
     <section className="section-view" aria-label="Git manager">
       {sidebarOpen && (
-        <SectionSidebar title="Source control" onBack={onBack}>
+        <SectionSidebar title="Source control" onBack={onBack} navigation={navigation}>
           {tabs.map(({ name, icon: Icon }) => (
             <button
               className="section-link"

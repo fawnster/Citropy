@@ -448,8 +448,19 @@ export function Sidebar({
             </button>
           )}
         />
+      </div>
+      <div className="thread-toolbar">
+        <label className="thread-search">
+          <Search size={14} aria-hidden="true" />
+          <input
+            aria-label="Find a conversation"
+            placeholder="Search conversations"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+        </label>
         <Menu
-          align="start"
+          align="end"
           header="Choose a provider"
           width={240}
           items={providers
@@ -469,24 +480,17 @@ export function Sidebar({
               aria-haspopup="menu"
               aria-expanded={open}
               className="new-thread"
+              aria-label="New thread"
+              title="New thread"
               type="button"
               onClick={toggle}
               disabled={!activeProjectId}
             >
-              <MessageSquarePlus size={17} /> New thread
+              <MessageSquarePlus size={18} />
             </button>
           )}
         />
       </div>
-      <label className="thread-search">
-        <Search size={14} aria-hidden="true" />
-        <input
-          aria-label="Find a conversation"
-          placeholder="Search conversations"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </label>
       {query.trim() && (
         <label className="search-scope">
           <input

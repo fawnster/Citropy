@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Bell,
   BookOpen,
@@ -44,27 +44,29 @@ const sections = [
   { name: "Actions", icon: Play, global: false },
   { name: "Releases", icon: Tag, global: false },
   { name: "Notifications", icon: Bell, global: true },
-  { name: "Account", icon: UserRound, global: true },
 ] as const;
-type Section = (typeof sections)[number]["name"];
+type Section = (typeof sections)[number]["name"] | "Account";
 
 export function GitHub({
   sidebarOpen,
   onCloseSidebar,
   onBack,
   onGit,
+  navigation,
+  status,
 }: {
   sidebarOpen: boolean;
   onCloseSidebar: () => void;
   onBack: () => void;
   onGit: () => void;
+  navigation?: ReactNode;
+  status: ReturnType<typeof useGitHub<"status">>;
 }) {
   const connected = useApp((state) => state.connected);
   const projectId = useApp((state) => state.activeProjectId);
   const project = useApp((state) =>
     state.projects.find((project) => project.id === projectId),
   );
-  const status = useGitHub("status", { projectId: projectId ?? undefined });
   const [section, setSection] = useState<Section>("Repositories");
   const [repo, setRepo] = useState("");
   const repository = useGitHub(
@@ -85,11 +87,13 @@ export function GitHub({
     if (!repo && status.data?.repositories[0])
       setRepo(status.data.repositories[0].repo);
   }, [status.data, repo]);
-  const global = sections.find((entry) => entry.name === section)?.global;
+  const global =
+    section === "Account" ||
+    sections.find((entry) => entry.name === section)?.global;
   return (
     <section className="section-view github-view" aria-label="GitHub">
       {sidebarOpen && (
-        <SectionSidebar title="GitHub" onBack={onBack}>
+        <SectionSidebar title="GitHub" onBack={onBack} navigation={navigation}>
           {sections.map(({ name, icon: Icon, global }) => (
             <button
               className="section-link"
@@ -111,13 +115,28 @@ export function GitHub({
               <strong>{repo}</strong>
             </div>
           )}
-          {status.data?.account && (
-            <div className="github-sidebar-account">
+          <button
+            type="button"
+            className="github-sidebar-account"
+            aria-label={
+              status.data?.account
+                ? `Account settings for ${status.data.account.login}`
+                : "Connect GitHub account"
+            }
+            aria-current={section === "Account" ? "page" : undefined}
+            onClick={() => {
+              setSection("Account");
+              if (viewportWidth() <= 720) onCloseSidebar();
+            }}
+          >
+            {status.data?.account ? (
               <img src={status.data.account.avatar_url} alt="" />
-              <span>{status.data.account.login}</span>
-              <Check size={14} />
-            </div>
-          )}
+            ) : (
+              <UserRound size={21} />
+            )}
+            <span>{status.data?.account?.login ?? "Connect GitHub"}</span>
+            {status.data?.account && <Check size={14} />}
+          </button>
         </SectionSidebar>
       )}
       <div className="github-main">

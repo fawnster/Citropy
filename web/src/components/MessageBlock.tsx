@@ -39,18 +39,37 @@ export const MessageBlock = memo(function MessageBlock({
   const providers = useApp((state) => state.providers);
 
   const thread = useApp((state) => state.threads[state.activeThreadId ?? ""]);
+  const account = useApp((state) =>
+    state.showGitHubIdentity && state.messages[messageId]?.role === "user"
+      ? state.githubAccount
+      : null,
+  );
 
   if (!shell) return null;
 
   if (shell.role === "user") {
     return (
       <article id={`message-${messageId}`} className="turn turn-user">
-        <div className="message-avatar user-avatar" aria-label="You">
+        <div
+          className="message-avatar user-avatar"
+          aria-label={account?.login ?? "You"}
+        >
           <UserRound size={17} />
+          {account?.avatar_url && (
+            <img
+              key={account.avatar_url}
+              src={account.avatar_url}
+              alt=""
+              referrerPolicy="no-referrer"
+              onError={(event) => {
+                event.currentTarget.hidden = true;
+              }}
+            />
+          )}
         </div>
         <div className="message-content">
           <div className="turn-heading">
-            <strong>You</strong>
+            <strong>{account?.login ?? "You"}</strong>
             <time>{clock(shell.ts)}</time>
           </div>
           {shell.attachments?.length && thread ? (

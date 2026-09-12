@@ -9,11 +9,13 @@ export function SidebarFooter({
   onGitHub,
   onSettings,
   onUsage,
+  activeView,
 }: {
   onGit: () => void;
   onGitHub: () => void;
   onSettings: () => void;
   onUsage: () => void;
+  activeView?: string;
 }) {
   const [compact, setCompact] = useState(
     () => localStorage.getItem("citropy.compactNavigation") === "1",
@@ -71,6 +73,7 @@ export function SidebarFooter({
             type="button"
             className="rail-action"
             data-tone={tone}
+            aria-current={activeView === tone ? "page" : undefined}
             key={name}
             onClick={run}
             aria-label={name}

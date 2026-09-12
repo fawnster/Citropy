@@ -2,6 +2,7 @@ import { resolveResponse } from "./requests.ts";
 import type { ComputerState } from "../../../shared/computer.ts";
 import "./migrate-preferences.ts";
 import { create } from "zustand";
+import type { GitHubUser } from "../../../shared/github.ts";
 import type {
   BrowserState,
   PanelTab,
@@ -64,6 +65,8 @@ export interface AppState {
   } | null;
   searchMessageId: string | null;
   connected: boolean;
+  githubAccount: GitHubUser | null;
+  showGitHubIdentity: boolean;
   offline: Record<string, QueuedMessage[]>;
   choosingWorkspace: boolean;
   home: string;
@@ -151,6 +154,8 @@ export const useApp = create<AppState>(() => ({
   searchResult: null,
   searchMessageId: null,
   connected: false,
+  githubAccount: null,
+  showGitHubIdentity: readFlag("citropy.showGitHubIdentity", true),
   offline: readOffline(),
   choosingWorkspace: false,
   home: "",
@@ -758,6 +763,11 @@ export function setUiScale(value: number): void {
 export function setTextStreaming(value: boolean): void {
   useApp.setState({ textStreaming: value });
   localStorage.setItem("citropy.textStreaming", value ? "1" : "0");
+}
+
+export function setShowGitHubIdentity(value: boolean): void {
+  useApp.setState({ showGitHubIdentity: value });
+  localStorage.setItem("citropy.showGitHubIdentity", value ? "1" : "0");
 }
 
 export function setTypingAnimation(value: boolean): void {

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState, type ReactNode } from "react";
 import {
   Check,
   Moon,
@@ -29,6 +29,7 @@ import {
   setTextStreaming,
   setTypingAnimation,
   setTypingSpeed,
+  setShowGitHubIdentity,
   toggleSidebar,
   toggleInspector,
   useApp,
@@ -41,47 +42,61 @@ import type { DesktopWindowState } from "../desktop.d.ts";
 const sections = [
   {
     name: "General",
+    group: "Workspace",
     icon: SlidersHorizontal,
     description: "Set up your conversation workspace.",
   },
   {
     name: "Appearance",
+    group: "Workspace",
     icon: Palette,
     description: "Choose how Citropy looks.",
   },
   {
     name: "Projects",
+    group: "Workspace",
     icon: FolderCog,
     description: "Set project defaults, worktrees, and terminal actions.",
   },
   {
+    name: "Providers",
+    group: "Providers & tools",
+    icon: Workflow,
+    description: "Choose which providers you use in Citropy.",
+  },
+  {
     name: "Skills",
+    group: "Providers & tools",
     icon: BookOpen,
     description: "Browse and manage the skills available to your providers.",
   },
   {
     name: "Browser",
+    group: "Providers & tools",
     icon: Globe,
     description: "Manage browser profiles, saved logins, and site data.",
   },
-  { name: "Computer use", icon: Monitor, description: "Share screens and control native desktop applications." },
+  {
+    name: "Computer use",
+    group: "Providers & tools",
+    icon: Monitor,
+    description: "Share screens and control native desktop applications.",
+  },
   {
     name: "Resources",
+    group: "Application",
     icon: Activity,
     description: "Inspect memory, processor use, and running processes.",
   },
   {
-    name: "Providers",
-    icon: Workflow,
-    description: "Choose which providers you use in Citropy.",
-  },
-  {
     name: "Notifications",
+    group: "Workspace",
     icon: Bell,
     description: "Choose how Citropy lets you know when work is done.",
   },
   {
     name: "Application",
+    group: "Application",
     icon: Monitor,
     description: "Manage the desktop app and live updates.",
   },
@@ -91,11 +106,13 @@ export function Settings({
   sidebarOpen,
   onCloseSidebar,
   onBack,
+  navigation,
   initialSection = "General",
 }: {
   sidebarOpen: boolean;
   onCloseSidebar: () => void;
   onBack: () => void;
+  navigation?: ReactNode;
   initialSection?: string;
 }) {
   const [section, setSection] = useState(initialSection);
@@ -107,6 +124,7 @@ export function Settings({
   const textStreaming = useApp((state) => state.textStreaming);
   const typingAnimation = useApp((state) => state.typingAnimation);
   const typingSpeed = useApp((state) => state.typingSpeed);
+  const showGitHubIdentity = useApp((state) => state.showGitHubIdentity);
 
   const notificationPreferences = useApp(
     (state) => state.notificationPreferences,
@@ -157,22 +175,27 @@ export function Settings({
   return (
     <section className="section-view" aria-label="Settings">
       {sidebarOpen && (
-        <SectionSidebar title="Settings" onBack={onBack}>
-          {sections.map(({ name, icon: Icon }) => (
-            <button
-              className="section-link"
-              data-settings-section={name.toLowerCase()}
-              type="button"
-              key={name}
-              aria-current={section === name ? "page" : undefined}
-              onClick={() => {
-                setSection(name);
-                if (viewportWidth() <= 720) onCloseSidebar();
-              }}
-            >
-              <Icon size={17} />
-              <span>{name}</span>
-            </button>
+        <SectionSidebar title="Settings" onBack={onBack} navigation={navigation}>
+          {["Workspace", "Providers & tools", "Application"].map((group) => (
+            <Fragment key={group}>
+              <h2 className="section-nav-label">{group}</h2>
+              {sections.filter((entry) => entry.group === group).map(({ name, icon: Icon }) => (
+                <button
+                  className="section-link"
+                  data-settings-section={name.toLowerCase()}
+                  type="button"
+                  key={name}
+                  aria-current={section === name ? "page" : undefined}
+                  onClick={() => {
+                    setSection(name);
+                    if (viewportWidth() <= 720) onCloseSidebar();
+                  }}
+                >
+                  <Icon size={17} />
+                  <span>{name}</span>
+                </button>
+              ))}
+            </Fragment>
           ))}
         </SectionSidebar>
       )}
@@ -241,6 +264,26 @@ export function Settings({
               <p className="settings-note">
                 Layout preferences are saved on this device.
               </p>
+              <h2 className="settings-group-heading settings-group-spaced">
+                Chat identity
+              </h2>
+              <div className="settings-group">
+                <label className="setting-row">
+                  <span>
+                    <strong>Use GitHub profile in chat</strong>
+                    <small>
+                      Show your connected GitHub username and photo on your messages. Turn off to show “You” and a generic avatar.
+                    </small>
+                  </span>
+                  <input
+                    className="setting-switch"
+                    type="checkbox"
+                    role="switch"
+                    checked={showGitHubIdentity}
+                    onChange={(event) => setShowGitHubIdentity(event.target.checked)}
+                  />
+                </label>
+              </div>
               <h2 className="settings-group-heading settings-group-spaced">
                 Response text
               </h2>

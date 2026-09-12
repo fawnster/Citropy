@@ -387,6 +387,38 @@
 .composer-writing {
   position: relative;
 }
+.composer-editor {
+  position: relative;
+}
+.composer-highlights {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  padding: 16px 18px 8px;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  pointer-events: none;
+  visibility: hidden;
+}
+.composer-editor[data-highlighted="true"] .composer-highlights {
+  visibility: visible;
+}
+.composer-editor[data-highlighted="true"] .composer-input {
+  position: relative;
+  color: transparent;
+  caret-color: var(--text);
+}
+.composer-input::selection {
+  background: var(--accent-soft);
+}
+.skill-mention {
+  background: color-mix(in srgb, var(--task-icon) 15%, transparent);
+  color: var(--task-icon);
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--task-icon) 15%, transparent);
+}
 .composer-suggestions {
   position: absolute;
   z-index: 70;

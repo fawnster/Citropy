@@ -9,6 +9,7 @@ import {
 } from "react";
 import { Titlebar } from "./components/Titlebar.tsx";
 import { Sidebar } from "./components/Sidebar.tsx";
+import { SidebarFooter } from "./components/SidebarFooter.tsx";
 import { Conversation } from "./components/Conversation.tsx";
 import { Composer } from "./components/Composer.tsx";
 import { Inspector } from "./components/Inspector.tsx";
@@ -26,6 +27,7 @@ import {
 } from "./lib/store.ts";
 import { send } from "./lib/socket.ts";
 import { createThread } from "./lib/actions.ts";
+import { useGitHub } from "./lib/use-github.ts";
 
 const GitHub = lazy(() =>
   import("./components/github/GitHub.tsx").then((module) => ({
@@ -62,6 +64,9 @@ export function App() {
   const panelWidths = useApp((state) => state.panelWidths);
   const activeThreadId = useApp((state) => state.activeThreadId);
   const activeProjectId = useApp((state) => state.activeProjectId);
+  const githubStatus = useGitHub("status", {
+    projectId: activeProjectId ?? undefined,
+  });
   const threadOrder = useApp((state) => state.threadOrder);
   const threads = useApp((state) => state.threads);
   const hasProject = useApp((state) => state.projects.length > 0);
@@ -81,6 +86,23 @@ export function App() {
     if (view === "chat") toggleSidebar();
     else setSectionSidebarOpen((open) => !open);
   };
+  const navigation = (
+    <SidebarFooter
+      activeView={view}
+      onGit={() => openView("git")}
+      onGitHub={() => openView("github")}
+      onSettings={() => {
+        setSettingsSection("General");
+        openView("settings");
+      }}
+      onUsage={() => openView("usage")}
+    />
+  );
+
+  useEffect(() => {
+    if (githubStatus.data)
+      useApp.setState({ githubAccount: githubStatus.data.account ?? null });
+  }, [githubStatus.data]);
 
   const openNotification = (target: NotificationTarget) => {
     const state = useApp.getState();
@@ -213,11 +235,13 @@ export function App() {
           >
             {view === "usage" ? (
               <UsageView
+                navigation={navigation}
                 sidebarOpen={sectionSidebarOpen}
                 onBack={() => openView("chat")}
               />
             ) : view === "git" ? (
               <GitManager
+                navigation={navigation}
                 key={`${activeProjectId}:${activeThreadId}`}
                 sidebarOpen={sectionSidebarOpen}
                 onCloseSidebar={() => setSectionSidebarOpen(false)}
@@ -225,6 +249,8 @@ export function App() {
               />
             ) : view === "github" ? (
               <GitHub
+                navigation={navigation}
+                status={githubStatus}
                 onGit={() => openView("git")}
                 key={activeProjectId}
                 sidebarOpen={sectionSidebarOpen}
@@ -233,6 +259,7 @@ export function App() {
               />
             ) : view === "settings" ? (
               <Settings
+                navigation={navigation}
                 initialSection={settingsSection}
                 sidebarOpen={sectionSidebarOpen}
                 onCloseSidebar={() => setSectionSidebarOpen(false)}
