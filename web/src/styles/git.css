@@ -169,47 +169,6 @@
   font-family: var(--font-mono);
 }
 
-.git-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  min-height: 34px;
-  padding: 7px 20px;
-  flex: none;
-  border-top: 1px solid var(--line);
-  color: var(--text-3);
-  background: var(--panel);
-  font-size: 11px;
-}
-
-.git-footer > span {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-}
-.git-footer > span > svg {
-  flex: none;
-}
-.git-footer-summary {
-  flex: none;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-.git-success {
-  color: var(--ok);
-}
-.git-connection {
-  height: 5px;
-  width: 5px;
-  border-radius: 50%;
-  background: var(--bad);
-  flex: none;
-}
-.git-connection[data-connected="true"] {
-  background: var(--text-3);
-}
 .git-spinner {
   animation: citropy-spin 1s linear infinite;
 }
@@ -376,6 +335,7 @@
 }
 .git-file-group > header {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 10px;
@@ -399,6 +359,21 @@
 }
 .git-text-button:hover {
   color: var(--accent-text);
+}
+.git-manager .git-stage-all {
+  height: 28px;
+  padding: 0 9px;
+  color: var(--text);
+  background: var(--raised);
+  border-color: var(--line-strong);
+  font-size: 11.5px;
+}
+.git-stage-all svg {
+  color: var(--file-icon);
+}
+.git-manager .git-stage-all:hover:not(:disabled) {
+  background: var(--raised-2);
+  border-color: var(--text-4);
 }
 .git-list-hint {
   color: var(--text-3);
@@ -488,11 +463,9 @@
   font-size: 12px;
   font-weight: 550;
 }
+.git-commit-form input,
 .git-commit-form textarea {
   width: 100%;
-  min-height: 76px;
-  max-height: 190px;
-  resize: vertical;
   border: 1px solid var(--line-strong);
   border-radius: 5px;
   background: var(--canvas);
@@ -500,7 +473,19 @@
   line-height: 1.7;
   padding: 10px;
 }
+.git-commit-form textarea {
+  min-height: 76px;
+  max-height: 190px;
+  resize: vertical;
+}
+.git-optional {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--text-4);
+}
 
+.git-commit-form input::placeholder,
 .git-commit-form textarea::placeholder {
   color: var(--text-4);
 }
@@ -609,28 +594,23 @@
 .git-patches {
   padding: 18px 20px 40px;
 }
-.git-patches > .diff {
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  overflow: hidden;
-}
-.git-patches .diff {
+.git-review-scroll .diff {
   font-size: 12px;
   line-height: 1.8;
 }
 .git-patches .diff-body {
-  max-height: none;
+  max-height: 480px;
 }
-.git-patches .diff-code {
+.git-review-scroll .diff-code {
   white-space: pre;
   word-break: normal;
 }
-.git-patches .diff-line {
+.git-review-scroll .diff-line {
   width: max-content;
   min-width: 100%;
   grid-template-columns: 42px 42px 18px minmax(0, 1fr);
 }
-.git-patches .diff-no {
+.git-review-scroll .diff-no {
   font-size: 10.5px;
 }
 .git-patch {
@@ -639,7 +619,26 @@
   overflow: hidden;
   margin-bottom: 16px;
 }
-.git-patch > summary {
+
+.git-review-scroll[data-kind="file"] { overflow: hidden; }
+.git-single-patch {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  padding: 18px 20px 20px;
+}
+.git-single-patch > .diff {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.git-single-patch .diff-body { flex: 1; min-height: 0; max-height: none; }
+.git-patch-heading {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -648,17 +647,25 @@
   cursor: pointer;
   font-size: 12px;
   overflow-wrap: anywhere;
-  list-style: none;
+  width: 100%;
+  text-align: left;
 }
 .git-patch-chevron {
   transition: transform var(--dur-fast);
 }
-.git-patch[open] .git-patch-chevron {
+.git-patch[data-open="true"] .git-patch-chevron {
   transform: rotate(90deg);
 }
-.git-patch > summary > svg {
+.git-patch-heading > svg {
   flex: none;
   color: var(--text-3);
+}
+.git-patch-list {
+  position: relative;
+}
+.git-patch-row {
+  position: absolute;
+  inset: 0 0 auto;
 }
 .git-patch .diff-stat {
   margin-left: auto;
@@ -1271,14 +1278,6 @@
   .git-inline-empty > .btn {
     margin-left: 36px;
   }
-  .git-footer {
-    padding: 8px 16px;
-    min-height: 34px;
-    font-size: 10.5px;
-  }
-  .git-footer-summary {
-    display: none !important;
-  }
   .git-alert {
     padding: 13px 18px;
   }
@@ -1315,10 +1314,10 @@
   .git-patches {
     padding: 12px 10px;
   }
-  .git-patches .diff-line {
+  .git-review-scroll .diff-line {
     grid-template-columns: 32px 32px 14px minmax(0, 1fr);
   }
-  .git-patches .diff {
+  .git-review-scroll .diff {
     font-size: 11px;
   }
 }

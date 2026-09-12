@@ -755,7 +755,10 @@ app
       updater: autoUpdater,
       version,
       unavailable: unavailableUpdate,
-      emit: (state) => { if (!window.isDestroyed()) window.webContents.send("updates:state", state); },
+      emit: (state) => {
+        if (!window.isDestroyed()) window.webContents.send("updates:state", state);
+        if (state.status === "available") emit({ type: "update.available", version: state.version });
+      },
       authenticate: async () => {
         let token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
         if (!token) {

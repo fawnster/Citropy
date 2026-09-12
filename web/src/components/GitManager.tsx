@@ -33,8 +33,12 @@ import {
 import { chooseWorkspace, manageGit } from "../lib/actions.ts";
 import { useApp, viewportWidth } from "../lib/store.ts";
 import { shortPath } from "../lib/format.ts";
+import { currentLocale, useI18n } from "../lib/i18n.ts";
+import { FileIcon } from "./FileIcon.tsx";
+import { groupGitFiles } from "../lib/git-files.ts";
 import { Menu } from "./Menu.tsx";
 import { SectionSidebar } from "./SectionSidebar.tsx";
+import { WorkspaceSelector } from "./WorkspaceSelector.tsx";
 import { GitDialog, type GitDialogAction } from "./GitDialog.tsx";
 import { GitReview, type GitSelection } from "./GitReview.tsx";
 import type {
@@ -112,10 +116,10 @@ function isConflict(file: GitFile) {
   );
 }
 
-function fileLabel(file: GitFile, staged: boolean) {
-  if (isConflict(file)) return "Conflict";
-  if (file.untracked) return "New";
-  return (
+function fileLabel(file: GitFile, staged: boolean, t: ReturnType<typeof useI18n>) {
+  if (isConflict(file)) return t("Conflict");
+  if (file.untracked) return t("New");
+  return t(
     (
       {
         M: "Modified",
@@ -129,23 +133,23 @@ function fileLabel(file: GitFile, staged: boolean) {
   );
 }
 
-function readableError(error: string) {
+function readableError(error: string, t: ReturnType<typeof useI18n>) {
   if (/unable to auto-detect email|please tell me who you are/i.test(error))
-    return "Set your Git name and email before making a commit.";
+    return t("Set your Git name and email before making a commit.");
   if (/conflict|automatic merge failed/i.test(error))
-    return "Some changes conflict. Review the affected files before continuing.";
+    return t("Some changes conflict. Review the affected files before continuing.");
   if (/would be overwritten/i.test(error))
-    return "Commit or stash your local changes before switching.";
+    return t("Commit or stash your local changes before switching.");
   if (/not fully merged/i.test(error))
-    return "This branch has unmerged commits. Merge them before deleting the branch.";
+    return t("This branch has unmerged commits. Merge them before deleting the branch.");
   if (/authentication|permission denied|could not read username/i.test(error))
-    return "Git couldn’t authenticate with this remote. Check your Git credentials.";
+    return t("Git couldn’t authenticate with this remote. Check your Git credentials.");
   return (
     error
       .split("\n")
       .find((line) => line.trim() && !line.startsWith("Command failed:"))
       ?.replace(/^(fatal|error):\s*/i, "") ??
-    "Git couldn’t complete the action."
+    t("Git couldn’t complete the action.")
   );
 }
 
@@ -181,6 +185,7 @@ export function GitManager({
   onBack: () => void;
   navigation?: ReactNode;
 }) {
+  const t = useI18n();
   const projectId = useApp((state) => state.activeProjectId);
   const thread = useApp((state) => state.threads[state.activeThreadId ?? ""]);
   const sourceProject = useApp((state) =>
@@ -197,6 +202,7 @@ export function GitManager({
   const [busy, setBusy] = useState<GitOperation | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [message, setMessage] = useState("");
+  const [description, setDescription] = useState("");
   const [filter, setFilter] = useState("");
   const [selection, setSelection] = useState<GitSelection | null>(null);
   const [offset, setOffset] = useState(0);
@@ -207,10 +213,9 @@ export function GitManager({
   const dialogTrigger = useRef<HTMLElement | null>(null);
 
   const firstFile = (overview: GitOverview): GitSelection | null => {
-    const file =
-      overview.status?.files.find(
-        (entry) => entry.untracked || entry.work !== " ",
-      ) ?? overview.status?.files[0];
+    const files = overview.status?.files ?? [];
+    const unstaged = files.filter((entry) => entry.untracked || entry.work !== " ");
+    const file = files.find(isConflict) ?? groupGitFiles(unstaged, false)[0]?.files[0] ?? groupGitFiles(files, true)[0]?.files[0];
     return file
       ? {
           kind: "file",
@@ -284,7 +289,7 @@ export function GitManager({
         if (epoch === generation.current)
           setFeedback({
             error: true,
-            text: readableError(error.message),
+            text: readableError(error.message, t),
             detail: error.message,
           });
       })
@@ -317,7 +322,10 @@ export function GitManager({
       if (typeof result !== "string" && "repository" in result)
         receive(result, page);
       else {
-        if (operation === "commit") setMessage("");
+        if (operation === "commit") {
+          setMessage("");
+          setDescription("");
+        }
         try {
           const updated = await manageGit(projectId, "overview");
           if (epoch !== generation.current) return false;
@@ -327,23 +335,23 @@ export function GitManager({
           if (epoch !== generation.current) return false;
           setFeedback({
             error: true,
-            text:
-              (doneLabels[operation] ?? "Action completed.") +
-              " Refresh to load the latest repository state.",
+            text: t("{message} Refresh to load the latest repository state.", {
+              message: t(doneLabels[operation] ?? "Action completed."),
+            }),
             detail: (error as Error).message,
           });
           return true;
         }
         setFeedback({
           error: false,
-          text: doneLabels[operation] ?? "Repository updated.",
+          text: t(doneLabels[operation] ?? "Repository updated."),
         });
       }
       return true;
     } catch (error) {
       if (epoch === generation.current) {
         const detail = (error as Error).message;
-        setFeedback({ error: true, text: readableError(detail), detail });
+        setFeedback({ error: true, text: readableError(detail, t), detail });
         try {
           const updated = await manageGit(projectId, "overview");
           if (
@@ -434,30 +442,27 @@ export function GitManager({
   const createBranch = () =>
     showDialog({
       operation: "createBranch",
-      title: "Create a branch",
-      description:
-        "Your new branch will start from " +
-        branch +
-        ". Citropy will switch to it after creation.",
-      label: "Create and switch",
+      title: t("Create a branch"),
+      description: t("Your new branch will start from {branch}. Citropy will switch to it after creation.", { branch }),
+      label: t("Create and switch"),
       fields: "branch",
     });
   const saveStash = () =>
     showDialog({
       operation: "stash",
-      title: "Save changes for later",
+      title: t("Save changes for later"),
       description:
-        "Save staged, unstaged, and new files in a stash, then return to a clean working tree.",
-      label: "Save stash",
+        t("Save staged, unstaged, and new files in a stash, then return to a clean working tree."),
+      label: t("Save stash"),
       fields: "stash",
     });
   const addRemote = () =>
     showDialog({
       operation: "addRemote",
-      title: "Connect a remote",
+      title: t("Connect a remote"),
       description:
-        "Link this workspace to an existing remote repository. You choose when to publish your commits.",
-      label: "Add remote",
+        t("Link this workspace to an existing remote repository. You choose when to publish your commits."),
+      label: t("Add remote"),
       fields: "remote",
     });
   const reviewChanges = (
@@ -466,7 +471,7 @@ export function GitManager({
       data-variant="primary"
       onClick={() => changeSection("Changes")}
     >
-      Review changes
+            {t("Review changes")}
       <ArrowRight size={15} />
     </button>
   );
@@ -475,85 +480,85 @@ export function GitManager({
     <section className="git-file-group">
       <header>
         <h3>
-          {title}
+          {t(title)}
           <span className="git-count">{list.length}</span>
         </h3>
         <button
-          className="git-text-button"
+          className="btn git-stage-all"
           disabled={disabled || !list.length}
           onClick={() => void act(inIndex ? "unstageAll" : "stageAll")}
         >
-          {inIndex ? "Unstage all" : "Stage all"}
+          {inIndex ? <Minus size={14} /> : <Plus size={14} />}
+          {inIndex ? t("Unstage all") : t("Stage all")}
         </button>
       </header>
       {!list.length && (
         <p className="git-list-hint">
           {inIndex
-            ? "Stage files to include them in your commit."
-            : "No unstaged changes."}
+            ? t("Stage files to include them in your commit.")
+            : t("No unstaged changes.")}
         </p>
       )}
-      {list
-        .filter((file) => match(file.path))
-        .map((file) => {
-          const label = fileLabel(file, inIndex);
-          const active =
-            selection?.kind === "file" &&
-            selection.path === file.path &&
-            selection.staged === inIndex;
-          const name = file.path.split("/").pop() ?? file.path;
-          const directory = file.path.slice(0, -name.length);
-          return (
-            <div
-              className="git-file-row"
-              key={file.path}
-              data-selected={active}
-            >
-              <button
-                className="git-file-name"
-                aria-pressed={active}
-                title={file.path + " · " + label}
-                onClick={() =>
-                  setSelection({
-                    kind: "file",
-                    path: file.path,
-                    staged: inIndex,
-                  })
-                }
+      {groupGitFiles(list.filter((file) => match(file.path)), inIndex).map((group) => (
+        <div className="git-change-category" key={group.kind}>
+          <h4 className="change-category" data-kind={group.kind}>{t(group.label)}<span>{group.files.length}</span></h4>
+          {group.files.map((file) => {
+            const label = fileLabel(file, inIndex, t);
+            const active =
+              selection?.kind === "file" &&
+              selection.path === file.path &&
+              selection.staged === inIndex;
+            const name = file.path.split("/").pop() ?? file.path;
+            const directory = file.path.slice(0, -name.length);
+            return (
+              <div
+                className="git-file-row"
+                key={file.path}
+                data-selected={active}
               >
-                {file.untracked ? (
-                  <FilePlus2 size={16} />
-                ) : (
-                  <FileCode2 size={16} />
-                )}
-                <span className="git-file-label">
-                  <strong className="truncate">{name}</strong>
-                  {directory && <small className="truncate">{directory}</small>}
-                </span>
-                <span className="git-file-status" data-status={label}>
-                  {label}
-                </span>
-              </button>
-              <button
-                className="icon-btn git-stage-button"
-                title={(inIndex ? "Unstage " : "Stage ") + file.path}
-                disabled={disabled}
-                onClick={() =>
-                  void act(inIndex ? "unstage" : "stage", file.path)
-                }
-              >
-                {inIndex ? <Minus size={15} /> : <Plus size={15} />}
-              </button>
-            </div>
-          );
-        })}
+                <button
+                  className="git-file-name"
+                  aria-pressed={active}
+                  title={file.path + " · " + label}
+                  onClick={() =>
+                    setSelection({
+                      kind: "file",
+                      path: file.path,
+                      staged: inIndex,
+                    })
+                  }
+                >
+                  <FileIcon path={file.path} />
+                  <span className="git-file-label">
+                    <strong className="truncate">{name}</strong>
+                    {directory && <small className="truncate">{directory}</small>}
+                  </span>
+                  <span className="git-file-status" data-status={label}>
+                    {label}
+                  </span>
+                </button>
+                <button
+                  className="icon-btn git-stage-button"
+                  title={(inIndex ? t("Unstage ") : t("Stage ")) + file.path}
+                  disabled={disabled}
+                  onClick={() =>
+                    void act(inIndex ? "unstage" : "stage", file.path)
+                  }
+                >
+                  {inIndex ? <Minus size={15} /> : <Plus size={15} />}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ))}
     </section>
   );
 
   return (
-    <section className="section-view" aria-label="Git manager">
+    <section className="section-view" aria-label={t("Git manager")}>
       {sidebarOpen && (
-        <SectionSidebar title="Source control" onBack={onBack} navigation={navigation}>
+        <SectionSidebar title={t("Source control")} onBack={onBack} navigation={navigation} workspace={<WorkspaceSelector disabled={Boolean(busy)} />}>
           {tabs.map(({ name, icon: Icon }) => (
             <button
               className="section-link"
@@ -563,7 +568,7 @@ export function GitManager({
               onClick={() => changeSection(name)}
             >
               <Icon size={17} />
-              <span>{name}</span>
+              <span>{t(name)}</span>
               {data?.repository && counts[name] !== undefined && (
                 <span className="section-count">{counts[name]}</span>
               )}
@@ -576,11 +581,15 @@ export function GitManager({
           <div className="git-heading">
             <FolderGit2 size={24} strokeWidth={1.6} />
             <div>
-              <h1>{section}</h1>
-              <p title={project?.path}>
-                {project
+              <h1>{t(section)}</h1>
+              <p role="status" title={project?.path}>
+                {busy
+                  ? `${t(workingLabels[busy] ?? "Working")}…`
+                  : feedback && !feedback.error
+                    ? feedback.text
+                    : project
                   ? shortPath(project.path, home)
-                  : "No workspace selected"}
+                  : t("No workspace selected")}
               </p>
             </div>
           </div>
@@ -589,25 +598,22 @@ export function GitManager({
               <div className="git-current-branch">
                 <GitBranch size={16} />
                 <strong>
-                  {branch === "detached" ? "Detached HEAD" : branch}
+                  {branch === "detached" ? t("Detached HEAD") : branch}
                 </strong>
                 <span>
                   {!data.hasCommits
-                    ? "No commits yet"
+                    ? t("No commits yet")
                     : upstream
                       ? data.status?.ahead || data.status?.behind
-                        ? (data.status?.ahead ?? 0) +
-                          " ahead · " +
-                          (data.status?.behind ?? 0) +
-                          " behind"
-                        : "Up to date"
-                      : "Local branch"}
+                        ? t("{ahead} ahead · {behind} behind", { ahead: data.status?.ahead ?? 0, behind: data.status?.behind ?? 0 })
+                        : t("Up to date")
+                      : t("Local branch")}
                 </span>
               </div>
             )}
             <button
               className="icon-btn"
-              title="Refresh repository"
+              title={t("Refresh repository")}
               disabled={disabled || !projectId}
               onClick={() => void act("overview", undefined, offset)}
             >
@@ -623,8 +629,7 @@ export function GitManager({
           <div className="git-alert" role="status">
             <CircleAlert size={17} />
             <p>
-              Connection lost. Your repository will be available when Citropy
-              reconnects.
+              {t("Connection lost. Your repository will be available when Citropy reconnects.")}
             </p>
           </div>
         )}
@@ -635,14 +640,14 @@ export function GitManager({
               <strong>{feedback.text}</strong>
               {feedback.detail && (
                 <details>
-                  <summary>Show Git details</summary>
+                  <summary>{t("Show Git details")}</summary>
                   <pre>{feedback.detail}</pre>
                 </details>
               )}
             </div>
             <button
               className="icon-btn"
-              aria-label="Dismiss error"
+              aria-label={t("Dismiss error")}
               onClick={() => setFeedback(null)}
             >
               <X size={15} />
@@ -654,44 +659,43 @@ export function GitManager({
           {!projectId ? (
             <EmptyState
               icon={FolderGit2}
-              title="Choose a workspace"
+              title={t("Choose a workspace")}
               action={
                 <button
                   className="btn"
                   data-variant="primary"
                   onClick={chooseWorkspace}
                 >
-                  Open workspace
+                  {t("Open workspace")}
                 </button>
               }
             >
               <p>
-                Open a project folder to review changes and manage its Git
-                repository.
+                {t("Open a project folder to review changes and manage its Git repository.")}
               </p>
             </EmptyState>
           ) : !data ? (
             busy ? (
               <div className="git-preview-placeholder" role="status">
                 <LoaderCircle className="git-spinner" size={24} />
-                <p>Reading repository…</p>
+                <p>{t("Reading repository…")}</p>
               </div>
             ) : (
-              <EmptyState icon={CircleAlert} title="Repository unavailable">
-                <p>Refresh to try loading this workspace again.</p>
+              <EmptyState icon={CircleAlert} title={t("Repository unavailable")}>
+                <p>{t("Refresh to try loading this workspace again.")}</p>
                 <button
                   className="btn"
                   disabled={disabled}
                   onClick={() => void act("overview")}
                 >
-                  Try again
+                  {t("Try again")}
                 </button>
               </EmptyState>
             )
           ) : !data.repository ? (
             <EmptyState
               icon={FolderGit2}
-              title="Start tracking this project"
+              title={t("Start tracking this project")}
               action={
                 <button
                   className="btn"
@@ -700,13 +704,12 @@ export function GitManager({
                   onClick={() => void act("init")}
                 >
                   <Plus size={16} />
-                  Initialize repository
+                  {t("Initialize repository")}
                 </button>
               }
             >
               <p>
-                Git keeps a history of your files so you can review changes,
-                save commits, and work on branches.
+                {t("Git keeps a history of your files so you can review changes, save commits, and work on branches.")}
               </p>
               <p className="git-empty-path">{project?.name}</p>
             </EmptyState>
@@ -720,16 +723,13 @@ export function GitManager({
                       <div>
                         <strong>
                           {conflicts.length
-                            ? conflicts.length +
-                              " file" +
-                              (conflicts.length === 1 ? " needs" : "s need") +
-                              " conflict resolution"
-                            : "Ready to finish the merge"}
+                            ? t(conflicts.length === 1 ? "{count} file needs conflict resolution" : "{count} files need conflict resolution", { count: conflicts.length })
+                            : t("Ready to finish the merge")}
                         </strong>
                         <p>
                           {conflicts.length
-                            ? "Resolve conflict markers in your files, then stage the resolved changes."
-                            : "Create a commit to complete this merge."}
+                            ? t("Resolve conflict markers in your files, then stage the resolved changes.")
+                            : t("Create a commit to complete this merge.")}
                         </p>
                       </div>
                       {data.mergeInProgress && (
@@ -747,7 +747,7 @@ export function GitManager({
                             })
                           }
                         >
-                          Abort merge
+                          {t("Abort merge")}
                         </button>
                       )}
                     </div>
@@ -756,9 +756,7 @@ export function GitManager({
                     <div className="git-first-commit">
                       <GitCommitHorizontal size={18} />
                       <span>
-                        <strong>Make your first commit.</strong> Review your
-                        files, stage the ones to track, then write a commit
-                        message.
+                        <strong>{t("Make your first commit.")}</strong> {t("Review your files, stage the ones to track, then write a commit message.")}
                       </span>
                     </div>
                   )}
@@ -770,15 +768,15 @@ export function GitManager({
                       <label className="git-filter">
                         <Search size={15} />
                         <input
-                          aria-label="Filter changed files"
-                          placeholder="Filter files…"
+                          aria-label={t("Filter changed files")}
+                          placeholder={t("Filter files…")}
                           value={filter}
                           onChange={(event) => setFilter(event.target.value)}
                         />
                         {filter && (
                           <button
                             className="icon-btn"
-                            aria-label="Clear file filter"
+                            aria-label={t("Clear file filter")}
                             onClick={() => setFilter("")}
                           >
                             <X size={13} />
@@ -790,7 +788,7 @@ export function GitManager({
                         {fileList("Staged for commit", staged, true)}
                         {filter && !files.some((file) => match(file.path)) && (
                           <p className="git-list-hint">
-                            No files match “{filter}”.
+                            {t("No files match “{filter}”.", { filter })}
                           </p>
                         )}
                       </div>
@@ -798,28 +796,39 @@ export function GitManager({
                         className="git-commit-form"
                         onSubmit={(event) => {
                           event.preventDefault();
-                          if (canCommit) void act("commit", message.trim());
+                          if (canCommit)
+                            void act("commit", [message.trim(), description.trim()].filter(Boolean).join("\n\n"));
                         }}
                       >
                         <label htmlFor="git-commit-message">
-                          Commit message
+                          {t("Commit title")}
                         </label>
-                        <textarea
+                        <input
                           id="git-commit-message"
-                          rows={3}
                           value={message}
                           disabled={busy === "commit"}
                           onChange={(event) => setMessage(event.target.value)}
                           placeholder={
                             data.hasCommits
-                              ? "What changed, and why?"
-                              : "Initial commit"
+                              ? t("Summarize the change")
+                              : t("Initial commit")
                           }
+                        />
+                        <label htmlFor="git-commit-description">
+                          {t("Description")} <span className="git-optional">{t("Optional")}</span>
+                        </label>
+                        <textarea
+                          id="git-commit-description"
+                          rows={3}
+                          value={description}
+                          disabled={busy === "commit"}
+                          onChange={(event) => setDescription(event.target.value)}
+                          placeholder={t("Explain why this change was made and any useful details.")}
                         />
                         <div className="git-commit-target">
                           <GitBranch size={13} />
                           <span className="truncate">{branch}</span>
-                          <span>{staged.length} staged</span>
+                          <span>{staged.length} {t("staged")}</span>
                         </div>
                         <button
                           className="btn"
@@ -832,24 +841,24 @@ export function GitManager({
                             <GitCommitHorizontal size={17} />
                           )}
                           {data.mergeInProgress
-                            ? "Complete merge"
+                            ? t("Complete merge")
                             : data.hasCommits
-                              ? "Commit staged changes"
-                              : "Create first commit"}
+                              ? t("Commit staged changes")
+                              : t("Create first commit")}
                         </button>
                       </form>
                     </div>
                     <ResizeHandle panel="git" inline />
                     <section
                       className="git-review-pane"
-                      aria-label="File preview"
+                      aria-label={t("File preview")}
                     >
                       {selection?.kind === "file" && selectedFile ? (
                         <>
                           <header className="git-review-header">
                             <button
                               className="icon-btn git-mobile-back"
-                              aria-label="Back to changed files"
+                              aria-label={t("Back to changed files")}
                               onClick={() => setSelection(null)}
                             >
                               <ArrowLeft size={17} />
@@ -858,16 +867,15 @@ export function GitManager({
                               <h2>{selection.path}</h2>
                               <p>
                                 {selection.staged
-                                  ? "Staged for commit"
-                                  : fileLabel(selectedFile, false) +
-                                    " · Unstaged changes"}
+                                  ? t("Staged for commit")
+                                  : `${fileLabel(selectedFile, false, t)} · ${t("Unstaged changes")}`}
                               </p>
                             </div>
                             <div className="git-inline-actions">
                               {!selection.staged && (
                                 <button
                                   className="icon-btn git-danger"
-                                  title={"Discard changes in " + selection.path}
+                                  title={t("Discard changes in ") + selection.path}
                                   disabled={disabled}
                                   onClick={() =>
                                     showDialog({
@@ -877,11 +885,8 @@ export function GitManager({
                                         ? "Delete this new file?"
                                         : "Discard unstaged changes?",
                                       description: selectedFile.untracked
-                                        ? selection.path +
-                                          " will be permanently deleted."
-                                        : "Unstaged edits to " +
-                                          selection.path +
-                                          " will be lost. Staged changes will be kept.",
+                                        ? t("{path} will be permanently deleted.", { path: selection.path })
+                                        : t("Unstaged edits to {path} will be lost. Staged changes will be kept.", { path: selection.path }),
                                       label: selectedFile.untracked
                                         ? "Delete file"
                                         : "Discard changes",
@@ -907,17 +912,16 @@ export function GitManager({
                                 ) : (
                                   <Plus size={14} />
                                 )}
-                                {selection.staged ? "Unstage" : "Stage file"}
+                                {selection.staged ? "Unstage" : t("Stage file")}
                               </button>
                             </div>
                           </header>
-                          <div className="git-review-scroll scroll">
-                            <GitReview
-                              projectId={projectId}
-                              selection={selection}
-                              revision={revision}
-                            />
-                          </div>
+                          <GitReview
+                            key={`${selection.staged}:${selection.path}`}
+                            projectId={projectId}
+                            selection={selection}
+                            revision={revision}
+                          />
                         </>
                       ) : (
                         <EmptyState
@@ -930,18 +934,18 @@ export function GitManager({
                           }
                           title={
                             files.length
-                              ? "Select a file to review"
+                              ? t("Select a file to review")
                               : data.hasCommits
-                                ? "Working tree is clean"
-                                : "Add files to get started"
+                                ? t("Working tree is clean")
+                                : t("Add files to get started")
                           }
                         >
                           <p>
                             {files.length
-                              ? "Choose a file on the left to see exactly what will change."
+                              ? t("Choose a file on the left to see exactly what will change.")
                               : data.hasCommits
-                                ? "Your files match the latest commit. New edits will appear here."
-                                : "Create or copy files into this workspace. They’ll appear here, ready for your first commit."}
+                                ? t("Your files match the latest commit. New edits will appear here.")
+                                : t("Create or copy files into this workspace. They’ll appear here, ready for your first commit.")}
                           </p>
                         </EmptyState>
                       )}
@@ -954,12 +958,11 @@ export function GitManager({
                 (!data.hasCommits ? (
                   <EmptyState
                     icon={History}
-                    title="Your history starts with a commit"
+                    title={t("Your history starts with a commit")}
                     action={reviewChanges}
                   >
                     <p>
-                      Commits are saved checkpoints of your work. Review your
-                      changes to create the first one.
+                      {t("Commits are saved checkpoints of your work. Review your changes to create the first one.")}
                     </p>
                   </EmptyState>
                 ) : (
@@ -969,7 +972,7 @@ export function GitManager({
                   >
                     <div className="git-history-list">
                       <header className="git-list-heading">
-                        <h2>Commit history</h2>
+                        <h2>{t("Commit history")}</h2>
                         <p>
                           <GitBranch size={13} />
                           {branch}
@@ -997,27 +1000,27 @@ export function GitManager({
                               <small>
                                 {commit.author} ·{" "}
                                 {new Date(commit.date).toLocaleDateString(
-                                  undefined,
+                                  currentLocale(),
                                   { month: "short", day: "numeric" },
                                 )}
                               </small>
                               <code>{commit.hash.slice(0, 7)}</code>
                             </span>
                             {commit.refs.includes("HEAD") && (
-                              <span className="git-tag">Latest</span>
+                              <span className="git-tag">{t("Latest")}</span>
                             )}
                           </button>
                         ))}
                         {!data.commits.length && (
                           <p className="git-list-hint">
-                            No more commits on this page.
+                            {t("No more commits on this page.")}
                           </p>
                         )}
                       </div>
                       <footer className="git-pagination">
                         <button
                           className="icon-btn"
-                          aria-label="Previous commits page"
+                          aria-label={t("Previous commits page")}
                           disabled={disabled || offset === 0}
                           onClick={() =>
                             void act(
@@ -1035,11 +1038,11 @@ export function GitManager({
                               1 +
                               " - " +
                               (offset + data.commits.length)
-                            : "End of history"}
+                            : t("End of history")}
                         </span>
                         <button
                           className="icon-btn"
-                          aria-label="Next commits page"
+                          aria-label={t("Next commits page")}
                           disabled={disabled || data.commits.length < 50}
                           onClick={() =>
                             void act("history", undefined, offset + 50)
@@ -1052,14 +1055,14 @@ export function GitManager({
                     <ResizeHandle panel="git" inline />
                     <section
                       className="git-review-pane"
-                      aria-label="Commit preview"
+                      aria-label={t("Commit preview")}
                     >
                       {selection?.kind === "commit" && selectedCommit ? (
                         <>
                           <header className="git-review-header">
                             <button
                               className="icon-btn git-mobile-back"
-                              aria-label="Back to history"
+                              aria-label={t("Back to history")}
                               onClick={() => setSelection(null)}
                             >
                               <ArrowLeft size={17} />
@@ -1068,7 +1071,7 @@ export function GitManager({
                               <h2>{selectedCommit.subject}</h2>
                               <p>
                                 {selectedCommit.author} ·{" "}
-                                {new Date(selectedCommit.date).toLocaleString()}{" "}
+                                {new Date(selectedCommit.date).toLocaleString(currentLocale())}{" "}
                                 · <code>{selectedCommit.hash.slice(0, 8)}</code>
                               </p>
                               {selectedCommit.refs && (
@@ -1078,21 +1081,20 @@ export function GitManager({
                               )}
                             </div>
                           </header>
-                          <div className="git-review-scroll scroll">
-                            <GitReview
-                              projectId={projectId}
-                              selection={selection}
-                              revision={revision}
-                            />
-                          </div>
+                          <GitReview
+                            key={selection.hash}
+                            projectId={projectId}
+                            selection={selection}
+                            revision={revision}
+                          />
                         </>
                       ) : (
                         <EmptyState
                           icon={GitCommitHorizontal}
-                          title="Review a saved change"
+                          title={t("Review a saved change")}
                         >
                           <p>
-                            Select a commit to see its message and file changes.
+                            {t("Select a commit to see its message and file changes.")}
                           </p>
                         </EmptyState>
                       )}
@@ -1105,7 +1107,7 @@ export function GitManager({
                   <header className="git-section-heading">
                     <div>
                       <p>
-                        Keep separate lines of work and bring changes together.
+                        {t("Keep separate lines of work and bring changes together.")}
                       </p>
                     </div>
                     {data.hasCommits && (
@@ -1116,7 +1118,7 @@ export function GitManager({
                         onClick={createBranch}
                       >
                         <Plus size={15} />
-                        New branch
+                        {t("New branch")}
                       </button>
                     )}
                   </header>
@@ -1124,44 +1126,40 @@ export function GitManager({
                     <div className="git-current-summary">
                       <GitBranch size={22} />
                       <div>
-                        <small>Current branch</small>
+                        <small>{t("Current branch")}</small>
                         <strong>{branch}</strong>
                       </div>
-                      <span className="git-tag">Awaiting first commit</span>
+                      <span className="git-tag">{t("Awaiting first commit")}</span>
                     </div>
                   )}
                   {!data.hasCommits ? (
                     <EmptyState
                       icon={GitBranch}
-                      title="Create a commit before branching"
+                      title={t("Create a commit before branching")}
                       action={reviewChanges}
                     >
-                      <p>
-                        Your repository is initialized, but{" "}
-                        <strong>{branch}</strong> has no commits yet. Save your
-                        first commit to create this branch and start new ones
-                        from it.
-                      </p>
+                      <p>{" "}{t("Your repository is initialized, but")}{" "}
+                        <strong>{branch}</strong>{" "}{t("has no commits yet. Save your first commit to create this branch and start new ones from it.")}{" "}</p>
                     </EmptyState>
                   ) : (
                     <>
                       <label className="git-filter git-branch-filter">
                         <Search size={15} />
                         <input
-                          aria-label="Filter branches"
-                          placeholder="Find a branch…"
+                          aria-label={t("Filter branches")}
+                          placeholder={t("Find a branch…")}
                           value={filter}
                           onChange={(event) => setFilter(event.target.value)}
                         />
                       </label>
                       <div className="git-table-heading">
                         <h3>
-                          Local branches
+                          {t("Local branches")}
                           <span className="git-count">
                             {localBranches.length}
                           </span>
                         </h3>
-                        <span>On this computer</span>
+                        <span>{t("On this computer")}</span>
                       </div>
                       <div className="git-branch-list">
                         {localBranches
@@ -1181,23 +1179,23 @@ export function GitManager({
                                   {entry.current && (
                                     <span className="git-tag">
                                       <Check size={11} />
-                                      Current
+                                      {t("Current")}
                                     </span>
                                   )}
                                 </div>
                                 <p className="truncate">{entry.subject}</p>
                                 <small>
                                   {entry.upstream
-                                    ? "Tracking " + entry.upstream
-                                    : "Local only"}
+                                    ? t("Tracking ") + entry.upstream
+                                    : t("Local only")}
                                 </small>
                               </div>
                               <time
                                 className="git-row-date"
-                                title={new Date(entry.date).toLocaleString()}
+                                title={new Date(entry.date).toLocaleString(currentLocale())}
                               >
                                 {new Date(entry.date).toLocaleDateString(
-                                  undefined,
+                                  currentLocale(),
                                   { month: "short", day: "numeric" },
                                 )}
                               </time>
@@ -1210,7 +1208,7 @@ export function GitManager({
                                       void act("switchBranch", entry.name)
                                     }
                                   >
-                                    Switch
+                                    {t("Switch")}
                                     <ArrowRight size={13} />
                                   </button>
                                   <Menu
@@ -1220,7 +1218,7 @@ export function GitManager({
                                       <button
                                         id={id}
                                         className="icon-btn"
-                                        aria-label={"Actions for " + entry.name}
+                                        aria-label={t("Actions for {name}", { name: entry.name })}
                                         aria-expanded={open}
                                         aria-haspopup="menu"
                                         disabled={
@@ -1234,35 +1232,30 @@ export function GitManager({
                                     items={[
                                       {
                                         id: "merge",
-                                        label: "Merge into " + branch,
+                                        label: t("Merge into {branch}", { branch }),
                                         icon: <GitMerge size={14} />,
                                         onSelect: () =>
                                           showDialog({
                                             operation: "merge",
                                             value: entry.name,
-                                            title: "Merge into " + branch + "?",
-                                            description:
-                                              "Bring commits from " +
-                                              entry.name +
-                                              " into your current branch, " +
-                                              branch +
-                                              ".",
-                                            label: "Merge branch",
+                                            title: t("Merge into {branch}?", { branch }),
+                                            description: t("Bring commits from {source} into your current branch, {branch}.", { source: entry.name, branch }),
+                                            label: t("Merge branch"),
                                           }),
                                       },
                                       {
                                         id: "delete",
-                                        label: "Delete branch",
+                                        label: t("Delete branch"),
                                         icon: <Trash2 size={14} />,
                                         danger: true,
                                         onSelect: () =>
                                           showDialog({
                                             operation: "deleteBranch",
                                             value: entry.name,
-                                            title: "Delete " + entry.name + "?",
+                                            title: t("Delete {name}?", { name: entry.name }),
                                             description:
                                               "Delete this local branch. Git will keep it if it contains unmerged work.",
-                                            label: "Delete branch",
+                                            label: t("Delete branch"),
                                             danger: true,
                                           }),
                                       },
@@ -1276,12 +1269,12 @@ export function GitManager({
                       {filter &&
                         !localBranches.some((entry) => match(entry.name)) && (
                           <p className="git-list-hint">
-                            No local branches match your search.
+                            {t("No local branches match your search.")}
                           </p>
                         )}
                       <div className="git-table-heading">
                         <h3>
-                          Remote branches
+                          {t("Remote branches")}
                           <span className="git-count">
                             {remoteBranches.length}
                           </span>
@@ -1290,7 +1283,7 @@ export function GitManager({
                           className="git-text-button"
                           onClick={() => changeSection("Remotes")}
                         >
-                          Manage remotes
+                            {t("Manage remotes")}
                           <ArrowRight size={13} />
                         </button>
                       </div>
@@ -1306,7 +1299,7 @@ export function GitManager({
                               </div>
                               <time className="git-row-date">
                                 {new Date(entry.date).toLocaleDateString(
-                                  undefined,
+                                  currentLocale(),
                                   { month: "short", day: "numeric" },
                                 )}
                               </time>
@@ -1316,11 +1309,11 @@ export function GitManager({
                         <div className="git-inline-empty">
                           <Globe2 size={22} />
                           <div>
-                            <strong>No remote branches yet</strong>
+                            <strong>{t("No remote branches yet")}</strong>
                             <p>
                               {data.remotes.length
-                                ? "Fetch your remotes to update the branch list."
-                                : "Connect a remote repository to see shared branches here."}
+                                ? t("Fetch your remotes to update the branch list.")
+                                : t("Connect a remote repository to see shared branches here.")}
                             </p>
                           </div>
                           {data.remotes.length > 0 && (
@@ -1329,7 +1322,7 @@ export function GitManager({
                               disabled={disabled}
                               onClick={() => void act("fetch")}
                             >
-                              Fetch remotes
+                              {t("Fetch remotes")}
                             </button>
                           )}
                         </div>
@@ -1338,7 +1331,7 @@ export function GitManager({
                         remoteBranches.length > 0 &&
                         !remoteBranches.some((entry) => match(entry.name)) && (
                           <p className="git-list-hint">
-                            No remote branches match your search.
+                            {t("No remote branches match your search.")}
                           </p>
                         )}
                     </>
@@ -1350,10 +1343,7 @@ export function GitManager({
                 <div className="git-stash-layout">
                   <header className="git-section-heading">
                     <div>
-                      <p>
-                        Set unfinished work aside and restore it when you’re
-                        ready.
-                      </p>
+                      <p>{" "}{t("Set unfinished work aside and restore it when you’re ready.")}{" "}</p>
                     </div>
                     {data.hasCommits && data.stashes.length > 0 && (
                       <button
@@ -1364,31 +1354,28 @@ export function GitManager({
                         }
                         title={
                           !files.length
-                            ? "Make a change before saving a stash"
+                            ? t("Make a change before saving a stash")
                             : undefined
                         }
                         onClick={saveStash}
                       >
                         <Archive size={15} />
-                        Save changes
+                        {t("Save changes")}
                       </button>
                     )}
                   </header>
                   {!data.hasCommits ? (
                     <EmptyState
                       icon={Archive}
-                      title="Make a first commit to use stashes"
+                        title={t("Make a first commit to use stashes")}
                       action={reviewChanges}
                     >
-                      <p>
-                        A stash saves work relative to a commit. Create your
-                        first commit before setting changes aside.
-                      </p>
+                      <p>{" "}{t("A stash saves work relative to a commit. Create your first commit before setting changes aside.")}{" "}</p>
                     </EmptyState>
                   ) : !data.stashes.length ? (
                     <EmptyState
                       icon={Archive}
-                      title="No work set aside"
+                      title={t("No work set aside")}
                       action={
                         files.length ? (
                           <button
@@ -1396,17 +1383,13 @@ export function GitManager({
                             disabled={disabled || conflicts.length > 0}
                             onClick={saveStash}
                           >
-                            Save current changes
+                            {t("Save current changes")}
                           </button>
                         ) : undefined
                       }
                     >
-                      <p>
-                        Stashes keep unfinished changes while you switch tasks.
-                        Applying one restores the files and keeps the saved
-                        copy.
-                      </p>
-                      {!files.length && <p>Your working tree is clean.</p>}
+                      <p>{" "}{t("Stashes keep unfinished changes while you switch tasks. Applying one restores the files and keeps the saved copy.")}{" "}</p>
+                      {!files.length && <p>{t("Your working tree is clean.")}</p>}
                     </EmptyState>
                   ) : (
                     <div
@@ -1438,14 +1421,14 @@ export function GitManager({
                       <ResizeHandle panel="git" inline />
                       <section
                         className="git-review-pane"
-                        aria-label="Stash preview"
+                        aria-label={t("Stash preview")}
                       >
                         {selection?.kind === "stash" && selectedStash ? (
                           <>
                             <header className="git-review-header">
                               <button
                                 className="icon-btn git-mobile-back"
-                                aria-label="Back to stashes"
+                                aria-label={t("Back to stashes")}
                                 onClick={() => setSelection(null)}
                               >
                                 <ArrowLeft size={17} />
@@ -1453,23 +1436,19 @@ export function GitManager({
                               <div>
                                 <h2>{selectedStash.subject}</h2>
                                 <p>
-                                  {selectedStash.ref} · Applying keeps this
-                                  saved copy
-                                </p>
+                                  {selectedStash.ref}{" "}{t("· Applying keeps this saved copy")}{" "}</p>
                               </div>
                               <div className="git-inline-actions">
                                 <button
                                   className="icon-btn git-danger"
-                                  aria-label="Delete stash"
+                                  aria-label={t("Delete stash")}
                                   disabled={disabled}
                                   onClick={() =>
                                     showDialog({
                                       operation: "dropStash",
                                       value: selectedStash.ref,
                                       title: "Delete this stash?",
-                                      description:
-                                        selectedStash.subject +
-                                        " will be permanently removed from your saved stashes.",
+                                      description: t("{stash} will be permanently removed from your saved stashes.", { stash: selectedStash.subject }),
                                       label: "Delete stash",
                                       danger: true,
                                     })
@@ -1486,24 +1465,20 @@ export function GitManager({
                                   }
                                 >
                                   <Archive size={14} />
-                                  Apply stash
+                                  {t("Apply stash")}
                                 </button>
                               </div>
                             </header>
-                            <div className="git-review-scroll scroll">
-                              <GitReview
-                                projectId={projectId}
-                                selection={selection}
-                                revision={revision}
-                              />
-                            </div>
+                            <GitReview
+                              key={selection.ref}
+                              projectId={projectId}
+                              selection={selection}
+                              revision={revision}
+                            />
                           </>
                         ) : (
-                          <EmptyState icon={Archive} title="Review saved work">
-                            <p>
-                              Select a stash to inspect its file changes before
-                              applying it.
-                            </p>
+                          <EmptyState icon={Archive} title={t("Review saved work")}>
+                            <p>{" "}{t("Select a stash to inspect its file changes before applying it.")}{" "}</p>
                           </EmptyState>
                         )}
                       </section>
@@ -1516,7 +1491,7 @@ export function GitManager({
                 <div className="git-page scroll">
                   <header className="git-section-heading">
                     <div>
-                      <p>Connect repositories and keep your work in sync.</p>
+                      <p>{t("Connect repositories and keep your work in sync.")}</p>
                     </div>
                     {data.remotes.length > 0 && (
                       <button
@@ -1525,14 +1500,14 @@ export function GitManager({
                         onClick={addRemote}
                       >
                         <Plus size={15} />
-                        Add remote
+                        {t("Add remote")}
                       </button>
                     )}
                   </header>
                   {!data.remotes.length ? (
                     <EmptyState
                       icon={Globe2}
-                      title="Your work is local"
+                      title={t("Your work is local")}
                       action={
                         <button
                           className="btn"
@@ -1541,15 +1516,11 @@ export function GitManager({
                           onClick={addRemote}
                         >
                           <Plus size={15} />
-                          Connect a remote
+                          {t("Connect a remote")}
                         </button>
                       }
                     >
-                      <p>
-                        Add a remote repository to back up your commits and
-                        collaborate. Nothing is published until you choose to
-                        push.
-                      </p>
+                      <p>{" "}{t("Add a remote repository to back up your commits and collaborate. Nothing is published until you choose to push.")}{" "}</p>
                     </EmptyState>
                   ) : (
                     <>
@@ -1560,12 +1531,12 @@ export function GitManager({
                             <h3>{branch}</h3>
                             <p>
                               {!data.hasCommits
-                                ? "Create a first commit before publishing."
+                                ? t("Create a first commit before publishing.")
                                 : upstream
-                                  ? "Tracking " + upstream
+                                  ? t("Tracking ") + upstream
                                   : branch === "detached"
-                                    ? "Switch to a branch before publishing."
-                                    : "Publish this branch to set up an upstream."}
+                                    ? t("Switch to a branch before publishing.")
+                                    : t("Publish this branch to set up an upstream.")}
                             </p>
                           </div>
                         </div>
@@ -1573,12 +1544,10 @@ export function GitManager({
                           <div className="git-sync-counts">
                             <span>
                               <ArrowUp size={15} />
-                              <strong>{data.status?.ahead ?? 0}</strong>to push
-                            </span>
+                              <strong>{data.status?.ahead ?? 0}</strong>{t("to push")}{" "}</span>
                             <span>
                               <ArrowDown size={15} />
-                              <strong>{data.status?.behind ?? 0}</strong>to pull
-                            </span>
+                              <strong>{data.status?.behind ?? 0}</strong>{t("to pull")}{" "}</span>
                           </div>
                         )}
                         <div className="git-inline-actions">
@@ -1588,18 +1557,18 @@ export function GitManager({
                             onClick={() => void act("fetch")}
                           >
                             <RefreshCw size={14} />
-                            Fetch
+                            {t("Fetch")}
                           </button>
                           {upstream && (
                             <>
                               <button
                                 className="btn"
                                 disabled={disabled || data.mergeInProgress}
-                                title="Pull with fast-forward only"
+                                title={t("Pull with fast-forward only")}
                                 onClick={() => void act("pull")}
                               >
                                 <ArrowDown size={14} />
-                                Pull
+                                {t("Pull")}
                               </button>
                               <button
                                 className="btn"
@@ -1609,18 +1578,13 @@ export function GitManager({
                                   showDialog({
                                     operation: "push",
                                     title: "Push commits?",
-                                    description:
-                                      "Send commits from " +
-                                      branch +
-                                      " to " +
-                                      upstream +
-                                      ".",
+                                    description: t("Send commits from {branch} to {upstream}.", { branch, upstream: upstream ?? "" }),
                                     label: "Push commits",
                                   })
                                 }
                               >
                                 <ArrowUp size={14} />
-                                Push
+                                {t("Push")}
                               </button>
                             </>
                           )}
@@ -1628,7 +1592,7 @@ export function GitManager({
                       </div>
                       <div className="git-table-heading">
                         <h3>
-                          Connected repositories
+                        {t("Connected repositories")}
                           <span className="git-count">
                             {data.remotes.length}
                           </span>
@@ -1655,32 +1619,26 @@ export function GitManager({
                                     showDialog({
                                       operation: "publish",
                                       value: remote.name,
-                                      title: "Publish " + branch + "?",
-                                      description:
-                                        "Push this branch to " +
-                                        remote.name +
-                                        " and use it as the upstream for future pulls and pushes.",
+                                      title: t("Publish {branch}?", { branch }),
+                                      description: t("Push this branch to {remote} and use it as the upstream for future pulls and pushes.", { remote: remote.name }),
                                       label: "Publish branch",
                                     })
                                   }
                                 >
                                   <ArrowUp size={14} />
-                                  Publish branch
+                                  {t("Publish branch")}
                                 </button>
                               )}
                             <button
                               className="icon-btn git-danger"
-                              title={"Remove " + remote.name}
+                              title={t("Remove ") + remote.name}
                               disabled={disabled}
                               onClick={() =>
                                 showDialog({
                                   operation: "removeRemote",
                                   value: remote.name,
-                                  title: "Disconnect " + remote.name + "?",
-                                  description:
-                                    "Remove this local remote configuration. The repository at " +
-                                    remote.url +
-                                    " will not be deleted.",
+                                  title: t("Disconnect {remote}?", { remote: remote.name }),
+                                  description: t("Remove this local remote configuration. The repository at {url} will not be deleted.", { url: remote.url }),
                                   label: "Disconnect remote",
                                   danger: true,
                                 })
@@ -1691,10 +1649,7 @@ export function GitManager({
                           </div>
                         </div>
                       ))}
-                      <p className="git-page-note">
-                        Fetch checks for remote updates. Pull brings them into
-                        your branch using fast-forward only.
-                      </p>
+                      <p className="git-page-note">{" "}{t("Fetch checks for remote updates. Pull brings them into your branch using fast-forward only.")}{" "}</p>
                     </>
                   )}
                 </div>
@@ -1702,40 +1657,6 @@ export function GitManager({
             </>
           )}
         </div>
-
-        <footer className="git-footer" role="status">
-          <span>
-            {busy ? (
-              <>
-                <LoaderCircle size={13} className="git-spinner" />
-                {workingLabels[busy] ?? "Working"}…
-              </>
-            ) : feedback && !feedback.error ? (
-              <>
-                <Check size={14} className="git-success" />
-                {feedback.text}
-              </>
-            ) : (
-              <>
-                <span className="git-connection" data-connected={connected} />
-                {connected ? "Local workspace" : "Disconnected"}
-              </>
-            )}
-          </span>
-          {data?.repository && (
-            <span className="git-footer-summary">
-              {files.length
-                ? files.length +
-                  " changed " +
-                  (files.length === 1 ? "file" : "files")
-                : "No changes"}
-              <span>·</span>
-              {data.mergeInProgress
-                ? "Merge in progress"
-                : staged.length + " staged"}
-            </span>
-          )}
-        </footer>
 
         {dialog && (
           <GitDialog

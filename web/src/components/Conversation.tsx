@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AnimatePresence, motion } from "motion/react";
 import { ChevronDown } from "./icons.ts";
@@ -13,8 +13,10 @@ import {
   sameTimelineRows,
   type TimelineRow,
 } from "../lib/timeline.ts";
+import { useI18n } from "../lib/i18n.ts";
 
 export function Conversation() {
+  const t = useI18n();
   const searchMessageId = useApp((state) => state.searchMessageId);
   const threadId = useApp((state) => state.activeThreadId);
   const ids = useApp((state) => (threadId ? state.order[threadId] : undefined));
@@ -47,8 +49,10 @@ export function Conversation() {
   const activeTool = useApp((state) =>
     threadId ? state.threads[threadId]?.activeTool : undefined,
   );
+  const compacting = useApp((state) => Boolean(threadId && state.threads[threadId]?.compacting));
   const connected = useApp((state) => state.connected);
   const followRequest = useApp((state) => state.followRequest);
+  const [selectedMessageId, setSelectedMessageId] = useState<string>();
   const {
     viewport,
     content,
@@ -79,6 +83,7 @@ export function Conversation() {
   }, [threadId, connected]);
 
   useLayoutEffect(() => {
+    setSelectedMessageId(undefined);
     scrollToBottom("auto");
   }, [threadId, followRequest, scrollToBottom]);
 
@@ -110,22 +115,18 @@ export function Conversation() {
     if (!searchMessageId || !ids?.includes(searchMessageId)) return;
     const frame = requestAnimationFrame(() => {
       stopFollowing();
-      if (virtualized) {
-        const index = rows.findIndex(
-          (row) => row.messageId === searchMessageId,
-        );
-        if (index !== -1) timeline.scrollToIndex(index, { align: "start" });
+      const index = rows.findIndex((row) => row.messageId === searchMessageId);
+      if (index !== -1) {
+        setSelectedMessageId(searchMessageId);
+        timeline.scrollToIndex(index, { align: "start" });
       }
-      document
-        .getElementById(`message-${searchMessageId}`)
-        ?.scrollIntoView({ block: "center" });
       useApp.setState({ searchMessageId: null });
     });
     return () => cancelAnimationFrame(frame);
-  }, [searchMessageId, ids, rows, virtualized, timeline, stopFollowing]);
+  }, [searchMessageId, ids, rows, timeline, stopFollowing]);
 
   const busy =
-    status === "thinking" || status === "working" || status === "queued";
+    compacting || status === "thinking" || status === "working" || status === "queued";
   const messages = ids ?? [];
   const virtualItems = timeline.getVirtualItems();
   const visibleItem = virtualItems.find((item) => item.end > (timeline.scrollOffset ?? 0) + 30);
@@ -135,7 +136,16 @@ export function Conversation() {
 
   return (
     <div className="conversation-viewport">
-      <div className="canvas scroll" ref={viewport}>
+      <div
+        className="canvas scroll"
+        ref={viewport}
+        onWheel={() => setSelectedMessageId(undefined)}
+        onPointerDown={() => setSelectedMessageId(undefined)}
+        onKeyDown={(event) => {
+          if (["ArrowUp", "ArrowDown", "PageUp", "PageDown", "Home", "End", " "].includes(event.key))
+            setSelectedMessageId(undefined);
+        }}
+      >
         <div
           className="canvas-inner"
           ref={content}
@@ -143,8 +153,7 @@ export function Conversation() {
           {messages.length === 0 && (
             <div className="canvas-hint">
               <p>
-                This thread is empty. Describe what you want changed and the
-                provider will work in your repository.
+                {t("This thread is empty. Describe what you want changed and the provider will work in your repository.")}
               </p>
             </div>
           )}
@@ -180,14 +189,14 @@ export function Conversation() {
               {error}
             </div>
           )}
-          {busy && <Working status={status} tool={activeTool} />}
+          {busy && <Working status={status} tool={activeTool} compacting={compacting} />}
           <div className="canvas-tail" />
         </div>
       </div>
 
       <MessageNavigator
         rows={rows}
-        activeMessageId={atBottom ? messages.at(-1) : visibleItem && rows[visibleItem.index]?.messageId}
+        activeMessageId={selectedMessageId ?? (atBottom ? messages.at(-1) : visibleItem && rows[visibleItem.index]?.messageId)}
         onSelect={jumpToMessage}
       />
 
@@ -197,14 +206,17 @@ export function Conversation() {
             <motion.button
               type="button"
               className="jump"
-              onClick={() => scrollToBottom(virtualized ? "auto" : "smooth")}
+              onClick={() => {
+                setSelectedMessageId(undefined);
+                scrollToBottom(virtualized ? "auto" : "smooth");
+              }}
               initial={{ opacity: 0, y: 8, scale: 0.94 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 6, scale: 0.96 }}
               transition={{ type: "spring", bounce: 0.2, duration: 0.34 }}
             >
               <ChevronDown size={14} />
-              Latest
+              {t("Latest")}
             </motion.button>
           )}
         </AnimatePresence>

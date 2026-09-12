@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { File, X, Download } from "lucide-react";
+import { X, Download } from "lucide-react";
+import { FileIcon } from "./FileIcon.tsx";
 import { Modal } from "./Modal.tsx";
 import { FilePreview } from "./FilePreview.tsx";
 import { assetQuery } from "../lib/api.ts";
 import type { Attachment } from "../../../shared/protocol.ts";
+import { useI18n } from "../lib/i18n.ts";
 
 export function Attachments({
   files,
@@ -16,6 +18,7 @@ export function Attachments({
   threadId: string;
   onRemove?: (id: string) => void;
 }) {
+  const t = useI18n();
   const [preview, setPreview] = useState<Attachment>();
   return (
     <>
@@ -26,8 +29,8 @@ export function Attachments({
               type="button"
               className="attachment-open"
               onClick={() => setPreview(file)}
-              aria-label={`Preview ${file.label}`}
-              title={`Preview ${file.label}`}
+              aria-label={`${t("Preview")} ${file.label}`}
+              title={`${t("Preview")} ${file.label}`}
             >
               {file.mime?.startsWith("image/") ? (
                 <img
@@ -35,7 +38,7 @@ export function Attachments({
                   src={`/api/assets?${assetQuery(projectId, file.path, threadId, file.id)}`}
                 />
               ) : (
-                <File size={22} className="attachment-file-icon" />
+                <FileIcon path={file.label} mime={file.mime} size={22} className="attachment-file-icon" />
               )}
               <span>
                 <strong className="truncate">{file.label}</strong>
@@ -44,7 +47,7 @@ export function Attachments({
                     ? file.size > 1024 * 1024
                       ? `${(file.size / 1024 / 1024).toFixed(1)} MB`
                       : `${Math.max(1, Math.ceil(file.size / 1024))} KB`
-                    : "File"}
+                    : t("File")}
                 </small>
               </span>
             </button>
@@ -52,7 +55,7 @@ export function Attachments({
               <button
                 type="button"
                 className="icon-btn"
-                aria-label={`Remove ${file.label}`}
+                aria-label={`${t("Remove")} ${file.label}`}
                 onClick={() => onRemove(file.id!)}
               >
                 <X size={14} />
@@ -64,6 +67,7 @@ export function Attachments({
       {preview && (
         <Modal
           title={preview.label}
+          icon={<FileIcon path={preview.label} mime={preview.mime} size={21} />}
           className="file-dialog"
           onClose={() => setPreview(undefined)}
           footer={
@@ -74,7 +78,7 @@ export function Attachments({
                 download={preview.label}
               >
                 <Download size={15} />
-                Download
+                {t("Download")}
               </a>
               <button
                 className="btn"
@@ -82,7 +86,7 @@ export function Attachments({
                 data-cancel
                 onClick={() => setPreview(undefined)}
               >
-                Close
+                {t("Close")}
               </button>
             </>
           }

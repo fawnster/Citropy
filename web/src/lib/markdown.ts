@@ -5,7 +5,7 @@ interface CodeToken extends Tokens.Code {
   rendered?: string;
 }
 
-function createParser(theme: "dark" | "light") {
+function createParser(theme: "dark" | "light", signal?: AbortSignal) {
   const marked = new Marked({
     gfm: true,
     breaks: false,
@@ -15,9 +15,9 @@ function createParser(theme: "dark" | "light") {
   marked.use({
     async: true,
     walkTokens: async (token) => {
-      if (token.type !== "code") return;
+      if (token.type !== "code" || signal?.aborted) return;
       const code = token as CodeToken;
-      code.rendered = await highlight(code.text, code.lang, theme);
+      code.rendered = await highlight(code.text, code.lang, theme, signal);
     },
     renderer: {
       code(token) {
@@ -41,8 +41,7 @@ function createParser(theme: "dark" | "light") {
   return marked;
 }
 
-const parsers = { dark: createParser("dark"), light: createParser("light") };
-
-export async function renderMarkdown(text: string, mode: "dark" | "light"): Promise<string> {
-  return (await parsers[mode].parse(text)) as string;
+export async function renderMarkdown(text: string, mode: "dark" | "light", signal?: AbortSignal): Promise<string> {
+  if (/^\s*\d+[.)]\s*$/.test(text)) return `<p>${escapeHtml(text.trim())}</p>`;
+  return (await createParser(mode, signal).parse(text)) as string;
 }

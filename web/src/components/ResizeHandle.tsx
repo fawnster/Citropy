@@ -1,3 +1,4 @@
+import { useI18n } from "../lib/i18n.ts";
 import { useEffect, useRef, useState } from "react";
 import {
   setPanelWidth,
@@ -20,6 +21,7 @@ export function ResizeHandle({
   panel: PanelId;
   inline?: boolean;
 }) {
+  const t = useI18n();
   const handle = useRef<HTMLDivElement>(null);
   const drag = useRef<{
     x: number;
@@ -91,14 +93,14 @@ export function ResizeHandle({
       data-inline={inline || undefined}
       data-edge={direction === -1 ? "left" : "right"}
       role="separator"
-      aria-label={labels[panel]}
+      aria-label={t(labels[panel])}
       aria-orientation="vertical"
       aria-valuemin={minimum}
       aria-valuemax={Math.round(maximum())}
       aria-valuenow={width}
-      aria-valuetext={`${width} pixels`}
+      aria-valuetext={t("{count} pixels", { count: width })}
       tabIndex={0}
-      title="Drag to resize. Double-click or press Enter to reset."
+      title={t("Drag to resize. Double-click or press Enter to reset.")}
       onDoubleClick={() => setPanelWidth(panel)}
       onPointerDown={(event) => {
         if (event.button !== 0) return;

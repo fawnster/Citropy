@@ -8,8 +8,10 @@ import type {
   ProjectSettings as Preferences,
 } from "../../../shared/protocol.ts";
 import type { PanelTab } from "../../../shared/workbench.ts";
+import { useI18n } from "../lib/i18n.ts";
 
 export function ProjectSettings({ onRun }: { onRun: () => void }) {
+  const t = useI18n();
   const projects = useApp((state) => state.projects);
   const activeProjectId = useApp((state) => state.activeProjectId);
   const [selected, setSelected] = useState(activeProjectId ?? projects[0]?.id);
@@ -19,7 +21,7 @@ export function ProjectSettings({ onRun }: { onRun: () => void }) {
       <label className="feature-field project-picker">
         <span>
           <Folder size={16} />
-          Project
+          {t("Project")}
         </span>
         <select
           value={selected ?? ""}
@@ -36,7 +38,7 @@ export function ProjectSettings({ onRun }: { onRun: () => void }) {
         <ProjectForm key={project.id} project={project} onRun={onRun} />
       ) : (
         <p className="feature-note">
-          Open a workspace to configure its defaults.
+          {t("Open a workspace to configure its defaults.")}
         </p>
       )}
     </>
@@ -50,6 +52,7 @@ function ProjectForm({
   project: Project;
   onRun: () => void;
 }) {
+  const t = useI18n();
   const providers = useApp((state) => state.providers);
   const [name, setName] = useState(project.name);
   const [settings, setSettings] = useState<Preferences>(project.settings ?? {});
@@ -94,7 +97,7 @@ function ProjectForm({
     <div className="feature-stack">
       <div className="feature-form-grid">
         <label className="feature-field">
-          Project name
+          {t("Project name")}
           <input
             value={name}
             onChange={(event) => {
@@ -104,19 +107,16 @@ function ProjectForm({
           />
         </label>
         <div className="feature-field">
-          <span>Folder</span>
+          <span>{t("Folder")}</span>
           <span className="feature-path">{project.path}</span>
         </div>
       </div>
       <section className="settings-group">
-        <h2 className="settings-group-heading">New conversation defaults</h2>
-        <p className="feature-note">
-          These choices apply to new conversations. Existing conversations keep
-          their settings.
-        </p>
+        <h2 className="settings-group-heading">{t("New conversation defaults")}</h2>
+        <p className="feature-note">{t("These choices apply to new conversations. Existing conversations keep their settings.")}</p>
         <div className="feature-form-grid">
           <label className="feature-field">
-            Provider
+            {t("Provider")}
             <select
               value={settings.provider ?? ""}
               onChange={(event) =>
@@ -129,7 +129,7 @@ function ProjectForm({
                 })
               }
             >
-              <option value="">Use the last selected provider</option>
+              <option value="">{t("Use the last selected provider")}</option>
               {providers.map((entry) => (
                 <option key={entry.id} value={entry.id}>
                   {entry.label}
@@ -138,7 +138,7 @@ function ProjectForm({
             </select>
           </label>
           <label className="feature-field">
-            Model
+            {t("Model")}
             <select
               value={settings.model ?? ""}
               disabled={!provider}
@@ -149,7 +149,7 @@ function ProjectForm({
                 })
               }
             >
-              <option value="">Use the provider's recommended model</option>
+              <option value="">{t("Use the provider's recommended model")}</option>
               {provider?.models.map((entry) => (
                 <option key={entry.id} value={entry.id}>
                   {entry.label}
@@ -158,7 +158,7 @@ function ProjectForm({
             </select>
           </label>
           <label className="feature-field">
-            Reasoning effort
+            {t("Reasoning effort")}
             <select
               value={settings.effort ?? ""}
               disabled={!model?.efforts?.length}
@@ -168,8 +168,8 @@ function ProjectForm({
             >
               <option value="">
                 {model?.defaultEffort
-                  ? `${effortLabel(model.defaultEffort)} (model preference)`
-                  : "Use the model's preference"}
+                  ? t("{effort} (model preference)", { effort: effortLabel(model.defaultEffort) })
+                  : t("Use the model's preference")}
               </option>
               {model?.efforts?.map((entry) => (
                 <option key={entry} value={entry}>
@@ -179,7 +179,7 @@ function ProjectForm({
             </select>
           </label>
           <label className="feature-field">
-            Permissions
+            {t("Permissions")}
             <select
               value={settings.permissionMode ?? "manual"}
               onChange={(event) =>
@@ -189,14 +189,14 @@ function ProjectForm({
                 })
               }
             >
-              <option value="manual">Ask before changes</option>
-              <option value="acceptEdits">Auto edits</option>
-              <option value="plan">Plan only</option>
-              <option value="bypass">Full access</option>
+              <option value="manual">{t("Ask before changes")}</option>
+              <option value="acceptEdits">{t("Auto edits")}</option>
+              <option value="plan">{t("Plan only")}</option>
+              <option value="bypass">{t("Full access")}</option>
             </select>
           </label>
           <label className="feature-field">
-            Workspace
+            {t("Workspace")}
             <select
               value={settings.workspace ?? "current"}
               onChange={(event) =>
@@ -205,20 +205,18 @@ function ProjectForm({
                 })
               }
             >
-              <option value="current">Current folder</option>
-              <option value="new">New worktree</option>
+              <option value="current">{t("Current folder")}</option>
+              <option value="new">{t("New worktree")}</option>
             </select>
           </label>
         </div>
       </section>
       <section className="settings-group">
-        <h2 className="settings-group-heading">Workspace behavior</h2>
+        <h2 className="settings-group-heading">{t("Workspace behavior")}</h2>
         <label className="feature-setting-row">
           <span>
-            <strong>Pull before starting</strong>
-            <small>
-              Fast-forward a clean checkout when it has no local commits.
-            </small>
+            <strong>{t("Pull before starting")}</strong>
+            <small>{" "}{t("Fast-forward a clean checkout when it has no local commits.")}{" "}</small>
           </span>
           <input
             className="setting-switch"
@@ -230,11 +228,8 @@ function ProjectForm({
         </label>
         <label className="feature-setting-row">
           <span>
-            <strong>Provider browser access</strong>
-            <small>
-              Allow conversations in this project to use the shared browser
-              tools.
-            </small>
+            <strong>{t("Provider browser access")}</strong>
+            <small>{" "}{t("Allow conversations in this project to use the shared browser tools.")}{" "}</small>
           </span>
           <input
             className="setting-switch"
@@ -249,7 +244,7 @@ function ProjectForm({
       </section>
       <section className="settings-group">
         <div className="feature-section-heading">
-          <h2>Project actions</h2>
+        <h2>{t("Project actions")}</h2>
           <button
             className="btn"
             type="button"
@@ -262,20 +257,13 @@ function ProjectForm({
               })
             }
           >
-            <Plus size={15} />
-            Add action
-          </button>
+            <Plus size={15} />{" "}{t("Add action")}{" "}</button>
         </div>
-        <p className="feature-note">
-          Save commands for your terminal. Setup actions run when you create a
-          worktree.
-        </p>
+        <p className="feature-note">{" "}{t("Save commands for your terminal. Setup actions run when you create a worktree.")}{" "}</p>
         {(settings.actions ?? []).map((action, index) => (
           <div className="project-action-editor" key={action.id}>
             <div className="feature-form-grid">
-              <label className="feature-field">
-                Name
-                <input
+              <label className="feature-field">{" "}{t("Name")}{" "}<input
                   value={action.name}
                   onChange={(event) =>
                     update({
@@ -286,12 +274,10 @@ function ProjectForm({
                       ),
                     })
                   }
-                  placeholder="Run tests"
+                  placeholder={t("Run tests")}
                 />
               </label>
-              <label className="feature-field">
-                Command
-                <input
+              <label className="feature-field">{" "}{t("Command")}{" "}<input
                   className="mono"
                   value={action.command}
                   onChange={(event) =>
@@ -321,13 +307,11 @@ function ProjectForm({
                       ),
                     })
                   }
-                />
-                Run on worktree creation
-              </label>
+                />{" "}{t("Run on worktree creation")}{" "}</label>
               <button
                 className="icon-btn"
                 type="button"
-                aria-label={`Run ${action.name || "action"}`}
+                aria-label={t("Run {name}", { name: action.name || t("action") })}
                 disabled={
                   !project.settings?.actions?.some(
                     (entry) => entry.id === action.id,
@@ -340,7 +324,7 @@ function ProjectForm({
               <button
                 className="icon-btn"
                 type="button"
-                aria-label={`Remove ${action.name || "action"}`}
+                aria-label={t("Remove {name}", { name: action.name || t("action") })}
                 onClick={() =>
                   update({
                     actions: settings.actions?.filter((_, i) => i !== index),
@@ -359,7 +343,7 @@ function ProjectForm({
         </p>
       )}
       <div className="feature-save">
-        <span role="status">{saved ? "Project settings saved" : ""}</span>
+        <span role="status">{saved ? t("Project settings saved") : ""}</span>
         <button
           className="btn"
           data-variant="primary"
@@ -367,7 +351,7 @@ function ProjectForm({
           onClick={save}
         >
           <Save size={15} />
-          {busy ? "Saving…" : "Save settings"}
+          {busy ? t("Saving…") : t("Save settings")}
         </button>
       </div>
     </div>

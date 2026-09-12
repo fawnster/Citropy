@@ -1,3 +1,4 @@
+import { useI18n } from "../lib/i18n.ts";
 import { useEffect, useRef } from "react";
 import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
@@ -74,6 +75,7 @@ export function TerminalPane({
   active: boolean;
   panel: PanelTab;
 }) {
+  const t = useI18n();
   const host = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
@@ -180,9 +182,9 @@ export function TerminalPane({
       if (event.termId !== panel.id) return;
       if (event.t === "term.data") term.current?.write(event.data);
       else
-        term.current?.writeln(`\r\n[process exited with code ${event.code}]`);
+        term.current?.writeln(`\r\n${t("[process exited with code {code}]", { code: event.code ?? "?" })}`);
     });
-  }, [panel.id]);
+  }, [panel.id, t]);
 
   useEffect(() => {
     if (!term.current) return;
@@ -222,7 +224,7 @@ export function TerminalPane({
   return (
     <div className="terminal-pane">
       {!connected && (
-        <div className="browser-notice">Reconnecting to your terminal…</div>
+        <div className="browser-notice">{t("Reconnecting to your terminal…")}</div>
       )}
       <div className="term" ref={host} />
     </div>

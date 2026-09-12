@@ -229,8 +229,8 @@ test(
       .getByRole("button", { name: "New thread", exact: true })
       .click();
     await page
-      .getByRole("menuitem", { name: "Claude Code", exact: true })
-      .click();
+      .getByRole("combobox", { name: "Provider", exact: true })
+      .selectOption("claude");
     await page.getByRole("radio", { name: /New worktree/ }).click();
     await page.getByLabel("Branch name").fill("feature/attachments");
     await page
@@ -372,7 +372,7 @@ test(
       .waitFor();
     assert.notEqual(await page.title(), "unsafe-preview");
     await page.getByRole("button", { name: "Source", exact: true }).click();
-    await page.locator(".preview-body pre").waitFor();
+    await page.locator(".preview-body code").filter({ hasText: "HTML attachment preview" }).waitFor();
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await page.getByRole("button", { name: "Usage", exact: true }).click();
     await page.getByText("76% left", { exact: true }).waitFor();

@@ -54,7 +54,12 @@
   max-height: 50%;
   background: var(--text-4);
   border-radius: 2px;
-  transition: width var(--dur-fast), background var(--dur-fast);
+  opacity: 0.28;
+  transition: width var(--dur-fast), background var(--dur-fast), opacity var(--dur-fast);
+}
+.message-nav:hover .message-nav-stop > span,
+.message-nav:has(:focus-visible) .message-nav-stop > span {
+  opacity: 1;
 }
 .message-nav-stop[aria-current] > span {
   width: 15px;

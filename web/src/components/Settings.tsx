@@ -22,6 +22,7 @@ import { BrowserProfiles } from "./BrowserProfiles.tsx";
 import { DiagnosticsSettings } from "./DiagnosticsSettings.tsx";
 import { ComputerSettings } from "./ComputerSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
+import { AppUpdateControl } from "./AppUpdateControl.tsx";
 import { SectionSidebar } from "./SectionSidebar.tsx";
 import {
   setTheme,
@@ -35,8 +36,10 @@ import {
   useApp,
   viewportWidth,
   confirmAction,
+  setLanguage,
 } from "../lib/store.ts";
 import { send } from "../lib/socket.ts";
+import { useI18n } from "../lib/i18n.ts";
 import type { DesktopWindowState } from "../desktop.d.ts";
 
 const sections = [
@@ -115,7 +118,10 @@ export function Settings({
   navigation?: ReactNode;
   initialSection?: string;
 }) {
+  const t = useI18n();
+  const language = useApp((state) => state.language);
   const [section, setSection] = useState(initialSection);
+  useEffect(() => setSection(initialSection), [initialSection]);
   const uiScale = useApp((state) => state.uiScale);
   const theme = useApp((state) => state.theme);
   const sidebar = useApp((state) => state.sidebarOpen);
@@ -146,10 +152,10 @@ export function Settings({
     if (
       action === "restart" &&
       !(await confirmAction({
-        title: "Restart Citropy desktop?",
+        title: t("Restart Citropy desktop?"),
         description:
-          "Browser pages will reload. Your conversations and terminals keep running on the local server.",
-        label: "Restart desktop",
+          t("Browser pages will reload. Your conversations and terminals keep running on the local server."),
+        label: t("Restart desktop"),
       }))
     )
       return;
@@ -173,12 +179,12 @@ export function Settings({
   const SectionIcon = selectedSection.icon;
 
   return (
-    <section className="section-view" aria-label="Settings">
+    <section className="section-view" aria-label={t("Settings")}>
       {sidebarOpen && (
-        <SectionSidebar title="Settings" onBack={onBack} navigation={navigation}>
+        <SectionSidebar title={t("Settings")} onBack={onBack} navigation={navigation}>
           {["Workspace", "Providers & tools", "Application"].map((group) => (
             <Fragment key={group}>
-              <h2 className="section-nav-label">{group}</h2>
+              <h2 className="section-nav-label">{t(group)}</h2>
               {sections.filter((entry) => entry.group === group).map(({ name, icon: Icon }) => (
                 <button
                   className="section-link"
@@ -192,7 +198,7 @@ export function Settings({
                   }}
                 >
                   <Icon size={17} />
-                  <span>{name}</span>
+                  <span>{t(name)}</span>
                 </button>
               ))}
             </Fragment>
@@ -208,9 +214,9 @@ export function Settings({
                 data-settings-section={section.toLowerCase()}
               >
                 <SectionIcon size={25} aria-hidden="true" />
-                {section}
+                {t(section)}
               </h1>
-              <p>{selectedSection.description}</p>
+              <p>{t(selectedSection.description)}</p>
             </div>
             {section === "Providers" && (
               <button
@@ -219,7 +225,7 @@ export function Settings({
                 onClick={() => send({ t: "providers.refresh" })}
               >
                 <RefreshCw size={14} />
-                Refresh models
+                {t("Refresh models")}
               </button>
             )}
           </header>
@@ -230,12 +236,24 @@ export function Settings({
           {section === "Resources" && <DiagnosticsSettings />}
           {section === "General" && (
             <>
-              <h2 className="settings-group-heading">Layout</h2>
               <div className="settings-group">
                 <label className="setting-row">
                   <span>
-                    <strong>Conversation sidebar</strong>
-                    <small>Keep your conversations alongside the chat.</small>
+                    <strong>{t("Language")}</strong>
+                    <small>{t("Choose the language used in Citropy.")}</small>
+                  </span>
+                  <select value={language} onChange={(event) => setLanguage(event.target.value as "en" | "es")}>
+                    <option value="en">English</option>
+                    <option value="es">Español</option>
+                  </select>
+                </label>
+              </div>
+              <h2 className="settings-group-heading">{t("Layout")}</h2>
+              <div className="settings-group">
+                <label className="setting-row">
+                  <span>
+                    <strong>{t("Conversation sidebar")}</strong>
+                    <small>{t("Keep your conversations alongside the chat.")}</small>
                   </span>
                   <input
                     className="setting-switch"
@@ -247,9 +265,9 @@ export function Settings({
                 </label>
                 <label className="setting-row">
                   <span>
-                    <strong>Inspector</strong>
+                    <strong>{t("Inspector")}</strong>
                     <small>
-                      Show changes, files, and the terminal next to your chat.
+                      {t("Show changes, files, and the terminal next to your chat.")}
                     </small>
                   </span>
                   <input
@@ -261,19 +279,13 @@ export function Settings({
                   />
                 </label>
               </div>
-              <p className="settings-note">
-                Layout preferences are saved on this device.
-              </p>
-              <h2 className="settings-group-heading settings-group-spaced">
-                Chat identity
-              </h2>
+              <p className="settings-note">{" "}{t("Layout preferences are saved on this device.")}{" "}</p>
+              <h2 className="settings-group-heading settings-group-spaced">{" "}{t("Chat identity")}{" "}</h2>
               <div className="settings-group">
                 <label className="setting-row">
                   <span>
-                    <strong>Use GitHub profile in chat</strong>
-                    <small>
-                      Show your connected GitHub username and photo on your messages. Turn off to show “You” and a generic avatar.
-                    </small>
+                    <strong>{t("Use GitHub profile in chat")}</strong>
+                    <small>{" "}{t("Show your connected GitHub username and photo on your messages. Turn off to show “You” and a generic avatar.")}{" "}</small>
                   </span>
                   <input
                     className="setting-switch"
@@ -284,17 +296,12 @@ export function Settings({
                   />
                 </label>
               </div>
-              <h2 className="settings-group-heading settings-group-spaced">
-                Response text
-              </h2>
+              <h2 className="settings-group-heading settings-group-spaced">{" "}{t("Response text")}{" "}</h2>
               <div className="settings-group">
                 <label className="setting-row">
                   <span>
-                    <strong>Text streaming</strong>
-                    <small>
-                      Show text as it arrives. Turn off to wait for each text
-                      block to finish.
-                    </small>
+                    <strong>{t("Text streaming")}</strong>
+                    <small>{" "}{t("Show text as it arrives. Turn off to wait for each text block to finish.")}{" "}</small>
                   </span>
                   <input
                     className="setting-switch"
@@ -306,11 +313,8 @@ export function Settings({
                 </label>
                 <label className="setting-row" data-disabled={textStreaming}>
                   <span>
-                    <strong>Typing animation</strong>
-                    <small>
-                      Reveal finished text gradually. Available when text
-                      streaming is off.
-                    </small>
+                    <strong>{t("Typing animation")}</strong>
+                    <small>{" "}{t("Reveal finished text gradually. Available when text streaming is off.")}{" "}</small>
                   </span>
                   <input
                     className="setting-switch"
@@ -328,10 +332,9 @@ export function Settings({
                   data-disabled={textStreaming || !typingAnimation}
                 >
                   <div>
-                    <label htmlFor="typing-speed">Typing speed</label>
+                    <label htmlFor="typing-speed">{t("Typing speed")}</label>
                     <output htmlFor="typing-speed">
-                      {typingSpeed} characters / second
-                    </output>
+                      {typingSpeed}{" "}{t("characters / second")}{" "}</output>
                   </div>
                   <input
                     id="typing-speed"
@@ -346,41 +349,37 @@ export function Settings({
                     }
                   />
                   <div className="typing-speed-labels">
-                    <span>Slower</span>
-                    <span>Faster</span>
+                <span>{t("Slower")}</span>
+                <span>{t("Faster")}</span>
                   </div>
                 </div>
               </div>
-              <p className="settings-note">
-                Tool activity stays live. Saved conversations appear
-                immediately. Typing animation respects your system’s
-                reduced-motion setting.
-              </p>
+              <p className="settings-note">{" "}{t("Tool activity stays live. Saved conversations appear immediately. Typing animation respects your system’s reduced-motion setting.")}{" "}</p>
             </>
           )}
           {section === "Notifications" && (
             <>
-              <h2 className="settings-group-heading">Completion alerts</h2>
+              <h2 className="settings-group-heading">{t("Completion alerts")}</h2>
               <div className="settings-group">
                 {(
                   [
                     {
                       key: "toasts",
-                      label: "In-app notifications",
+                      label: t("In-app notifications"),
                       detail:
                         "Show a brief popup when a response or Git action finishes.",
                     },
                     {
                       key: "desktop",
-                      label: "Desktop notifications",
+                      label: t("Desktop notifications"),
                       detail:
                         "Notify you when the Citropy window is in the background.",
                     },
                     {
                       key: "sound",
-                      label: "Notification sound",
+                      label: t("Notification sound"),
                       detail:
-                        "Use your system sound for desktop notifications.",
+                        t("Use your system sound for desktop notifications."),
                     },
                   ] as const
                 ).map(({ key, label, detail }) => (
@@ -405,11 +404,7 @@ export function Settings({
                   </label>
                 ))}
               </div>
-              <p className="settings-note">
-                Your last 100 notifications stay in the notification center
-                until you clear them. Desktop alerts require Citropy desktop and
-                follow your system's notification settings.
-              </p>
+              <p className="settings-note">{" "}{t("Your last 100 notifications stay in the notification center until you clear them. Desktop alerts require Citropy desktop and follow your system's notification settings.")}{" "}</p>
             </>
           )}
           {section === "Application" && (
@@ -419,23 +414,30 @@ export function Settings({
                   <Monitor size={24} />
                 </span>
                 <div>
-                  <h2>Citropy desktop</h2>
+                  <h2>{t("Citropy desktop")}</h2>
                   <p>
                     {desktop
-                      ? `Version ${desktop.version} · Electron ${desktop.electron}`
-                      : "Open the desktop app to use the embedded browser and window controls."}
+                      ? t("Version {version} · Electron {electron}", { version: desktop.version, electron: desktop.electron })
+                      : t("Open the desktop app to use the embedded browser and window controls.")}
                   </p>
                 </div>
               </div>
-              <h2 className="settings-group-heading">Updates and restart</h2>
+              <h2 className="settings-group-heading">{t("Updates and restart")}</h2>
               <div className="settings-group">
                 <div className="setting-row">
                   <span>
-                    <strong>Live interface updates</strong>
+                    <strong>{t("Citropy updates")}</strong>
+                    <small>{t("You’ll be notified when an update is available. Download and apply it when you choose.")}</small>
+                  </span>
+                  <AppUpdateControl variant="settings" />
+                </div>
+                <div className="setting-row">
+                  <span>
+                    <strong>{t("Live interface updates")}</strong>
                     <small>
                       {desktop?.development
                         ? "Connected. Interface changes appear as you save."
-                        : "Enable live updates while developing Citropy."}
+                        : t("Enable live updates while developing Citropy.")}
                     </small>
                   </span>
                   <button
@@ -448,19 +450,16 @@ export function Settings({
                   >
                     <RefreshCw size={14} />
                     {desktop?.development
-                      ? "Live updates on"
-                      : "Enable live updates"}
+                      ? t("Live updates on")
+                      : t("Enable live updates")}
                   </button>
                 </div>
                 {desktop ? (
                   <>
                     <div className="setting-row">
                       <span>
-                        <strong>Reload interface</strong>
-                        <small>
-                          Refresh the window while conversations and terminals
-                          keep running.
-                        </small>
+                        <strong>{t("Reload interface")}</strong>
+                        <small>{" "}{t("Refresh the window while conversations and terminals keep running.")}{" "}</small>
                       </span>
                       <button
                         type="button"
@@ -468,17 +467,15 @@ export function Settings({
                         disabled={updating}
                         onClick={() => void applicationAction("reload")}
                       >
-                        <RefreshCw size={14} />
-                        Reload
-                      </button>
+                        <RefreshCw size={14} />{" "}{t("Reload")}{" "}</button>
                     </div>
                     <div className="setting-row">
                       <span>
-                        <strong>Restart desktop</strong>
+                        <strong>{t("Restart desktop")}</strong>
                         <small>
                           {running
-                            ? "Available when active conversations have finished."
-                            : "Apply desktop changes and reopen your browser tabs."}
+                            ? t("Available when active conversations have finished.")
+                            : t("Apply desktop changes and reopen your browser tabs.")}
                         </small>
                       </span>
                       <button
@@ -487,18 +484,14 @@ export function Settings({
                         disabled={!connected || updating || running}
                         onClick={() => void applicationAction("restart")}
                       >
-                        <RotateCcw size={14} />
-                        Restart
-                      </button>
+                        <RotateCcw size={14} />{" "}{t("Restart")}{" "}</button>
                     </div>
                   </>
                 ) : (
                   <div className="setting-row">
                     <span>
-                      <strong>Desktop app</strong>
-                      <small>
-                        Use native browsing, notifications, and window controls.
-                      </small>
+                      <strong>{t("Desktop app")}</strong>
+                      <small>{" "}{t("Use native browsing, notifications, and window controls.")}{" "}</small>
                     </span>
                     <button
                       type="button"
@@ -506,9 +499,7 @@ export function Settings({
                       disabled={!connected}
                       onClick={() => send({ t: "desktop.open" })}
                     >
-                      <ExternalLink size={14} />
-                      Open desktop
-                    </button>
+                      <ExternalLink size={14} />{" "}{t("Open desktop")}{" "}</button>
                   </div>
                 )}
               </div>
@@ -517,21 +508,17 @@ export function Settings({
                   {applicationError}
                 </p>
               )}
-              <p className="settings-note">
-                Interface edits update live. Restart the desktop after changing
-                its native code. Server changes require restarting the local
-                server after active work has finished.
-              </p>
+              <p className="settings-note">{" "}{t("Interface edits update live. Restart the desktop after changing its native code. Server changes require restarting the local server after active work has finished.")}{" "}</p>
             </>
           )}
           {section === "Appearance" && (
             <>
-              <h2 className="settings-group-heading">Interface size</h2>
+              <h2 className="settings-group-heading">{t("Interface size")}</h2>
               <div className="settings-group size-setting">
                 <div className="size-setting-heading">
                   <div>
-                    <label htmlFor="ui-scale">UI size</label>
-                    <p>Scale text, icons, and controls together.</p>
+                    <label htmlFor="ui-scale">{t("UI size")}</label>
+                    <p>{t("Scale text, icons, and controls together.")}</p>
                   </div>
                   <output htmlFor="ui-scale">{uiScale}%</output>
                 </div>
@@ -542,26 +529,24 @@ export function Settings({
                   max="150"
                   step="5"
                   value={uiScale}
-                  aria-valuetext={`${uiScale} percent`}
+                  aria-valuetext={t("{value} percent", { value: uiScale })}
                   onChange={(event) => setUiScale(Number(event.target.value))}
                 />
                 <div className="size-setting-labels">
-                  <span>Compact</span>
+                  <span>{t("Compact")}</span>
                   <button
                     type="button"
                     onClick={() => setUiScale(120)}
                     disabled={uiScale === 120}
-                  >
-                    Reset to 120%
-                  </button>
-                  <span>Larger</span>
+                  >{" "}{t("Reset to 120%")}{" "}</button>
+                  <span>{t("Larger")}</span>
                 </div>
               </div>
-              <h2 className="settings-group-heading">Theme</h2>
+              <h2 className="settings-group-heading">{t("Theme")}</h2>
               <div
                 className="theme-options"
                 role="group"
-                aria-label="Color theme"
+                aria-label={t("Color theme")}
               >
                 {(["dark", "light"] as const).map((value) => (
                   <button
@@ -593,7 +578,7 @@ export function Settings({
                       ) : (
                         <Sun size={16} />
                       )}
-                      <span>{value === "dark" ? "Dark" : "Light"}</span>
+                      <span>{value === "dark" ? t("Dark") : t("Light")}</span>
                       {theme === value && <Check size={16} />}
                     </span>
                   </button>
@@ -601,8 +586,8 @@ export function Settings({
               </div>
               <p className="settings-note">
                 {theme === "dark"
-                  ? "Charcoal surfaces with white accents."
-                  : "Neutral surfaces with dark accents."}
+                  ? t("Charcoal surfaces with white accents.")
+                  : t("Neutral surfaces with dark accents.")}
               </p>
             </>
           )}

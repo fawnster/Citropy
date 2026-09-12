@@ -1,7 +1,8 @@
+import { useI18n } from "../lib/i18n.ts";
 import { useEffect, useState } from "react";
-import { X, Download, Code, Eye, File } from "lucide-react";
-import { highlight } from "../lib/highlight.ts";
-import { langFor } from "../lib/format.ts";
+import { X, Download, Code, Eye } from "lucide-react";
+import { FileIcon } from "./FileIcon.tsx";
+import { SourceView } from "./SourceView.tsx";
 import { useApp } from "../lib/store.ts";
 import { api, assetQuery } from "../lib/api.ts";
 import { Prose } from "./parts/Prose.tsx";
@@ -22,13 +23,12 @@ export function FilePreview({
   attachmentId?: string;
   hideHeader?: boolean;
 }) {
-  const theme = useApp((state) => state.theme);
+  const t = useI18n();
   const active = useApp((state) => state.threads[state.activeThreadId ?? ""]);
   const connected = useApp((state) => state.connected);
   const threadId =
     selectedThread ?? (active?.projectId === projectId ? active.id : undefined);
   const [file, setFile] = useState<FilePreviewData>();
-  const [html, setHtml] = useState("");
   const [error, setError] = useState("");
   const [source, setSource] = useState(false);
   const query = assetQuery(projectId, path, threadId, attachmentId);
@@ -38,32 +38,28 @@ export function FilePreview({
     const controller = new AbortController();
     setFile(undefined);
     setError("");
-    setHtml("");
     setSource(false);
     api<FilePreviewData>(`preview?${query}`, { signal: controller.signal })
-      .then(async (data) => {
+      .then((data) => {
         if (controller.signal.aborted) return;
         setFile(data);
-        if (data.text !== undefined) {
-          const rendered = await highlight(data.text, langFor(path), theme);
-          if (!controller.signal.aborted) setHtml(rendered);
-        }
       })
       .catch((error) => {
         if (!controller.signal.aborted) setError(error.message);
       });
     return () => controller.abort();
-  }, [query, theme, connected]);
+  }, [query, connected]);
   const renderedDocument =
     file?.mime === "text/html" || file?.mime === "text/markdown";
   return (
     <div className="preview rich-preview">
       {!hideHeader && (
         <div className="preview-head">
+          <FileIcon path={file?.name ?? path} mime={file?.mime} />
           <span className="truncate">{file?.name ?? path}</span>
           <a
             className="icon-btn"
-            aria-label="Download file"
+            aria-label={t("Download file")}
             href={`${url}&download=1`}
             download
           >
@@ -73,7 +69,7 @@ export function FilePreview({
             className="icon-btn"
             type="button"
             onClick={onClose}
-            aria-label="Close preview"
+            aria-label={t("Close preview")}
           >
             <X size={15} />
           </button>
@@ -83,7 +79,7 @@ export function FilePreview({
         <div className="preview-toolbar">
           <span>
             {file.mime === "application/octet-stream" && file.text !== undefined
-              ? "Source file"
+              ? t("Source file")
               : file.mime}{" "}
             ·{" "}
             {file.size > 1024 * 1024
@@ -97,7 +93,7 @@ export function FilePreview({
               onClick={() => setSource((value) => !value)}
             >
               {source ? <Eye size={14} /> : <Code size={14} />}
-              {source ? "Preview" : "Source"}
+              {source ? t("Preview") : t("Source")}
             </button>
           )}
         </div>
@@ -108,7 +104,7 @@ export function FilePreview({
         </div>
       ) : !file ? (
         <div className="pane-empty" role="status">
-          {connected ? "Loading preview…" : "Reconnect to load this file."}
+          {connected ? t("Loading preview…") : t("Reconnect to load this file.")}
         </div>
       ) : (
         <>
@@ -139,27 +135,17 @@ export function FilePreview({
               <Prose text={file.text ?? ""} live={false} />
             </div>
           ) : file.text !== undefined ? (
-            html ? (
-              <div
-                className="preview-body scroll"
-                dangerouslySetInnerHTML={{ __html: html }}
-              />
-            ) : (
-              <pre className="preview-body scroll">{file.text}</pre>
-            )
+            <SourceView key={query} text={file.text} path={path} />
           ) : (
             <div className="pane-empty">
-              <File size={30} />
-              <p>This file can be downloaded to open in another application.</p>
-              <a className="btn" href={`${url}&download=1`} download>
-                Download {file.name}
+              <FileIcon path={file.name} mime={file.mime} size={30} />
+              <p>{t("This file can be downloaded to open in another application.")}</p>
+              <a className="btn" href={`${url}&download=1`} download>{t("Download {name}", { name: file.name })}
               </a>
             </div>
           )}
           {file.truncated && (
-            <p className="feature-note">
-              Showing the first 512 KB. Download the file to read it in full.
-            </p>
+            <p className="feature-note">{t("Showing the first 512 KB. Download the file to read it in full.")}</p>
           )}
         </>
       )}

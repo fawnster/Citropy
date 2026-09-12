@@ -1,8 +1,11 @@
 import { useId, useState } from "react";
+import { Minimize2 } from "lucide-react";
 import { cost, tokens } from "../lib/format.ts";
 import { useApp } from "../lib/store.ts";
+import { useI18n } from "../lib/i18n.ts";
 
 export function ContextUsage({ onCompact }: { onCompact?: () => void }) {
+  const t = useI18n();
   const [open, setOpen] = useState(false);
   const id = useId();
   const connected = useApp((state) => state.connected);
@@ -15,8 +18,8 @@ export function ContextUsage({ onCompact }: { onCompact?: () => void }) {
       ? Math.max(0, Math.min(usage.contextTokens / contextMax, 1))
       : 0;
   const label = known
-    ? `${Math.round(fill * 100)}% context used`
-    : "Context usage";
+    ? t("{percent}% context used", { percent: Math.round(fill * 100) })
+    : t("Context usage");
 
   return (
     <div
@@ -87,24 +90,29 @@ export function ContextUsage({ onCompact }: { onCompact?: () => void }) {
         <div
           className="context-details"
           role="group"
-          aria-label="Context usage"
+          aria-label={t("Context usage")}
           id={id}
         >
           <div className="context-heading">
-            <strong>Context</strong>
+            <strong>{t("Context")}</strong>
             <span>
-              {known ? `${Math.round(fill * 100)}% used` : "Not reported yet"}
+              {known
+                ? t("{percent}% context used", { percent: Math.round(fill * 100) })
+                : t("Not reported yet")}
             </span>
           </div>
           <p>
             {known && usage
-              ? `${tokens(usage.contextTokens)} of ${tokens(contextMax)} tokens`
-              : "Usage appears when the provider reports it."}
+              ? t("{used} of {total} tokens", {
+                  used: tokens(usage.contextTokens),
+                  total: tokens(contextMax),
+                })
+              : t("Usage appears when the provider reports it.")}
           </p>
           {usage && usage.turns > 0 && (
             <dl>
               <div>
-                <dt>Input</dt>
+                <dt>{t("Input")}</dt>
                 <dd>
                   {tokens(
                     thread?.provider === "codex"
@@ -114,42 +122,43 @@ export function ContextUsage({ onCompact }: { onCompact?: () => void }) {
                 </dd>
               </div>
               <div>
-                <dt>Output</dt>
+                <dt>{t("Output")}</dt>
                 <dd>{tokens(usage.output)}</dd>
               </div>
               <div>
-                <dt>Cache read</dt>
+                <dt>{t("Cache read")}</dt>
                 <dd>{tokens(usage.cacheRead)}</dd>
               </div>
               <div>
-                <dt>Cache write</dt>
+                <dt>{t("Cache write")}</dt>
                 <dd>{tokens(usage.cacheWrite)}</dd>
               </div>
               {usage.costUsd > 0 && (
                 <div>
-                  <dt>Cost</dt>
+                  <dt>{t("Cost")}</dt>
                   <dd>{cost(usage.costUsd)}</dd>
                 </div>
               )}
             </dl>
           )}
-          {thread?.externalId && onCompact && (
-            <button
-              className="btn"
-              type="button"
-              disabled={thread.running || !connected}
-              onClick={onCompact}
-            >
-              {thread.compacting ? "Compacting…" : "Compact context"}
-            </button>
+          {thread?.compacting ? (
+            <div className="context-compacting" role="status">
+                <Minimize2 size={15} />{t("Compacting context")}…
+            </div>
+          ) : thread?.externalId && onCompact && (
+            <div className="context-actions">
+              <button className="btn" type="button" disabled={thread.running || !connected} onClick={onCompact}>
+                <Minimize2 size={15} />{t("Compact context")}
+              </button>
+            </div>
           )}
-          <div className="context-connection">
+          {!thread?.compacting && <div className="context-connection">
             {connected
               ? thread?.running
-                ? "Provider working"
-                : "Connected"
-              : "Reconnecting…"}
-          </div>
+                ? t("Provider working")
+                : t("Connected")
+              : t("Reconnecting…")}
+          </div>}
         </div>
       )}
     </div>

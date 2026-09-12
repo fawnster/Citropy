@@ -22,11 +22,20 @@ test(
     const originalEnv = { ...process.env };
     const originalFetch = globalThis.fetch;
     let latest = "1.1.0";
-    globalThis.fetch = (input, options) => String(input).startsWith("https://registry.npmjs.org/")
-      ? Promise.resolve(Response.json({ version: latest }))
-      : originalFetch(input, options);
+    let installerDownloads = 0;
+    let installer = '#!/bin/sh\nexec "$CODEX_INSTALL_DIR/codex" standalone-install';
+    globalThis.fetch = (input, options) => {
+      if (String(input).startsWith("https://registry.npmjs.org/"))
+        return Promise.resolve(Response.json({ version: latest }));
+      if (String(input) === "https://chatgpt.com/codex/install.sh") {
+        installerDownloads++;
+        return Promise.resolve(new Response(installer));
+      }
+      return originalFetch(input, options);
+    };
     os.homedir = () => home;
     process.env.CODEX_HOME = join(home, "codex-custom");
+    delete process.env.CODEX_INSTALL_DIR;
     process.env.CLAUDE_CONFIG_DIR = join(home, "claude-custom");
     process.env.XDG_CONFIG_HOME = join(home, "config-custom");
     process.env.PATH = `${join(home, ".local/bin")}:${join(home, ".opencode/bin")}:${process.env.PATH}`;
@@ -51,6 +60,7 @@ if (args.includes('--help')) {
 } else if (args[0] === '--version') {
   process.stdout.write(provider + ' ' + (fs.existsSync(home + '/' + provider + '.version') ? fs.readFileSync(home + '/' + provider + '.version', 'utf8') : '1.0.0'));
 } else {
+  if (args[0] === 'standalone-install' && process.env.CODEX_NON_INTERACTIVE !== '1') process.exit(4);
   fs.appendFileSync(home + '/calls.jsonl', JSON.stringify({ provider, args }) + '\\n');
   const fail = fs.existsSync(home + '/fail');
   process.stdout.write('\\x1b[32m' + 'updater output '.repeat(2000) + '\\x1b[0m');
@@ -201,13 +211,16 @@ if (args.includes('--help')) {
       },
     );
     await t.test(
-      "all three native updaters are detected, run once, verify versions, and bound their output",
+      "updates use the owning installer, run only on request, verify versions, and bound output",
       async () => {
-        assert.ok(
-          (await providerMaintenance()).every(
-            (entry) => entry.available && entry.method === "Native updater",
-          ),
-        );
+        const maintenance = await providerMaintenance();
+        assert.ok(maintenance.every((entry) => entry.available));
+        assert.deepEqual(maintenance.map((entry) => entry.method), ["Native updater", "Standalone installer", "Native updater"]);
+        await providerMaintenance(true);
+        assert.equal(installerDownloads, 0);
+        assert.equal(fs.existsSync(join(home, "calls.jsonl")), false);
+        assert.equal(store.notifications.filter((entry) => entry.kind === "update").length, 3);
+        assert.ok(store.notifications.every((entry) => entry.target?.view === "settings" && entry.target.section === "Providers"));
         let prepared = 0;
         let refreshed = 0;
         for (const provider of ["claude", "codex", "opencode"]) {
@@ -250,10 +263,42 @@ if (args.includes('--help')) {
           .map(JSON.parse);
         assert.deepEqual(
           calls.map(({ args }) => args),
-          [["update"], ["update"], ["upgrade"]],
+          [["update"], ["standalone-install"], ["upgrade"]],
         );
+        assert.equal(installerDownloads, 1);
       },
     );
+    await t.test("invalid installer downloads leave the installed CLI untouched and release the update lock", async () => {
+      const validInstaller = installer;
+      installer = "<html>Temporary service error</html>";
+      const calls = fs.readFileSync(join(home, "calls.jsonl"), "utf8");
+      try {
+        startProviderUpdate("codex", async () => {}, async () => assert.fail("Must not report refreshed"));
+        const state = await settle("codex");
+        assert.equal(state.status, "error");
+        assert.match(state.message, /installer response was invalid/);
+        assert.equal(fs.readFileSync(join(home, "calls.jsonl"), "utf8"), calls);
+        assert.equal(fs.readFileSync(join(home, "codex.version"), "utf8"), "1.1.0");
+        assertProviderReady("codex");
+      } finally {
+        installer = validInstaller;
+      }
+    });
+    await t.test("update notifications are emitted once per release and survive being marked read", async () => {
+      const { notifyUpdateAvailable } = await import("../server/update-notifications.ts");
+      notifyUpdateAvailable("Citropy", "0.2.0", "Application");
+      const notification = store.notifications.find(entry => entry.dedupeKey === "update:Citropy:0.2.0");
+      assert.ok(notification);
+      assert.deepEqual(notification.target, { view: "settings", section: "Application" });
+      store.readNotifications([notification.id]);
+      notifyUpdateAvailable("Citropy", "0.2.0", "Application");
+      assert.equal(store.notifications.filter(entry => entry.dedupeKey === notification.dedupeKey).length, 1);
+      assert.equal(store.notifications.find(entry => entry.id === notification.id).read, true);
+      notifyUpdateAvailable("Citropy", "invalid version", "Application");
+      assert.equal(store.notifications.some(entry => entry.text.includes("invalid version")), false);
+      notifyUpdateAvailable("Citropy", "0.3.0", "Application");
+      assert.equal(store.notifications.filter(entry => entry.target.section === "Application").length, 2);
+    });
     await t.test(
       "failed updates release the lock and preserve the installed version",
       async () => {
@@ -535,6 +580,24 @@ if (args.includes('--help')) {
         await page.close();
       },
     );
+    await t.test("managed standalone installations keep their update method after the first install", async () => {
+      const binary = join(home, ".local/bin/codex");
+      const original = fs.readFileSync(binary);
+      const target = join(process.env.CODEX_HOME, "packages/standalone/releases/1.1.0/codex");
+      fs.mkdirSync(dirname(target), { recursive: true });
+      fs.writeFileSync(target, original, { mode: 0o755 });
+      fs.rmSync(binary);
+      fs.symlinkSync(target, binary);
+      try {
+        const state = (await providerMaintenance(true)).find(entry => entry.provider === "codex");
+        assert.equal(state.method, "Standalone installer");
+        assert.equal(state.available, true);
+        assert.equal(state.updateStatus, "current");
+      } finally {
+        fs.rmSync(binary);
+        fs.writeFileSync(binary, original, { mode: 0o755 });
+      }
+    });
     await t.test(
       "npm updates the owning prefix and unrecognized installations stay manual",
       async () => {

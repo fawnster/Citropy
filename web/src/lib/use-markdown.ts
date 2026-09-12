@@ -41,8 +41,9 @@ export function useMarkdown(text: string, live: boolean): { html: string; ready:
       return;
     }
     let cancelled = false;
+    const controller = new AbortController();
     const run = async () => {
-      const result = await renderMarkdown(text, theme).catch(() => fallback(text));
+      const result = await renderMarkdown(text, theme, controller.signal).catch(() => fallback(text));
       if (cancelled || latest.current !== key) return;
       if (!live) remember(key, result);
       setRendered({ html: result, key });
@@ -51,11 +52,13 @@ export function useMarkdown(text: string, live: boolean): { html: string; ready:
       void run();
       return () => {
         cancelled = true;
+        controller.abort();
       };
     }
     const timer = setTimeout(run, 70);
     return () => {
       cancelled = true;
+      controller.abort();
       clearTimeout(timer);
     };
   }, [key, text, theme, live]);

@@ -13,6 +13,7 @@ import {
   X,
 } from "lucide-react";
 import { useApp } from "../../lib/store.ts";
+import { currentLocale, useI18n } from "../../lib/i18n.ts";
 
 export function GitHubLink({
   href,
@@ -46,6 +47,7 @@ export function GitHubFeedback({
   loading?: boolean;
   empty?: string;
 }) {
+  const t = useI18n();
   if (error)
     return (
       <div className="github-feedback" data-error role="alert">
@@ -57,7 +59,7 @@ export function GitHubFeedback({
     return (
       <div className="github-feedback" role="status">
         <LoaderCircle size={18} className="git-spinner" />
-        <span>Loading from GitHub…</span>
+        <span>{t("Loading from GitHub…")}</span>
       </div>
     );
   if (empty)
@@ -65,7 +67,7 @@ export function GitHubFeedback({
       <div className="github-empty">
         <Circle size={28} strokeWidth={1.3} />
         <h2>{empty}</h2>
-        <p>Try another filter or refresh for updates.</p>
+        <p>{t("Try another filter or refresh for updates.")}</p>
       </div>
     );
   return null;
@@ -78,6 +80,7 @@ export function GitHubState({
   state: string | null;
   pull?: boolean;
 }) {
+  const t = useI18n();
   const value = (state ?? "pending").toLowerCase();
   const tone = ["merged"].includes(value)
     ? "merged"
@@ -105,7 +108,7 @@ export function GitHubState({
   return (
     <span className="github-state" data-tone={tone}>
       <Icon size={15} />
-      {value.replaceAll("_", " ")}
+      {t(value.replaceAll("_", " "))}
     </span>
   );
 }
@@ -119,6 +122,7 @@ export function GitHubPagination({
   more: boolean;
   onChange: (page: number) => void;
 }) {
+  const t = useI18n();
   if (page === 1 && !more) return null;
   return (
     <div className="github-pagination">
@@ -128,15 +132,15 @@ export function GitHubPagination({
         onClick={() => onChange(page - 1)}
       >
         <ArrowLeft size={14} />
-        Previous
+        {t("Previous")}
       </button>
-      <span>Page {page}</span>
+      <span>{t("Page {page}", { page })}</span>
       <button
         className="btn"
         disabled={!more}
         onClick={() => onChange(page + 1)}
       >
-        Next
+        {t("Next")}
         <ArrowRight size={14} />
       </button>
     </div>
@@ -160,6 +164,7 @@ export function GitHubDialog({
   onClose: () => void;
   danger?: boolean;
 }) {
+  const t = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const connected = useApp((state) => state.connected);
@@ -199,7 +204,7 @@ export function GitHubDialog({
             data-cancel
             onClick={onClose}
           >
-            {onSubmit ? "Cancel" : "Close"}
+            {onSubmit ? t("Cancel") : t("Close")}
           </button>
           {onSubmit && (
             <button
@@ -208,7 +213,7 @@ export function GitHubDialog({
               disabled={busy || !connected}
             >
               {busy && <LoaderCircle size={14} className="git-spinner" />}
-              {busy ? "Working…" : submitLabel}
+              {busy ? t("Working…") : submitLabel && t(submitLabel)}
             </button>
           )}
         </>
@@ -218,7 +223,7 @@ export function GitHubDialog({
       <GitHubFeedback error={error} />
       {!connected && (
         <p role="status">
-          Reconnecting to Citropy… You can continue when the connection returns.
+          {t("Reconnecting to Citropy… You can continue when the connection returns.")}
         </p>
       )}
     </Modal>
@@ -226,7 +231,7 @@ export function GitHubDialog({
 }
 
 export function githubDate(date: string) {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(currentLocale(), {
     month: "short",
     day: "numeric",
   }).format(new Date(date));

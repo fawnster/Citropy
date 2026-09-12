@@ -3,7 +3,6 @@ import { useState } from "react";
 import {
   ArrowLeft,
   Check,
-  FileCode2,
   GitBranch,
   MessageSquare,
   Plus,
@@ -11,6 +10,8 @@ import {
   Search,
 } from "lucide-react";
 import { useGitHub } from "../../lib/use-github.ts";
+import { useI18n } from "../../lib/i18n.ts";
+import { FileIcon } from "../FileIcon.tsx";
 import { github } from "../../lib/actions.ts";
 import { Prose } from "../parts/Prose.tsx";
 import {
@@ -50,6 +51,7 @@ export function GitHubItems({
   branch?: string;
   currentUser: string;
 }) {
+  const t = useI18n();
   const repo = repository.full_name;
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
@@ -162,14 +164,14 @@ export function GitHubItems({
     refresh();
   };
   const titles: Record<Action, string> = {
-    new: pull ? "New pull request" : "New issue",
-    edit: "Edit details",
-    comment: "Add a comment",
-    state: item?.state === "open" ? "Close on GitHub" : "Reopen on GitHub",
-    review: "Submit a review",
-    merge: "Merge pull request",
-    ready: "Mark ready for review",
-    reviewers: "Request a review",
+    new: pull ? t("New pull request") : t("New issue"),
+    edit: t("Edit details"),
+    comment: t("Add a comment"),
+    state: item?.state === "open" ? t("Close on GitHub") : t("Reopen on GitHub"),
+    review: t("Submit a review"),
+    merge: t("Merge pull request"),
+    ready: t("Mark ready for review"),
+    reviewers: t("Request a review"),
   };
   return (
     <div className="github-workspace">
@@ -184,32 +186,32 @@ export function GitHubItems({
         >
           <Search size={16} />
           <input
-            aria-label={pull ? "Search pull requests" : "Search issues"}
-            placeholder={pull ? "Search pull requests…" : "Search issues…"}
+            aria-label={pull ? t("Search pull requests") : t("Search issues")}
+            placeholder={pull ? t("Search pull requests…") : t("Search issues…")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
-          <button className="btn" type="submit">
-            Search
+            <button className="btn" type="submit">
+            {t("Search")}
           </button>
         </form>
         <select
-          aria-label="State"
+          aria-label={t("State")}
           value={state}
           onChange={(event) => {
             setState(event.target.value as typeof state);
             setPage(1);
           }}
         >
-          <option value="open">Open</option>
-          <option value="closed">Closed</option>
-          <option value="all">All states</option>
+          <option value="open">{t("Open")}</option>
+          <option value="closed">{t("Closed")}</option>
+          <option value="all">{t("All states")}</option>
         </select>
         <button
           className="icon-btn"
           onClick={refresh}
-          title="Refresh"
-          aria-label="Refresh items"
+          title={t("Refresh")}
+          aria-label={t("Refresh items")}
           disabled={list.loading}
         >
           <RefreshCw size={16} />
@@ -221,7 +223,7 @@ export function GitHubItems({
           disabled={repository.archived}
         >
           <Plus size={15} />
-          {pull ? "New pull request" : "New issue"}
+          {pull ? t("New pull request") : t("New issue")}
         </button>
       </div>
       {feedback && (
@@ -233,14 +235,14 @@ export function GitHubItems({
       <div className="github-split" data-detail={Boolean(selected)}>
         <div className="github-list scroll">
           <div className="github-list-caption">
-            {list.data?.total ?? ""} {pull ? "pull requests" : "issues"}
+            {list.data?.total ?? ""} {pull ? t("pull requests") : t("issues")}
           </div>
           <GitHubFeedback
             error={list.error}
             loading={list.loading && !list.data}
             empty={
               list.data?.items.length === 0
-                ? `No ${state === "all" ? "" : state + " "}${pull ? "pull requests" : "issues"}`
+                ? t("No {state} {items}", { state: state === "all" ? "" : t(state === "open" ? "open" : "closed"), items: pull ? t("pull requests") : t("issues") })
                 : undefined
             }
           />
@@ -257,7 +259,7 @@ export function GitHubItems({
               <GitHubState state={itemState(entry)} pull={pull} />
               <strong>{entry.title}</strong>
               <span className="github-meta">
-                #{entry.number} · {entry.user?.login ?? "Deleted user"} ·{" "}
+                #{entry.number} · {entry.user?.login ?? t("Deleted user")} ·{" "}
                 {githubDate(entry.updated_at)}
               </span>
               <div className="github-labels">
@@ -280,10 +282,9 @@ export function GitHubItems({
           {!selected ? (
             <div className="github-empty">
               <MessageSquare size={30} />
-              <h2>Select {pull ? "a pull request" : "an issue"}</h2>
+          <h2>{t("Select {item}", { item: pull ? t("a pull request") : t("an issue") })}</h2>
               <p>
-                Read the conversation, review changes, and follow its progress
-                here.
+                {t("Read the conversation, review changes, and follow its progress here.")}
               </p>
             </div>
           ) : (
@@ -293,7 +294,7 @@ export function GitHubItems({
                 onClick={() => setSelected(null)}
               >
                 <ArrowLeft size={15} />
-                Back to {pull ? "pull requests" : "issues"}
+                {t("Back to {items}", { items: pull ? t("pull requests") : t("issues") })}
               </button>
               <GitHubFeedback
                 error={detail.error}
@@ -304,10 +305,10 @@ export function GitHubItems({
                   <header className="github-item-heading">
                     <GitHubState state={itemState(item)} pull={pull} />
                     <span className="github-meta">#{item.number}</span>
-                    <GitHubLink href={item.html_url}>Open on GitHub</GitHubLink>
+                    <GitHubLink href={item.html_url}>{t("Open on GitHub")}</GitHubLink>
                     <h2>{item.title}</h2>
                     <p>
-                      {item.user?.login ?? "Deleted user"} opened this{" "}
+                      {item.user?.login ?? t("Deleted user")} {t("opened this")} {" "}
                       {githubDate(item.created_at)}
                     </p>
                   </header>
@@ -315,7 +316,7 @@ export function GitHubItems({
                     <div className="github-branch-line">
                       <GitBranch size={15} />
                       <code>{item.head.label}</code>
-                      <span>into</span>
+                      <span>{t("into")}</span>
                       <code>{item.base?.ref}</code>
                     </div>
                   )}
@@ -324,14 +325,14 @@ export function GitHubItems({
                       className="btn"
                       onClick={() => setAction("comment")}
                     >
-                      Comment
+                      {t("Comment")}
                     </button>
                     <button
                       className="btn"
                       onClick={() => setAction("edit")}
                       disabled={repository.archived || !canEdit}
                     >
-                      Edit
+                      {t("Edit")}
                     </button>
                     {pull && item.state === "open" && (
                       <>
@@ -340,14 +341,14 @@ export function GitHubItems({
                           onClick={() => setAction("review")}
                           disabled={item.user?.login === currentUser}
                         >
-                          Review
+                          {t("Review")}
                         </button>
                         {canEdit && (
                           <button
                             className="btn"
                             onClick={() => setAction("reviewers")}
                           >
-                            Request review
+                            {t("Request review")}
                           </button>
                         )}
                         {canEdit && item.draft && (
@@ -355,7 +356,7 @@ export function GitHubItems({
                             className="btn"
                             onClick={() => setAction("ready")}
                           >
-                            Ready for review
+                            {t("Ready for review")}
                           </button>
                         )}
                         {canManage && !item.draft && (
@@ -365,7 +366,7 @@ export function GitHubItems({
                             disabled={item.mergeable === false}
                             onClick={() => setAction("merge")}
                           >
-                            Merge…
+                            {t("Merge…")}
                           </button>
                         )}
                       </>
@@ -376,20 +377,19 @@ export function GitHubItems({
                         data-variant="ghost"
                         onClick={() => setAction("state")}
                       >
-                        {item.state === "open" ? "Close" : "Reopen"}
+                        {item.state === "open" ? t("Close") : t("Reopen")}
                       </button>
                     )}
                   </div>
                   {pull && item.mergeable === false && (
                     <p className="github-notice">
-                      This pull request has conflicts. Resolve them before
-                      merging.
+                      {t("This pull request has conflicts. Resolve them before merging.")}
                     </p>
                   )}
                   <div
                     className="github-tabs"
                     role="tablist"
-                    aria-label={pull ? "Pull request details" : "Issue details"}
+                    aria-label={pull ? t("Pull request details") : t("Issue details")}
                     onKeyDown={(event) => {
                       const buttons = Array.from(
                         event.currentTarget.querySelectorAll<HTMLButtonElement>(
@@ -448,23 +448,21 @@ export function GitHubItems({
                   {tab === "Conversation" && (
                     <div className="github-discussion">
                       <Prose
-                        text={item.body || "No description provided."}
+                        text={item.body || t("No description provided.")}
                         live={false}
                       />
                       {(item.labels.length > 0 ||
                         item.assignees.length > 0) && (
                         <div className="github-item-metadata">
-                          <span>
-                            Labels:{" "}
+                          <span>{" "}{t("Labels:")}{" "}
                             {item.labels
                               .map((label) => label.name)
-                              .join(", ") || "None"}
+                              .join(", ") || t("None")}
                           </span>
-                          <span>
-                            Assignees:{" "}
+                          <span>{" "}{t("Assignees:")}{" "}
                             {item.assignees
                               .map((user) => user.login)
-                              .join(", ") || "None"}
+                              .join(", ") || t("None")}
                           </span>
                         </div>
                       )}
@@ -475,15 +473,13 @@ export function GitHubItems({
                         >
                           <header>
                             <strong>
-                              {review.user?.login ?? "Deleted user"}
+                              {review.user?.login ?? t("Deleted user")}
                             </strong>
                             <GitHubState state={review.state ?? "commented"} />
                             <GitHubLink
                               className="github-meta"
                               href={review.html_url}
-                            >
-                              Review
-                            </GitHubLink>
+                            >{" "}{t("Review")}{" "}</GitHubLink>
                           </header>
                           <Prose text={review.body} live={false} />
                         </article>
@@ -492,15 +488,13 @@ export function GitHubItems({
                         <article className="github-comment" key={comment.id}>
                           <header>
                             <strong>
-                              {comment.user?.login ?? "Deleted user"}
+                              {comment.user?.login ?? t("Deleted user")}
                             </strong>
                             <span>{githubDate(comment.created_at!)}</span>
                             <GitHubLink
                               className="github-meta"
                               href={comment.html_url}
-                            >
-                              Comment
-                            </GitHubLink>
+                            >{" "}{t("Comment")}{" "}</GitHubLink>
                           </header>
                           <Prose text={comment.body} live={false} />
                         </article>
@@ -512,14 +506,13 @@ export function GitHubItems({
                       {detail.data?.files.map((file) => (
                         <details key={file.filename} open>
                           <summary>
-                            <FileCode2 size={16} />
+                            <FileIcon path={file.filename} />
                             <span>{file.filename}</span>
                             <span className="add">+{file.additions}</span>
                             <span className="del">−{file.deletions}</span>
                           </summary>
                           {file.previous_filename && (
-                            <p className="github-meta">
-                              Renamed from {file.previous_filename}
+                            <p className="github-meta">{" "}{t("Renamed from")}{" "}{file.previous_filename}
                             </p>
                           )}
                           {file.patch ? (
@@ -542,15 +535,11 @@ export function GitHubItems({
                               ))}
                             </pre>
                           ) : (
-                            <p className="github-meta">
-                              GitHub does not provide an inline diff for this
-                              file.{" "}
+                            <p className="github-meta">{" "}{t("GitHub does not provide an inline diff for this file.")}{" "}
                               <GitHubLink
                                 className="github-inline-link"
                                 href={file.blob_url}
-                              >
-                                View file
-                              </GitHubLink>
+                              >{" "}{t("View file")}{" "}</GitHubLink>
                             </p>
                           )}
                         </details>
@@ -565,25 +554,19 @@ export function GitHubItems({
                             state={check.conclusion ?? check.status}
                           />
                           <strong>{check.name}</strong>
-                          <GitHubLink href={check.details_url}>
-                            Details
-                          </GitHubLink>
+                          <GitHubLink href={check.details_url}>{" "}{t("Details")}{" "}</GitHubLink>
                         </div>
                       ))}
                       {detail.data?.statuses.map((check) => (
                         <div key={check.id}>
                           <GitHubState state={check.state} />
                           <strong>{check.context}</strong>
-                          <GitHubLink href={check.target_url}>
-                            Details
-                          </GitHubLink>
+                          <GitHubLink href={check.target_url}>{" "}{t("Details")}{" "}</GitHubLink>
                         </div>
                       ))}
                       {!detail.data?.checks.length &&
                         !detail.data?.statuses.length && (
-                          <p className="github-meta">
-                            No checks reported for this commit.
-                          </p>
+                          <p className="github-meta">{" "}{t("No checks reported for this commit.")}{" "}</p>
                         )}
                     </div>
                   )}
@@ -596,12 +579,12 @@ export function GitHubItems({
       {action && (
         <GitHubDialog
           title={titles[action]}
-          description={`${repo}${selected && action !== "new" ? ` · #${selected}` : ""}. ${action === "merge" ? "Merge the reviewed commit into the base branch. GitHub branch protections still apply." : action === "new" && pull ? "Both branches must already be pushed to GitHub." : "Changes will be saved to GitHub under your signed-in account."}`}
+          description={`${repo}${selected && action !== "new" ? ` · #${selected}` : ""}. ${action === "merge" ? t("Merge the reviewed commit into the base branch. GitHub branch protections still apply.") : action === "new" && pull ? t("Both branches must already be pushed to GitHub.") : t("Changes will be saved to GitHub under your signed-in account.")}`}
           submitLabel={
             action === "new"
               ? pull
-                ? "Create pull request"
-                : "Create issue"
+                ? t("Create pull request")
+                : t("Create issue")
               : titles[action]
           }
           danger={action === "state" && item?.state === "open"}
@@ -609,9 +592,7 @@ export function GitHubItems({
           onSubmit={submit}
         >
           {(action === "new" || action === "edit") && (
-            <label className="git-field">
-              Title
-              <input
+            <label className="git-field">{" "}{t("Title")}{" "}<input
                 name="title"
                 defaultValue={action === "edit" ? item?.title : ""}
                 required
@@ -623,9 +604,7 @@ export function GitHubItems({
             <>
               <GitHubFeedback error={branches.error} />
               <div className="github-form-columns">
-                <label className="git-field">
-                  Head branch
-                  <input
+                <label className="git-field">{" "}{t("Head branch")}{" "}<input
                     name="head"
                     list="github-branches"
                     defaultValue={
@@ -633,13 +612,11 @@ export function GitHubItems({
                         ? branch
                         : ""
                     }
-                    placeholder="feature/my-change or owner:branch"
+                    placeholder={t("feature/my-change or owner:branch")}
                     required
                   />
                 </label>
-                <label className="git-field">
-                  Base branch
-                  <input
+                <label className="git-field">{" "}{t("Base branch")}{" "}<input
                     name="base"
                     list="github-branches"
                     defaultValue={repository.default_branch}
@@ -653,77 +630,65 @@ export function GitHubItems({
                 ))}
               </datalist>
               <label className="github-checkbox">
-                <input type="checkbox" name="draft" defaultChecked />
-                Create as a draft
-              </label>
+                <input type="checkbox" name="draft" defaultChecked />{" "}{t("Create as a draft")}{" "}</label>
             </>
           )}
           {action === "review" && (
-            <label className="git-field">
-              Review decision
-              <select name="event">
-                <option value="COMMENT">Comment</option>
-                <option value="APPROVE">Approve</option>
-                <option value="REQUEST_CHANGES">Request changes</option>
+            <label className="git-field">{" "}{t("Review decision")}{" "}<select name="event">
+                <option value="COMMENT">{t("Comment")}</option>
+                <option value="APPROVE">{t("Approve")}</option>
+                <option value="REQUEST_CHANGES">{t("Request changes")}</option>
               </select>
             </label>
           )}
           {["new", "edit", "comment", "review"].includes(action) && (
             <label className="git-field">
               {action === "comment" || action === "review"
-                ? "Comment"
-                : "Description"}
+                ? t("Comment")
+                : t("Description")}
               <textarea
                 name="body"
                 rows={6}
                 defaultValue={action === "edit" ? (item?.body ?? "") : ""}
                 required={action === "comment"}
-                placeholder="Markdown supported"
+                placeholder={t("Markdown supported")}
               />
             </label>
           )}
           {(action === "edit" || (action === "new" && !pull)) && (
             <div className="github-form-columns">
-              <label className="git-field">
-                Labels
-                <input
+              <label className="git-field">{" "}{t("Labels")}{" "}<input
                   name="labels"
                   defaultValue={
                     action === "edit"
                       ? item?.labels.map((label) => label.name).join(", ")
                       : ""
                   }
-                  placeholder="bug, documentation"
+                  placeholder={t("bug, documentation")}
                 />
               </label>
-              <label className="git-field">
-                Assignees
-                <input
+              <label className="git-field">{" "}{t("Assignees")}{" "}<input
                   name="assignees"
                   defaultValue={
                     action === "edit"
                       ? item?.assignees.map((user) => user.login).join(", ")
                       : ""
                   }
-                  placeholder="usernames, separated by commas"
+                  placeholder={t("usernames, separated by commas")}
                 />
               </label>
             </div>
           )}
           {action === "reviewers" && (
-            <label className="git-field">
-              Reviewers
-              <input
+            <label className="git-field">{" "}{t("Reviewers")}{" "}<input
                 name="reviewers"
                 required
-                placeholder="usernames, separated by commas"
+                placeholder={t("usernames, separated by commas")}
               />
             </label>
           )}
           {action === "merge" && (
-            <label className="git-field">
-              Merge method
-              <select
+            <label className="git-field">{" "}{t("Merge method")}{" "}<select
                 name="method"
                 defaultValue={
                   repository.allow_squash_merge
@@ -734,17 +699,16 @@ export function GitHubItems({
                 }
               >
                 {repository.allow_squash_merge && (
-                  <option value="squash">Squash and merge</option>
+                  <option value="squash">{t("Squash and merge")}</option>
                 )}
                 {repository.allow_merge_commit && (
-                  <option value="merge">Create a merge commit</option>
+                  <option value="merge">{t("Create a merge commit")}</option>
                 )}
                 {repository.allow_rebase_merge && (
-                  <option value="rebase">Rebase and merge</option>
+                  <option value="rebase">{t("Rebase and merge")}</option>
                 )}
               </select>
-              <small>
-                Commit {item?.head?.sha.slice(0, 12)} into {item?.base?.ref}
+              <small>{" "}{t("Commit")}{" "}{item?.head?.sha.slice(0, 12)}{" "}{t("into")}{" "}{item?.base?.ref}
               </small>
             </label>
           )}

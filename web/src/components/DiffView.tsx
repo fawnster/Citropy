@@ -1,8 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
-import { highlightTokens, escapeHtml } from "../lib/highlight.ts";
+import { useI18n } from "../lib/i18n.ts";
+import { useCallback, useMemo, useRef } from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { escapeHtml } from "../lib/highlight.ts";
 import { langFor } from "../lib/format.ts";
-import { useApp } from "../lib/store.ts";
+import { useHighlightedLines } from "../lib/use-highlighted-lines.ts";
 import { useDisclosure } from "../lib/use-disclosure.ts";
+import { FileIcon } from "./FileIcon.tsx";
 import type { FilePatch, PatchLine } from "../../../shared/protocol.ts";
 
 interface Props {
@@ -10,6 +13,8 @@ interface Props {
   limit?: number;
   showHeader?: boolean;
   partId?: string;
+  expanded?: boolean;
+  onExpand?: () => void;
 }
 
 interface Row extends PatchLine {
@@ -44,38 +49,29 @@ function rows(patch: FilePatch): Row[] {
   return out;
 }
 
-export function DiffView({ patch, limit = 26, showHeader = true, partId }: Props) {
-  const theme = useApp((state) => state.theme);
-  const [expanded, setExpanded] = useDisclosure(partId, "diff");
-  const [oldLines, setOldLines] = useState<string[] | null>(null);
-  const [newLines, setNewLines] = useState<string[] | null>(null);
+export function DiffView({ patch, limit = 26, showHeader = true, partId, expanded: controlledExpanded, onExpand }: Props) {
+  const t = useI18n();
+  const [disclosed, setDisclosed] = useDisclosure(partId, "diff");
+  const expanded = controlledExpanded ?? disclosed;
+  const viewport = useRef<HTMLDivElement>(null);
 
   const all = useMemo(() => rows(patch), [patch]);
   const visible = useMemo(() => expanded ? all : all.slice(0, limit), [all, expanded, limit]);
   const lang = langFor(patch.path);
 
-  useEffect(() => {
-    let cancelled = false;
-    const oldText = visible
-      .filter((row) => row.side !== "new" && row.index >= 0)
-      .map((row) => row.text)
-      .join("\n");
-    const newText = visible
-      .filter((row) => row.side !== "old" && row.index >= 0)
-      .map((row) => row.text)
-      .join("\n");
-    void Promise.all([
-      highlightTokens(oldText, lang, theme),
-      highlightTokens(newText, lang, theme),
-    ]).then(([older, newer]) => {
-      if (cancelled) return;
-      setOldLines(older);
-      setNewLines(newer);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [visible, lang, theme]);
+  const oldText = useMemo(() => visible.filter((row) => row.side !== "new" && row.index >= 0).map((row) => row.text).join("\n"), [visible]);
+  const newText = useMemo(() => visible.filter((row) => row.side !== "old" && row.index >= 0).map((row) => row.text).join("\n"), [visible]);
+  const oldLines = useHighlightedLines(oldText, lang);
+  const newLines = useHighlightedLines(newText, lang);
+  const getItemKey = useCallback((index: number) => visible[index]!.key, [visible]);
+  const lines = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count: visible.length,
+    getScrollElement: () => viewport.current,
+    getItemKey,
+    estimateSize: () => 22,
+    overscan: 5,
+    measureElement: (element) => element.offsetHeight,
+  });
 
   const hidden = all.length - visible.length;
 
@@ -91,6 +87,7 @@ export function DiffView({ patch, limit = 26, showHeader = true, partId }: Props
     <div className="diff">
       {showHeader && (
         <div className="diff-head">
+          <FileIcon path={patch.path} />
           <span className="diff-path truncate">{patch.path}</span>
           <span className="diff-stat">
             {patch.added > 0 && <span className="diff-plus">+{patch.added}</span>}
@@ -98,22 +95,26 @@ export function DiffView({ patch, limit = 26, showHeader = true, partId }: Props
           </span>
         </div>
       )}
-      <div className="diff-body">
-        {visible.map((row) => (
-          <div className="diff-line" data-type={row.type} key={row.key}>
-            <span className="diff-no">{row.oldNo ?? ""}</span>
-            <span className="diff-no">{row.newNo ?? ""}</span>
-            <span className="diff-sign">{row.type === "add" ? "+" : row.type === "del" ? "-" : " "}</span>
-            <span className="diff-code" dangerouslySetInnerHTML={{ __html: render(row) }} />
-          </div>
-        ))}
+      <div className="diff-body scroll" ref={viewport} tabIndex={0} role="region" aria-label={t("Diff for {path}", { path: patch.path })}>
+        <div className="diff-lines" style={{ height: lines.getTotalSize() }}>
+          {lines.getVirtualItems().map((item) => {
+            const row = visible[item.index]!;
+            return (
+              <div className="diff-line" data-type={row.type} data-index={item.index} key={item.key} ref={lines.measureElement} style={{ transform: `translateY(${item.start}px)` }}>
+                <span className="diff-no">{row.oldNo ?? ""}</span>
+                <span className="diff-no">{row.newNo ?? ""}</span>
+                <span className="diff-sign">{row.type === "add" ? "+" : row.type === "del" ? "-" : " "}</span>
+                <span className="diff-code" dangerouslySetInnerHTML={{ __html: render(row) }} />
+              </div>
+            );
+          })}
+        </div>
       </div>
       {hidden > 0 && (
-        <button className="diff-more" type="button" onClick={() => setExpanded(true)}>
-          Show {hidden} more {hidden === 1 ? "line" : "lines"}
+        <button className="diff-more" type="button" onClick={() => onExpand ? onExpand() : setDisclosed(true)}>{t(hidden === 1 ? "Show {count} more line" : "Show {count} more lines", { count: hidden })}
         </button>
       )}
-      {patch.truncated && <div className="diff-more" data-static="true">Diff truncated</div>}
+      {patch.truncated && <div className="diff-more" data-static="true">{t("Diff truncated")}</div>}
     </div>
   );
 }

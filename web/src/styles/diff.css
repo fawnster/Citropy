@@ -15,6 +15,7 @@
 }
 
 .diff-path {
+  flex: 1;
   color: var(--text-2);
   font-size: 11px;
 }
@@ -40,12 +41,20 @@
   overflow: auto;
   padding: 4px 0;
 }
+.diff-lines {
+  position: relative;
+  min-width: 100%;
+}
 
 .diff-line {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: grid;
   grid-template-columns: 40px 40px 14px minmax(0, 1fr);
   align-items: baseline;
   padding-right: 10px;
+  min-width: 100%;
 }
 
 .diff-line[data-type="add"] {

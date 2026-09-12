@@ -222,7 +222,7 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     });
     for (let index = 1; index <= 2; index++) {
       await page.getByRole("button", { name: "New thread", exact: true }).click();
-      await page.getByRole("menuitem", { name: "Claude Code", exact: true }).click();
+      await page.getByRole("combobox", { name: "Provider", exact: true }).selectOption("claude");
       await page.getByRole("button", { name: "Create conversation", exact: true }).click();
       await page.getByRole("dialog").waitFor({ state: "detached" });
       await page.locator(`.thread-row[title="Empty conversation ${index}"][data-active="true"]`).waitFor();
@@ -308,6 +308,41 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     await card.getByRole("button", { name: `Delete ${title}`, exact: true }).click();
     await page.getByRole("dialog").waitFor();
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
+    await f.close();
+  });
+
+  await t.test("short replies stay readable and navigation selects the clicked message without moving the app", async () => {
+    const f = await fixture({ messages: Array.from({ length: 12 }, (_, index) => message(`quick-${index}`, [textPart(`quick-text-${index}`, index === 4 ? "30." : `Short reply ${index}.`)])) });
+    const { page } = f;
+    const rail = page.getByRole("navigation", { name: "Conversation messages", exact: true });
+    for (const index of [4, 9, 1, 11]) {
+      const marker = rail.getByRole("button", { name: `Go to message ${index + 1}`, exact: true });
+      await marker.click();
+      await page.waitForFunction(index => document.querySelector(`[data-message-index="${index}"]`)?.getAttribute("aria-current") === "location", index);
+      assert.equal(await page.evaluate(() => window.scrollY), 0);
+      const visible = await page.locator(`#message-quick-${index}`).evaluate(node => {
+        const bounds = node.getBoundingClientRect();
+        const viewport = document.querySelector(".canvas").getBoundingClientRect();
+        return bounds.top >= viewport.top - 2 && bounds.bottom <= viewport.bottom + 2;
+      });
+      assert.ok(visible);
+    }
+    const html = await page.evaluate(async () => {
+      const { renderMarkdown } = await import("/web/src/lib/markdown.ts");
+      return Promise.all(["30.", "30)", "30. A real list item", "1. First\n2. Second"].map(text => renderMarkdown(text, "dark")));
+    });
+    assert.equal(html[0], "<p>30.</p>");
+    assert.equal(html[1], "<p>30)</p>");
+    assert.match(html[2], /<ol start="30">/);
+    assert.match(html[3], /<li>First<\/li>/);
+    await rail.getByRole("button", { name: "Go to message 5", exact: true }).click();
+    await page.locator('[data-part-id="quick-text-4"] p').waitFor();
+    assert.equal(await page.locator('[data-part-id="quick-text-4"] li').count(), 0);
+    await page.mouse.move(1000, 100);
+    await page.waitForFunction(() => Number(getComputedStyle(document.querySelector(".message-nav-stop > span")).opacity) < 0.3);
+    await page.screenshot({ path: "/tmp/citropy-short-replies.png", animations: "disabled" });
+    await rail.getByRole("button", { name: "Go to message 5", exact: true }).hover();
+    await page.waitForFunction(() => getComputedStyle(document.querySelector(".message-nav-stop > span")).opacity === "1");
     await f.close();
   });
 

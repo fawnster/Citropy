@@ -5,6 +5,7 @@ import { api } from "../lib/api.ts";
 import { confirmAction } from "../lib/store.ts";
 import type { ProviderInfo } from "../../../shared/protocol.ts";
 import type { GlobalInstructions } from "../../../shared/provider-settings.ts";
+import { useI18n } from "../lib/i18n.ts";
 
 export function ProviderInstructions({
   provider,
@@ -13,6 +14,7 @@ export function ProviderInstructions({
   provider: ProviderInfo;
   onClose: () => void;
 }) {
+  const t = useI18n();
   const id = useId();
   const [file, setFile] = useState<GlobalInstructions>();
   const [draft, setDraft] = useState("");
@@ -54,10 +56,10 @@ export function ProviderInstructions({
   const discard = () =>
     !dirty ||
     confirmAction({
-      title: "Discard your instruction changes?",
+      title: t("Discard your instruction changes?"),
       description:
-        "Your saved file will stay as it is. The unsaved draft will be discarded.",
-      label: "Discard draft",
+        t("Your saved file will stay as it is. The unsaved draft will be discarded."),
+      label: t("Discard draft"),
       danger: true,
     });
   const save = async () => {
@@ -81,8 +83,8 @@ export function ProviderInstructions({
 
   return (
     <Modal
-      title={`${provider.label} instructions`}
-      description="Global guidance for every project using this provider, including its CLI. Changes apply when you next start a conversation."
+      title={t("{provider} instructions", { provider: provider.label })}
+      description={t("Global guidance for every project using this provider, including its CLI. Changes apply when you next start a conversation.")}
       icon={<FileText size={21} />}
       className="provider-instructions-dialog"
       initialFocus="textarea"
@@ -105,9 +107,7 @@ export function ProviderInstructions({
               })
             }
           >
-            <RotateCcw size={14} />
-            Reload file
-          </button>
+            <RotateCcw size={14} />{" "}{t("Reload file")}{" "}</button>
           <span className="instruction-save-state" role="status">
             {busy
               ? "Working…"
@@ -127,9 +127,7 @@ export function ProviderInstructions({
                 if (ok) onClose();
               })
             }
-          >
-            Close
-          </button>
+          >{" "}{t("Close")}{" "}</button>
           <button
             className="btn"
             data-variant="primary"
@@ -141,35 +139,31 @@ export function ProviderInstructions({
               (!file?.exists && !draft.trim())
             }
           >
-            <Save size={14} />
-            Save instructions
-          </button>
+            <Save size={14} />{" "}{t("Save instructions")}{" "}</button>
         </>
       }
     >
       <label htmlFor={id} className="instruction-file-label">
-        <span>{file ? file.path : "Loading global instructions…"}</span>
-        {file && !file.exists && <small>Created when you save</small>}
+        <span>{file ? file.path : t("Loading global instructions…")}</span>
+        {file && !file.exists && <small>{t("Created when you save")}</small>}
       </label>
       {file?.note && <p className="instruction-note">{file.note}</p>}
       <textarea
         id={id}
-        aria-label={`${provider.label} global instructions`}
+        aria-label={t("{provider} global instructions", { provider: provider.label })}
         className="instruction-editor scroll"
         value={draft}
         disabled={!file || busy}
         spellCheck={false}
         autoCapitalize="off"
         autoCorrect="off"
-        placeholder="Add your coding conventions, preferred workflows, and other guidance…"
+            placeholder={t("Add your coding conventions, preferred workflows, and other guidance…")}
         onChange={(event) => {
           setDraft(event.target.value);
           setSaved(false);
         }}
       />
-      <p className="instruction-note">
-        Saving keeps the previous file as a .citropy-backup beside the original.
-      </p>
+      <p className="instruction-note">{" "}{t("Saving keeps the previous file as a .citropy-backup beside the original.")}{" "}</p>
       {error && (
         <p className="dialog-error" role="alert">
           {error}

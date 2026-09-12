@@ -1,3 +1,4 @@
+import { useI18n } from "../lib/i18n.ts";
 import { useEffect, useRef } from "react";
 import {
   Globe2,
@@ -8,7 +9,6 @@ import {
   Plug,
   Plus,
   X,
-  ChevronDown,
   Monitor,
 } from "lucide-react";
 import { Changes } from "./Changes.tsx";
@@ -71,6 +71,7 @@ const options = [
 }>;
 
 export function Inspector({ visible }: { visible: boolean }) {
+  const t = useI18n();
   const projectId = useApp((state) => state.activeProjectId);
   const threadId = useApp((state) => state.activeThreadId);
   const panels = useApp((state) => state.panels);
@@ -107,18 +108,18 @@ export function Inspector({ visible }: { visible: boolean }) {
     <aside
       className="inspector workbench"
       data-visible={visible}
-      aria-label="Workspace panels"
+      aria-label={t("Workspace panels")}
     >
       <div className="workbench-heading">
-        <span>Workspace</span>
+        <span>{t("Workspace")}</span>
         <Menu
-          header="Open a panel"
+          header={t("Open a panel")}
           width={292}
           align="end"
           items={options.map((option) => ({
             id: option.kind,
-            label: option.label,
-            hint: option.hint,
+            label: t(option.label),
+            hint: t(option.hint),
             icon: (
               <option.icon size={17} className={`panel-icon-${option.kind}`} />
             ),
@@ -131,11 +132,11 @@ export function Inspector({ visible }: { visible: boolean }) {
               type="button"
               onClick={toggle}
               disabled={!connected}
-              aria-label="Open panel"
+              aria-label={t("Open panel")}
               aria-haspopup="menu"
               aria-expanded={open}
             >
-              <Plus size={14} /> Open <ChevronDown size={11} />
+              <Plus size={15} />{t("Open panel")}
             </button>
           )}
         />
@@ -143,7 +144,7 @@ export function Inspector({ visible }: { visible: boolean }) {
       <div
         className="workbench-tabs scroll"
         role="tablist"
-        aria-label="Open workspace panels"
+        aria-label={t("Open workspace panels")}
         onKeyDown={(event) => {
           if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
             return;
@@ -169,6 +170,7 @@ export function Inspector({ visible }: { visible: boolean }) {
           const Icon = options.find(
             (option) => option.kind === panel.kind,
           )!.icon;
+          const title = panel.kind === "browser" || panel.kind === "terminal" ? panel.title : t(panel.title);
           return (
             <div
               className="workbench-tab"
@@ -182,18 +184,18 @@ export function Inspector({ visible }: { visible: boolean }) {
                 aria-selected={activeId === panel.id}
                 aria-controls={`panel-body-${panel.id}`}
                 tabIndex={activeId === panel.id ? 0 : -1}
-                title={panel.title}
+                title={title}
                 onClick={() => selectPanel(panel.id)}
               >
                 <Icon size={14} className={`panel-icon-${panel.kind}`} />
-                <span className="truncate">{panel.title}</span>
+                <span className="truncate">{title}</span>
               </button>
               <button
                 type="button"
                 className="workbench-close"
                 disabled={!connected}
-                aria-label={`Close ${panel.title}`}
-                title={`Close ${panel.title}`}
+                aria-label={t("Close {name}", { name: title })}
+                title={t("Close {name}", { name: title })}
                 onClick={() => send({ t: "panel.close", id: panel.id })}
               >
                 <X size={12} />
@@ -237,19 +239,15 @@ export function Inspector({ visible }: { visible: boolean }) {
         {tabs.length === 0 && (
           <div className="workbench-empty">
             <Files size={28} />
-            <h3>Room for your work</h3>
-            <p>
-              Open a browser, terminal, or workspace view alongside the
-              conversation.
-            </p>
+            <h3>{t("Room for your work")}</h3>
+            <p>{t("Open a browser, terminal, or workspace view alongside the conversation.")}</p>
             <button
               type="button"
               className="btn"
               disabled={!connected}
               onClick={() => openWorkbenchPanel("browser")}
             >
-              <Globe2 size={15} /> Open browser
-            </button>
+              <Globe2 size={15} />{t("Open browser")}</button>
           </div>
         )}
       </div>

@@ -1,151 +1,80 @@
-import type { HighlighterCore } from "shiki/core";
-import { citropyDark, citropyLight } from "./theme-code.ts";
+import { escapeHtml } from "./highlight-core.ts";
+export { escapeHtml, resolveLang } from "./highlight-core.ts";
 
-const LOADERS: Record<string, () => Promise<unknown>> = {
-  typescript: () => import("shiki/langs/typescript.mjs"),
-  tsx: () => import("shiki/langs/tsx.mjs"),
-  javascript: () => import("shiki/langs/javascript.mjs"),
-  jsx: () => import("shiki/langs/jsx.mjs"),
-  json: () => import("shiki/langs/json.mjs"),
-  python: () => import("shiki/langs/python.mjs"),
-  rust: () => import("shiki/langs/rust.mjs"),
-  go: () => import("shiki/langs/go.mjs"),
-  ruby: () => import("shiki/langs/ruby.mjs"),
-  java: () => import("shiki/langs/java.mjs"),
-  kotlin: () => import("shiki/langs/kotlin.mjs"),
-  c: () => import("shiki/langs/c.mjs"),
-  cpp: () => import("shiki/langs/cpp.mjs"),
-  csharp: () => import("shiki/langs/csharp.mjs"),
-  php: () => import("shiki/langs/php.mjs"),
-  swift: () => import("shiki/langs/swift.mjs"),
-  bash: () => import("shiki/langs/bash.mjs"),
-  fish: () => import("shiki/langs/fish.mjs"),
-  css: () => import("shiki/langs/css.mjs"),
-  scss: () => import("shiki/langs/scss.mjs"),
-  html: () => import("shiki/langs/html.mjs"),
-  vue: () => import("shiki/langs/vue.mjs"),
-  svelte: () => import("shiki/langs/svelte.mjs"),
-  markdown: () => import("shiki/langs/markdown.mjs"),
-  yaml: () => import("shiki/langs/yaml.mjs"),
-  toml: () => import("shiki/langs/toml.mjs"),
-  sql: () => import("shiki/langs/sql.mjs"),
-  lua: () => import("shiki/langs/lua.mjs"),
-  docker: () => import("shiki/langs/docker.mjs"),
-  makefile: () => import("shiki/langs/make.mjs"),
-  diff: () => import("shiki/langs/diff.mjs"),
-};
-
-const ALIASES: Record<string, string> = {
-  ts: "typescript",
-  js: "javascript",
-  py: "python",
-  rs: "rust",
-  sh: "bash",
-  shell: "bash",
-  zsh: "bash",
-  console: "bash",
-  yml: "yaml",
-  md: "markdown",
-  "c++": "cpp",
-  "c#": "csharp",
-  golang: "go",
-  dockerfile: "docker",
-  make: "makefile",
-  htm: "html",
-  patch: "diff",
-};
-
-let core: Promise<HighlighterCore> | null = null;
-const loaded = new Set<string>();
-const inflight = new Map<string, Promise<void>>();
-
-function highlighter(): Promise<HighlighterCore> {
-  if (core) return core;
-  core = (async () => {
-    const [{ createHighlighterCore }, { createJavaScriptRegexEngine }] = await Promise.all([
-      import("shiki/core"),
-      import("shiki/engine/javascript"),
-    ]);
-    return createHighlighterCore({
-      themes: [citropyDark, citropyLight],
-      langs: [],
-      engine: createJavaScriptRegexEngine({ forgiving: true }),
-    });
-  })();
-  return core;
+export interface HighlightRequest {
+  id: number;
+  kind: "html" | "tokens";
+  code: string;
+  lang?: string;
+  theme: "dark" | "light";
 }
 
-export function resolveLang(input: string | undefined): string | null {
-  if (!input) return null;
-  const key = input.trim().toLowerCase();
-  const name = ALIASES[key] ?? key;
-  return LOADERS[name] ? name : null;
+type Result = string | string[] | null;
+let worker: Worker | undefined;
+let sequence = 0;
+let idle: ReturnType<typeof setTimeout> | undefined;
+const pending = new Map<number, (result: Result) => void>();
+
+function dispose(): void {
+  worker?.terminate();
+  worker = undefined;
+  for (const finish of pending.values()) finish(null);
+  clearTimeout(idle);
+  idle = undefined;
 }
 
-async function ensure(lang: string): Promise<boolean> {
-  if (loaded.has(lang)) return true;
-  const loader = LOADERS[lang];
-  if (!loader) return false;
-  let pending = inflight.get(lang);
-  if (!pending) {
-    pending = (async () => {
-      const shiki = await highlighter();
-      const mod = (await loader()) as { default: unknown };
-      await shiki.loadLanguage(mod.default as never);
-      loaded.add(lang);
-    })();
-    inflight.set(lang, pending);
+async function render(
+  request: Omit<HighlightRequest, "id">,
+  signal?: AbortSignal,
+): Promise<Result> {
+  if (signal?.aborted) return null;
+  if (typeof Worker === "undefined") {
+    const core = await import("./highlight-core.ts");
+    return request.kind === "html"
+      ? core.highlight(request.code, request.lang, request.theme)
+      : core.highlightTokens(request.code, request.lang, request.theme);
   }
-  await pending;
-  inflight.delete(lang);
-  return true;
-}
-
-export function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-export async function highlight(code: string, lang: string | undefined, theme: "dark" | "light"): Promise<string> {
-  const resolved = resolveLang(lang);
-  if (!resolved || code.length > 120_000) return `<pre class="raw"><code>${escapeHtml(code)}</code></pre>`;
-  try {
-    const ok = await ensure(resolved);
-    if (!ok) return `<pre class="raw"><code>${escapeHtml(code)}</code></pre>`;
-    const shiki = await highlighter();
-    return shiki.codeToHtml(code, {
-      lang: resolved,
-      theme: theme === "light" ? "citropy-light" : "citropy-dark",
-    });
-  } catch {
-    return `<pre class="raw"><code>${escapeHtml(code)}</code></pre>`;
+  if (!worker) {
+    try {
+      worker = new Worker(new URL("./highlight.worker.ts", import.meta.url), { type: "module" });
+      worker.onmessage = (event: MessageEvent<{ id: number; result: Result }>) => {
+        pending.get(event.data.id)?.(event.data.result);
+      };
+      worker.onerror = dispose;
+      worker.onmessageerror = dispose;
+    } catch {
+      return null;
+    }
   }
+  clearTimeout(idle);
+  const id = ++sequence;
+  return new Promise((resolve) => {
+    const timeout = setTimeout(dispose, 30_000);
+    const finish = (result: Result) => {
+      if (!pending.delete(id)) return;
+      clearTimeout(timeout);
+      signal?.removeEventListener("abort", cancel);
+      resolve(result);
+      if (!pending.size && worker) idle = setTimeout(dispose, 60_000);
+    };
+    const cancel = () => {
+      try { worker?.postMessage({ cancel: id }); } catch {}
+      finish(null);
+    };
+    pending.set(id, finish);
+    signal?.addEventListener("abort", cancel, { once: true });
+    try { worker!.postMessage({ ...request, id }); } catch { dispose(); }
+  });
 }
 
-export async function highlightTokens(
-  code: string,
-  lang: string | undefined,
-  theme: "dark" | "light",
-): Promise<string[] | null> {
-  const resolved = resolveLang(lang);
-  if (!resolved || code.length > 200_000) return null;
-  try {
-    const ok = await ensure(resolved);
-    if (!ok) return null;
-    const shiki = await highlighter();
-    const result = shiki.codeToTokens(code, {
-      lang: resolved,
-      theme: theme === "light" ? "citropy-light" : "citropy-dark",
-    });
-    return result.tokens.map((line) =>
-      line
-        .map((token) => `<span style="color:${token.color ?? "inherit"}">${escapeHtml(token.content)}</span>`)
-        .join(""),
-    );
-  } catch {
-    return null;
-  }
+export async function highlight(code: string, lang: string | undefined, theme: "dark" | "light", signal?: AbortSignal): Promise<string> {
+  const result = await render({ kind: "html", code, lang, theme }, signal);
+  return typeof result === "string" ? result : `<pre class="raw"><code>${escapeHtml(code)}</code></pre>`;
 }
+
+export async function highlightTokens(code: string, lang: string | undefined, theme: "dark" | "light", signal?: AbortSignal): Promise<string[] | null> {
+  const result = await render({ kind: "tokens", code, lang, theme }, signal);
+  return Array.isArray(result) ? result : null;
+}
+
+if (import.meta.hot) import.meta.hot.dispose(dispose);

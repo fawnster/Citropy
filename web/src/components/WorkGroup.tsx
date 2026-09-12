@@ -7,15 +7,17 @@ import { PartView } from "./PartView.tsx";
 import { groupStats, summarize } from "../lib/group.ts";
 import { useApp } from "../lib/store.ts";
 import type { ToolPart, ToolShape } from "../../../shared/protocol.ts";
+import { useI18n } from "../lib/i18n.ts";
 
 export const WorkGroup = memo(function WorkGroup({ ids }: { ids: string[] }) {
+  const t = useI18n();
   const [open, setOpen] = useDisclosure(ids[0], "group");
   const tools = useApp(useShallow((state) =>
     ids.map((id) => state.parts[id]).filter((part): part is ToolPart => part?.kind === "tool"),
   ));
 
   const stats = useMemo(() => groupStats(tools), [tools]);
-  const sentence = useMemo(() => summarize(tools), [tools]);
+  const sentence = useMemo(() => summarize(tools, t), [tools, t]);
   const shapes = useMemo(() => {
     const seen: ToolShape[] = [];
     for (const tool of tools) if (!seen.includes(tool.shape)) seen.push(tool.shape);

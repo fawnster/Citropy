@@ -1,4 +1,5 @@
 import { useDisclosure } from "../../lib/use-disclosure.ts";
+import { useI18n } from "../../lib/i18n.ts";
 import { AnimatePresence, motion } from "motion/react";
 import { Brain, ChevronRight } from "../icons.ts";
 import { Collapsible } from "../Collapsible.tsx";
@@ -17,6 +18,7 @@ function tail(text: string): string {
 }
 
 export function Reasoning({ partId, text, live }: Props) {
+  const t = useI18n();
   const [open, setOpen] = useDisclosure(partId, "reasoning");
   const streaming = useApp((state) => state.textStreaming);
   if (!text.trim() || (!streaming && live)) return null;
@@ -28,8 +30,8 @@ export function Reasoning({ partId, text, live }: Props) {
       <button className="reason-head" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <ChevronRight size={13} className="reason-chevron" />
         <Brain size={13} />
-        <span>{live ? "Thinking" : "Thought"}</span>
-        <span className="reason-count">{words} words</span>
+        <span>{live ? t("Thinking") : t("Thought")}</span>
+        <span className="reason-count">{words} {t("words")}</span>
       </button>
 
       <Collapsible open={open} className="reason-body">

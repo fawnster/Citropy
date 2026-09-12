@@ -1,3 +1,4 @@
+import { useI18n } from "../lib/i18n.ts";
 import { Folder, GitBranch, PanelLeft, PanelRight } from "./icons.ts";
 import { toggleInspector, useApp } from "../lib/store.ts";
 import { NotificationCenter } from "./NotificationCenter.tsx";
@@ -16,6 +17,7 @@ export function Titlebar({
   onToggleSidebar: () => void;
   onNotification: (target: NotificationTarget) => void;
 }) {
+  const t = useI18n();
   const projects = useApp((state) => state.projects);
   const activeProjectId = useApp((state) => state.activeProjectId);
   const activeThreadId = useApp((state) => state.activeThreadId);
@@ -48,22 +50,22 @@ export function Titlebar({
           type="button"
           onClick={onToggleSidebar}
           aria-expanded={sidebarOpen}
-          title="Toggle sidebar"
+          title={t("Toggle sidebar")}
         >
           <PanelLeft size={15} />
         </button>
       </div>
       <nav
         className="topbar-center breadcrumb"
-        aria-label="Current workspace and view"
+        aria-label={t("Current workspace and view")}
       >
         {view === "settings" || view === "github" || view === "usage" ? (
           <span className="thread-title">
             {view === "github"
               ? "GitHub"
               : view === "usage"
-                ? "Usage"
-                : "Settings"}
+                ? t("Usage")
+                : t("Settings")}
           </span>
         ) : (
           <>
@@ -73,7 +75,7 @@ export function Titlebar({
             >
               <Folder size={14} />
               <span className="truncate">
-                {project?.name ?? "No workspace"}
+                {project?.name ?? t("No workspace")}
               </span>
               {(git?.branch || thread?.workspaceBranch) && view === "chat" && (
                 <span className="branch">
@@ -86,7 +88,7 @@ export function Titlebar({
               <>
                 <span className="breadcrumb-separator">/</span>
                 <span className="thread-title truncate">
-                  {view === "git" ? "Source control" : thread?.title}
+                  {view === "git" ? t("Source control") : thread?.title}
                 </span>
               </>
             )}
@@ -103,7 +105,7 @@ export function Titlebar({
             type="button"
             onClick={toggleInspector}
             data-active={inspectorOpen}
-            title="Toggle inspector"
+            title={t("Toggle inspector")}
           >
             <PanelRight size={15} />
           </button>

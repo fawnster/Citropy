@@ -662,7 +662,7 @@
   align-items: center;
   gap: 8px;
   font-size: 11px;
-  padding: 5px 0 10px;
+  padding: 12px 18px 0;
 }
 @container application (max-width: 900px) {
   .metric-grid,

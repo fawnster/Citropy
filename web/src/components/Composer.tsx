@@ -48,6 +48,7 @@ import {
   effortLabel as formatEffort,
 } from "../lib/format.ts";
 import type { PermissionMode } from "../../../shared/protocol.ts";
+import { useI18n } from "../lib/i18n.ts";
 
 const MODES: Array<{
   id: PermissionMode;
@@ -91,6 +92,7 @@ export function Composer({
   onUsage?: () => void;
   onSkills?: () => void;
 }) {
+  const t = useI18n();
   const threadId = useApp((state) => state.activeThreadId);
   const thread = useApp((state) =>
     threadId ? state.threads[threadId] : undefined,
@@ -146,20 +148,20 @@ export function Composer({
   const upload = async (files: File[]) => {
     if (!threadId || uploading) return;
     if (attachments.length + files.length > 8) {
-      reportError(new Error("Attach up to 8 files per message."));
+      reportError(new Error(t("Attach up to 8 files per message.")));
       return;
     }
     try {
       for (const file of files) {
         if (file.size > 50 * 1024 * 1024)
-          throw new Error(`${file.name} exceeds the 50 MB file limit.`);
+          throw new Error(t("{name} exceeds the 50 MB file limit.", { name: file.name }));
         setUploading(file.name);
         const response = await fetch(
           `/api/attachments?${new URLSearchParams({ threadId, name: file.name })}`,
           { method: "POST", body: file, signal: uploadAbort.current.signal },
         );
         const result = await response.json();
-        if (!response.ok) throw new Error(result.error || "Upload failed.");
+        if (!response.ok) throw new Error(result.error || t("Upload failed."));
         setAttachments((previous) => [...previous, result]);
       }
     } catch (error) {
@@ -195,7 +197,7 @@ export function Composer({
   const model = selectedModel(provider?.models ?? [], thread?.model);
 
   const effort = effectiveEffort(model, thread?.effort);
-  const effortLabel = effort ? formatEffort(effort) : "Model options";
+  const effortLabel = effort ? formatEffort(effort) : t("Model options");
   const contextWindow = thread?.contextWindow ?? model?.contextMax;
   const ModeIcon = mode?.icon ?? ShieldCheck;
 
@@ -203,35 +205,35 @@ export function Composer({
     {
       id: "compact",
       label: "/compact",
-      hint: "Compact context and keep the visible history",
+      hint: t("Compact context and keep the visible history"),
       icon: <Minimize2 size={16} />,
       run: compact,
     },
     {
       id: "usage",
       label: "/usage",
-      hint: "See usage and remaining allowance",
+      hint: t("See usage and remaining allowance"),
       icon: <BarChart3 size={16} />,
       run: () => onUsage?.(),
     },
     {
       id: "skills",
       label: "/skills",
-      hint: "Manage installed skills",
+      hint: t("Manage installed skills"),
       icon: <BookOpen size={16} />,
       run: () => onSkills?.(),
     },
     {
       id: "model",
       label: "/model",
-      hint: "Choose a model",
+      hint: t("Choose a model"),
       icon: <Brain size={16} />,
       run: () => modelButton.current?.click(),
     },
     {
       id: "plan",
       label: "/plan",
-      hint: "Switch to Plan only permissions",
+      hint: t("Switch to Plan only permissions"),
       icon: <ListChecks size={16} />,
       run: () => {
         if (threadId) configureThread(threadId, { permissionMode: "plan" });
@@ -244,7 +246,7 @@ export function Composer({
           {
             id: "effort",
             label: "/effort",
-            hint: "Choose reasoning effort and context size",
+            hint: t("Choose reasoning effort and context size"),
             icon: <Brain size={16} />,
             run: () => effortButton.current?.click(),
           },
@@ -255,7 +257,7 @@ export function Composer({
           {
             id: "fast",
             label: "/fast",
-            hint: thread?.fastMode ? "Turn fast mode off" : "Turn fast mode on",
+            hint: thread?.fastMode ? t("Turn fast mode off") : t("Turn fast mode on"),
             icon: <Zap size={16} />,
             run: () => {
               if (threadId)
@@ -267,14 +269,14 @@ export function Composer({
     {
       id: "permissions",
       label: "/permissions",
-      hint: "Choose tool permissions",
+      hint: t("Choose tool permissions"),
       icon: <ShieldCheck size={16} />,
       run: () => permissionButton.current?.click(),
     },
     ...(project?.settings?.actions ?? []).map((action) => ({
       id: action.id,
       label: `/run ${action.name}`,
-      hint: "Run in this conversation's workspace",
+      hint: t("Run in this conversation's workspace"),
       icon: <Play size={16} />,
       run: () => {
         if (!thread) return;
@@ -320,7 +322,7 @@ export function Composer({
     return (
       <div className="composer">
         <div className="subagent-managed">
-          This subagent is managed by its parent conversation.
+          {t("This subagent is managed by its parent conversation.")}
           <button
             type="button"
             className="btn"
@@ -328,9 +330,7 @@ export function Composer({
               selectThread(thread.parentThreadId!);
               loadThread(thread.parentThreadId!);
             }}
-          >
-            Back to parent chat
-          </button>
+          >{" "}{t("Back to parent chat")}{" "}</button>
         </div>
       </div>
     );
@@ -339,7 +339,7 @@ export function Composer({
     <div className="composer">
       {thread.parentThreadId && (
         <div className="subagent-managed">
-          Subagent conversation
+          {t("Subagent conversation")}
           <button
             type="button"
             onClick={() => {
@@ -347,19 +347,18 @@ export function Composer({
               loadThread(thread.parentThreadId!);
             }}
           >
-            Back to parent chat
+            {t("Back to parent chat")}
           </button>
         </div>
       )}
       {thread.finished && (
         <div className="composer-finished" role="status">
-          This conversation is finished. Send a message to reopen it.
+          {t("This conversation is finished. Send a message to reopen it.")}
         </div>
       )}
       {provider && !provider.enabled && (
         <div className="models-warning" role="status">
-          {provider.label} is disabled. Enable it in Settings &gt; Providers to
-          continue this conversation.
+          {t("{provider} is disabled. Enable it in Settings > Providers to continue this conversation.", { provider: provider.label })}
         </div>
       )}
       {provider?.modelsError && (
@@ -389,7 +388,7 @@ export function Composer({
           type="file"
           multiple
           hidden
-          aria-label="Attach files"
+          aria-label={t("Attach files")}
           onChange={(event) => {
             void upload(Array.from(event.target.files ?? []));
             event.target.value = "";
@@ -413,13 +412,7 @@ export function Composer({
         {uploading && (
           <div className="upload-progress" role="status">
             <LoaderCircle size={15} className="spin" />
-            Uploading {uploading}…
-          </div>
-        )}
-        {thread.compacting && (
-          <div className="upload-progress" role="status">
-            <Minimize2 size={15} />
-            Compacting context…
+            {t("Uploading {name}…", { name: uploading })}
           </div>
         )}
         <ComposerInput
@@ -434,7 +427,7 @@ export function Composer({
         <div className="composer-bar">
           <Menu
             header={
-              provider?.modelsError ? "Models · refresh unavailable" : "Model"
+              provider?.modelsError ? t("Models · refresh unavailable") : t("Model")
             }
             width={320}
             searchable
@@ -481,7 +474,7 @@ export function Composer({
               items={[
                 ...(model?.efforts ?? []).map((value) => ({
                   id: `effort-${value}`,
-                  section: "Reasoning effort",
+                  section: t("Reasoning effort"),
                   icon: <Brain size={16} className="option-reasoning" />,
                   label: formatEffort(value),
                   selected: effort === value,
@@ -489,7 +482,7 @@ export function Composer({
                 })),
                 ...(model?.contextWindows ?? []).map((size) => ({
                   id: `context-${size}`,
-                  section: "Context window",
+                  section: t("Context window"),
                   icon: <Layers size={16} className="option-context" />,
                   label: `${contextLabel(size)} tokens`,
                   selected: contextWindow === size,
@@ -499,18 +492,17 @@ export function Composer({
                 ...(model?.fastMode
                   ? [true, false].map((on) => ({
                       id: `fast-${on}`,
-                      section: "Fast mode",
+                      section: t("Fast mode"),
                       icon: (
                         <Zap
                           size={16}
                           className={on ? "option-fast" : "muted"}
                         />
                       ),
-                      label: on ? "On" : "Off",
+                      label: on ? t("On") : t("Off"),
                       hint: on
-                        ? (model.fastModeHint ??
-                          "Faster responses, increased usage")
-                        : "Standard speed and usage",
+                        ? (model.fastModeHint ?? t("Faster responses, increased usage"))
+                        : t("Standard speed and usage"),
                       selected: Boolean(thread.fastMode) === on,
                       onSelect: () =>
                         configureThread(thread.id, { fastMode: on }),
@@ -527,8 +519,8 @@ export function Composer({
                   disabled={running}
                   onClick={toggle}
                   ref={effortButton}
-                  title="Model options"
-                  aria-label={`Model options: ${effortLabel}${contextWindow ? `, ${contextLabel(contextWindow)} context` : ""}${thread.fastMode ? ", fast mode on" : ""}`}
+                  title={t("Model options")}
+                  aria-label={`${t("Model options")}: ${effortLabel}${contextWindow ? `, ${contextLabel(contextWindow)} ${t("context")}` : ""}${thread.fastMode ? `, ${t("fast mode on")}` : ""}`}
                 >
                   {thread.fastMode ? (
                     <Zap size={14} className="option-fast" />
@@ -540,7 +532,7 @@ export function Composer({
                       ? effortLabel
                       : contextWindow
                         ? contextLabel(contextWindow)
-                        : "Options"}
+                        : t("Options")}
                   </span>
                   {effort && contextWindow && (
                     <span className="composer-context">
@@ -554,18 +546,18 @@ export function Composer({
           )}
 
           <Menu
-            header="Permissions"
+            header={t("Permissions")}
             width={290}
             items={MODES.map((entry) => ({
               id: entry.id,
-              label: entry.label,
+              label: t(entry.label),
               icon: (
                 <entry.icon
                   size={17}
                   className={`option-permission ${entry.id}`}
                 />
               ),
-              hint: entry.hint,
+              hint: t(entry.hint),
               selected: entry.id === thread.permissionMode,
               onSelect: () =>
                 configureThread(thread.id, { permissionMode: entry.id }),
@@ -586,7 +578,7 @@ export function Composer({
                   size={14}
                   className={`option-permission ${thread.permissionMode}`}
                 />
-                <span className="truncate">{mode?.label}</span>
+                <span className="truncate">{mode && t(mode.label)}</span>
                 <ChevronDown size={11} className="muted" />
               </button>
             )}
@@ -597,8 +589,8 @@ export function Composer({
             <button
               className="icon-btn"
               type="button"
-              title="Attach images or files"
-              aria-label="Attach images or files"
+              title={t("Attach images or files")}
+              aria-label={t("Attach images or files")}
               disabled={!connected || Boolean(uploading)}
               onClick={() => fileInput.current?.click()}
             >
@@ -615,7 +607,7 @@ export function Composer({
                   disabled={(!value.trim() && !attachments.length) || !canSend}
                 >
                   <ArrowUp size={13} />
-                  Queue
+                  {t("Queue")}
                 </button>
                 <button
                   className="btn"
@@ -624,7 +616,7 @@ export function Composer({
                   onClick={stopThread}
                 >
                   <Square size={11} fill="currentColor" />
-                  Stop
+                  {t("Stop")}
                 </button>
               </>
             ) : (
@@ -636,7 +628,7 @@ export function Composer({
                 disabled={(!value.trim() && !attachments.length) || !canSend}
               >
                 <ArrowUp size={13} />
-                Send
+                {t("Send")}
               </button>
             )}
           </div>

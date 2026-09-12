@@ -1,3 +1,4 @@
+import { useI18n } from "./lib/i18n.ts";
 import { NewConversation } from "./components/NewConversation.tsx";
 import {
   Fragment,
@@ -51,6 +52,7 @@ const UsageView = lazy(() =>
 );
 
 export function App() {
+  const t = useI18n();
   const [view, setView] = useState<
     "chat" | "git" | "github" | "settings" | "usage"
   >("chat");
@@ -59,6 +61,7 @@ export function App() {
     viewportWidth() > 720,
   );
   const newThreadProvider = useApp((state) => state.newThreadProvider);
+  const language = useApp((state) => state.language);
   const sidebarOpen = useApp((state) => state.sidebarOpen);
   const inspectorOpen = useApp((state) => state.inspectorOpen);
   const panelWidths = useApp((state) => state.panelWidths);
@@ -71,6 +74,10 @@ export function App() {
   const threads = useApp((state) => state.threads);
   const hasProject = useApp((state) => state.projects.length > 0);
   const navigationOpen = view === "chat" ? sidebarOpen : sectionSidebarOpen;
+
+  useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
 
   const openView = (next: typeof view) => {
     if (next !== "chat") useApp.setState({ readingThreadId: null });
@@ -105,6 +112,7 @@ export function App() {
   }, [githubStatus.data]);
 
   const openNotification = (target: NotificationTarget) => {
+    if (target.view === "settings") setSettingsSection(target.section ?? "General");
     const state = useApp.getState();
     if (
       target.projectId &&
@@ -209,7 +217,7 @@ export function App() {
           <button
             className="sidebar-scrim"
             type="button"
-            aria-label="Close navigation"
+            aria-label={t("Close navigation")}
             onClick={toggleNavigation}
           />
         )}
@@ -228,9 +236,7 @@ export function App() {
         <main className="stage">
           <Suspense
             fallback={
-              <div className="pane-empty" role="status">
-                Loading…
-              </div>
+              <div className="pane-empty" role="status">{t("Loading…")}</div>
             }
           >
             {view === "usage" ? (

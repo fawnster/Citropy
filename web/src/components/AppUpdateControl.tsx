@@ -1,3 +1,4 @@
+import { useI18n } from "../lib/i18n.ts";
 import { useEffect, useId, useRef, useState } from "react";
 import {
   Check,
@@ -11,7 +12,8 @@ import type { AppUpdateState } from "../../../shared/app-update.ts";
 const size = (bytes?: number) =>
   bytes ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : "";
 
-export function AppUpdateControl() {
+export function AppUpdateControl({ variant = "rail" }: { variant?: "rail" | "settings" }) {
+  const t = useI18n();
   const [state, setState] = useState<AppUpdateState>({
     status: "unsupported",
     currentVersion: "",
@@ -61,21 +63,21 @@ export function AppUpdateControl() {
       : ready
         ? "Restart & apply"
         : downloading
-          ? `Downloading ${Math.floor(state.percent || 0)}%`
+          ? t("Downloading {percent}%", { percent: Math.floor(state.percent || 0) })
           : state.status === "checking"
             ? "Checking for updates…"
             : state.status === "available"
               ? "Download update"
               : state.status === "error"
                 ? "Retry update"
-                : "Check for updates";
+                : "Check for Citropy updates";
   const title =
     state.status === "unsupported"
       ? "Citropy updates"
       : state.status === "current"
         ? "Citropy is up to date"
         : state.status === "available"
-          ? `Citropy ${state.version} is available`
+          ? t("Citropy {version} is available", { version: state.version ?? "" })
           : ready
             ? "Your update is ready"
             : label;
@@ -116,7 +118,7 @@ export function AppUpdateControl() {
             : Download;
   return (
     <div
-      className="app-update-control"
+      className={`app-update-control${variant === "settings" ? " app-update-settings" : ""}`}
       onPointerEnter={show}
       onPointerLeave={hide}
       onFocus={show}
@@ -132,9 +134,9 @@ export function AppUpdateControl() {
     >
       <button
         type="button"
-        className="rail-action app-update-button"
+        className={variant === "settings" ? "btn app-update-button" : "rail-action app-update-button"}
         data-state={state.status}
-        aria-label={label}
+        aria-label={t(label)}
         aria-describedby={open ? id : undefined}
         aria-disabled={busy || state.status === "unsupported"}
         onClick={() => void run()}
@@ -143,8 +145,8 @@ export function AppUpdateControl() {
           size={17}
           className={busy && !downloading ? "git-spinner" : undefined}
         />
-        {downloading && <small>{Math.floor(state.percent || 0)}%</small>}
-        {state.status === "available" && (
+        {variant === "settings" ? t(label) : downloading && <small>{Math.floor(state.percent || 0)}%</small>}
+        {variant === "rail" && state.status === "available" && (
           <span className="update-available-dot" />
         )}
       </button>
@@ -152,17 +154,17 @@ export function AppUpdateControl() {
         <div className="app-update-popover" id={id} role="tooltip">
           <div className="app-update-heading">
             <Icon size={16} />
-            <strong>{title}</strong>
+            <strong>{t(title)}</strong>
           </div>
           {state.currentVersion && (
             <small>
               {state.version && state.status !== "current"
                 ? `${state.currentVersion} → ${state.version}`
-                : `Version ${state.currentVersion}`}
+                : t("Version {version}", { version: state.currentVersion })}
             </small>
           )}
           {state.message ? (
-            <p>{state.message}</p>
+            <p>{t(state.message)}</p>
           ) : downloading ? (
             <>
               <div className="app-update-progress-label">
@@ -175,7 +177,7 @@ export function AppUpdateControl() {
               <div
                 className="app-update-progress"
                 role="progressbar"
-                aria-label="Update download"
+                aria-label={t("Update download")}
                 aria-valuemin={0}
                 aria-valuemax={100}
                 aria-valuenow={Math.floor(state.percent || 0)}
@@ -185,25 +187,18 @@ export function AppUpdateControl() {
               <p>
                 {state.bytesPerSecond
                   ? `${size(state.bytesPerSecond)}/s · `
-                  : ""}
-                You can keep working while it downloads.
-              </p>
+                  : ""}{t("You can keep working while it downloads.")}</p>
             </>
           ) : ready ? (
-            <p>
-              Download verified. Click again to restart Citropy and apply it.
-            </p>
+            <p>{t("Download verified. Click again to restart Citropy and apply it.")}</p>
           ) : state.status === "available" ? (
-            <p>
-              Click to download. Citropy will wait for another click before
-              restarting.
-            </p>
+            <p>{t("Click to download. Citropy will wait for another click before restarting.")}</p>
           ) : state.status === "current" ? (
-            <p>No newer release is available.</p>
+            <p>{t("No newer release is available.")}</p>
           ) : state.status === "installing" ? (
-            <p>Saving your work and restarting Citropy.</p>
+            <p>{t("Saving your work and restarting Citropy.")}</p>
           ) : (
-            <p>Check the latest Citropy release.</p>
+            <p>{t("Check the latest Citropy release.")}</p>
           )}
         </div>
       )}

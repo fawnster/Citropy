@@ -1,3 +1,4 @@
+import { currentLocale, useI18n } from "../lib/i18n.ts";
 import { useEffect, useRef, useState } from "react";
 import {
   Bell,
@@ -10,6 +11,7 @@ import {
   Trash2,
   X,
   CircleAlert,
+  Download,
 } from "lucide-react";
 import { useApp } from "../lib/store.ts";
 import { send } from "../lib/socket.ts";
@@ -21,6 +23,7 @@ export function NotificationCenter({
 }: {
   onOpen: (target: NotificationTarget) => void;
 }) {
+  const t = useI18n();
   const notifications = useApp((state) => state.notifications);
   const connected = useApp((state) => state.connected);
   const [open, setOpen] = useState(false);
@@ -67,9 +70,9 @@ export function NotificationCenter({
         ref={trigger}
         type="button"
         className="icon-btn notification-trigger"
-        title="Notifications"
+        title={t("Notifications")}
         aria-label={
-          unread ? `Notifications, ${unread} unread` : "Notifications"
+          unread ? t("Notifications, {count} unread", { count: unread }) : t("Notifications")
         }
         aria-expanded={open}
         aria-haspopup="dialog"
@@ -82,17 +85,17 @@ export function NotificationCenter({
         <section
           className="notification-center"
           role="dialog"
-          aria-label="Notifications"
+          aria-label={t("Notifications")}
         >
           <header>
             <div>
-              <h2>Notifications</h2>
-              <span>{unread ? `${unread} unread` : "You're up to date"}</span>
+              <h2>{t("Notifications")}</h2>
+              <span>{unread ? t("{count} unread", { count: unread }) : t("You're up to date")}</span>
             </div>
             <button
               className="icon-btn"
               type="button"
-              title="Mark all read"
+              title={t("Mark all read")}
               disabled={!unread || !connected}
               onClick={() => send({ t: "notifications.read" })}
             >
@@ -101,7 +104,7 @@ export function NotificationCenter({
             <button
               className="icon-btn"
               type="button"
-              title="Close notifications"
+              title={t("Close notifications")}
               onClick={() => {
                 setOpen(false);
                 trigger.current?.focus();
@@ -113,21 +116,18 @@ export function NotificationCenter({
           <div
             className="notification-filters"
             role="group"
-            aria-label="Filter notifications"
+            aria-label={t("Filter notifications")}
           >
             <button
               type="button"
               aria-pressed={filter === "all"}
               onClick={() => setFilter("all")}
-            >
-              All activity
-            </button>
+            >{t("All activity")}</button>
             <button
               type="button"
               aria-pressed={filter === "unread"}
               onClick={() => setFilter("unread")}
-            >
-              Unread {unread > 0 && <span>{unread}</span>}
+            >{t("Unread")}{unread > 0 && <span>{unread}</span>}
             </button>
           </div>
           <div className="notification-list scroll">
@@ -139,7 +139,7 @@ export function NotificationCenter({
                     ? GitBranch
                     : entry.kind === "github"
                       ? Github
-                      : MessageSquare;
+                      : entry.kind === "update" ? Download : MessageSquare;
               return (
                 <article
                   key={entry.id}
@@ -161,11 +161,11 @@ export function NotificationCenter({
                       setOpen(false);
                     }}
                   >
-                    <strong>{entry.title}</strong>
-                    <span>{entry.text}</span>
+                    <strong>{t(entry.title)}</strong>
+                    <span>{entry.kind === "update" ? t("{release} is available. Open settings to update when you’re ready.", { release: entry.text }) : entry.text}</span>
                     <time
                       dateTime={new Date(entry.createdAt).toISOString()}
-                      title={new Date(entry.createdAt).toLocaleString()}
+                      title={new Date(entry.createdAt).toLocaleString(currentLocale())}
                     >
                       {ago(entry.createdAt)}
                     </time>
@@ -174,7 +174,7 @@ export function NotificationCenter({
                     <button
                       type="button"
                       className="icon-btn notification-read"
-                      title="Mark read"
+                      title={t("Mark read")}
                       disabled={!connected}
                       onClick={() =>
                         send({ t: "notifications.read", ids: [entry.id] })
@@ -190,17 +190,14 @@ export function NotificationCenter({
               <div className="notification-empty">
                 <BellRing size={27} />
                 <strong>
-                  {filter === "unread" ? "All caught up" : "Nothing here yet"}
+                  {filter === "unread" ? t("All caught up") : t("Nothing here yet")}
                 </strong>
-                <p>
-                  Chat replies and completed Git or GitHub actions will appear
-                  here.
-                </p>
+                <p>{t("Chat replies, updates, and completed Git or GitHub actions will appear here.")}</p>
               </div>
             )}
           </div>
           <footer>
-            <span>Last 100 notifications</span>
+            <span>{t("Last 100 notifications")}</span>
             <button
               type="button"
               disabled={
@@ -208,9 +205,7 @@ export function NotificationCenter({
               }
               onClick={() => send({ t: "notifications.clear" })}
             >
-              <Trash2 size={13} />
-              Clear read
-            </button>
+              <Trash2 size={13} />{t("Clear read")}</button>
           </footer>
         </section>
       )}

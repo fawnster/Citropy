@@ -8,6 +8,7 @@ import { Check } from "./icons.ts";
 import { Collapsible } from "./Collapsible.tsx";
 import { ProviderIcon } from "./ProviderIcon.tsx";
 import { ThreadPulse } from "./ThreadPulse.tsx";
+import { useI18n } from "../lib/i18n.ts";
 
 interface Props {
   parent: ThreadMeta;
@@ -20,6 +21,7 @@ interface Props {
 }
 
 export function ThreadChildren(props: Props) {
+  const t = useI18n();
   const {
     parent,
     childrenByParent,
@@ -48,19 +50,19 @@ export function ThreadChildren(props: Props) {
       className="thread-children-disclosure"
       data-open={open}
       data-nested={Boolean(nested)}
-      aria-label={`Subagents of ${parent.title}`}
+      aria-label={t("Subagents for {title}", { title: parent.title })}
     >
       <div className="thread-children-clip">
         <button
           type="button"
           className="thread-subagents-toggle"
           aria-expanded={open}
-          aria-label={`${open ? "Hide" : "Show"} subagents of ${parent.title}`}
+          aria-label={t(open ? "Hide subagents for {title}" : "Show subagents for {title}", { title: parent.title })}
           onClick={() => setOpen(!open)}
         >
           {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
           <Network size={13} className="panel-icon-subagents" />
-          <span>Subagents</span>
+          <span>{t("Subagents")}</span>
           <span className="thread-completed-count">{visible.length}</span>
         </button>
         <Collapsible open={open} className="thread-children">
@@ -71,7 +73,7 @@ export function ThreadChildren(props: Props) {
                   type="button"
                   className="thread-child"
                   data-active={child.id === activeThreadId}
-                  title={`${child.title} · ${child.status}`}
+                  title={`${child.title} · ${t(child.status)}`}
                   onClick={() => {
                     onConversation();
                     selectThread(child.id);

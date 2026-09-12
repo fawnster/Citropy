@@ -1,5 +1,7 @@
+import { useI18n } from "../lib/i18n.ts";
 import { useEffect, useState } from "react";
-import { ChevronRight, FileText, Folder, FolderOpen } from "./icons.ts";
+import { ChevronRight, Folder, FolderOpen } from "./icons.ts";
+import { FileIcon } from "./FileIcon.tsx";
 import { fetchTree } from "../lib/actions.ts";
 import { FilePreview } from "./FilePreview.tsx";
 import { useApp } from "../lib/store.ts";
@@ -43,7 +45,7 @@ function Node({ entry, depth, projectId, onOpen }: NodeProps) {
         onClick={() => onOpen(entry.path)}
       >
         <span className="tree-spacer" />
-        <FileText size={12} className="tree-icon" />
+        <FileIcon path={entry.path} />
         <span className="truncate">{entry.name}</span>
       </button>
     );
@@ -85,6 +87,7 @@ function Node({ entry, depth, projectId, onOpen }: NodeProps) {
 }
 
 export function FileTree() {
+  const t = useI18n();
   const threadId = useApp((state) => state.activeThreadId);
   const projectId = useApp((state) => state.activeProjectId);
   const connected = useApp((state) => state.connected);
@@ -111,7 +114,7 @@ export function FileTree() {
   }, [projectId, threadId, connected]);
 
   if (!projectId)
-    return <div className="pane-empty">Open a workspace first.</div>;
+    return <div className="pane-empty">{t("Open a workspace first.")}</div>;
 
   if (preview) {
     return (
@@ -136,7 +139,7 @@ export function FileTree() {
       ))}
       {entries.length === 0 && (
         <div className="pane-empty" role={error ? "alert" : undefined}>
-          {error || "Nothing to show."}
+          {error || t("Nothing to show.")}
         </div>
       )}
     </div>

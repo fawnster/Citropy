@@ -12,12 +12,14 @@ import {
   githubDate,
 } from "./GitHubShared.tsx";
 import type { GitHubRepository } from "../../../../shared/github.ts";
+import { useI18n } from "../../lib/i18n.ts";
 
 export function GitHubReleases({
   repository,
 }: {
   repository: GitHubRepository;
 }) {
+  const t = useI18n();
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
   const [message, setMessage] = useState("");
@@ -25,10 +27,10 @@ export function GitHubReleases({
   return (
     <div className="github-workspace scroll">
       <div className="github-toolbar">
-        <h2>Releases</h2>
+        <h2>{t("Releases")}</h2>
         <button
           className="icon-btn"
-          aria-label="Refresh releases"
+          aria-label={t("Refresh releases")}
           disabled={releases.loading}
           onClick={releases.refresh}
         >
@@ -41,7 +43,7 @@ export function GitHubReleases({
           onClick={() => setCreating(true)}
         >
           <Plus size={15} />
-          New release
+          {t("New release")}
         </button>
       </div>
       {message && (
@@ -53,7 +55,7 @@ export function GitHubReleases({
         error={releases.error}
         loading={releases.loading && !releases.data}
         empty={
-          releases.data?.items.length === 0 ? "No releases yet" : undefined
+          releases.data?.items.length === 0 ? t("No releases yet") : undefined
         }
       />
       <div className="github-releases">
@@ -62,18 +64,18 @@ export function GitHubReleases({
             <header>
               <Tag size={19} />
               <h2>{release.name || release.tag_name}</h2>
-              {release.draft && <span className="pill">Draft</span>}
-              {release.prerelease && <span className="pill">Pre-release</span>}
-              <GitHubLink href={release.html_url}>Release</GitHubLink>
+              {release.draft && <span className="pill">{t("Draft")}</span>}
+              {release.prerelease && <span className="pill">{t("Pre-release")}</span>}
+              <GitHubLink href={release.html_url}>{t("Release")}</GitHubLink>
             </header>
             <p className="github-meta">
               {release.tag_name}
               {release.published_at && ` · ${githubDate(release.published_at)}`}
             </p>
-            <Prose text={release.body || "No release notes."} live={false} />
+            <Prose text={release.body || t("No release notes.")} live={false} />
             {release.assets.length > 0 && (
               <div className="github-release-assets">
-                <h3>Downloads</h3>
+                <h3>{t("Downloads")}</h3>
                 {release.assets.map((asset) => (
                   <GitHubLink
                     key={asset.id}
@@ -99,9 +101,9 @@ export function GitHubReleases({
       )}
       {creating && (
         <GitHubDialog
-          title="Create a release"
-          description={`Create a release in ${repository.full_name}. Saving a draft keeps it unpublished.`}
-          submitLabel="Save release"
+          title={t("Create a release")}
+          description={t("Create a release in {repo}. Saving a draft keeps it unpublished.", { repo: repository.full_name })}
+          submitLabel={t("Save release")}
           onClose={() => setCreating(false)}
           onSubmit={async (data) => {
             const result = await github("mutate", {
@@ -121,16 +123,14 @@ export function GitHubReleases({
           }}
         >
           <label className="git-field">
-            Release name
+            {t("Release name")}
             <input name="name" required />
           </label>
           <div className="github-form-columns">
-            <label className="git-field">
-              Tag
-              <input name="tag" placeholder="v1.0.0" required />
+            <label className="git-field">{" "}{t("Tag")}{" "}<input name="tag" placeholder="v1.0.0" required />
             </label>
             <label className="git-field">
-              Target branch or commit
+              {t("Target branch or commit")}
               <input
                 name="target"
                 defaultValue={repository.default_branch}
@@ -139,16 +139,16 @@ export function GitHubReleases({
             </label>
           </div>
           <label className="git-field">
-            Release notes
+            {t("Release notes")}
             <textarea name="body" rows={6} />
           </label>
           <label className="github-checkbox">
             <input name="draft" type="checkbox" defaultChecked />
-            Save as a draft
+            {t("Save as a draft")}
           </label>
           <label className="github-checkbox">
             <input name="prerelease" type="checkbox" />
-            Mark as a pre-release
+            {t("Mark as a pre-release")}
           </label>
         </GitHubDialog>
       )}

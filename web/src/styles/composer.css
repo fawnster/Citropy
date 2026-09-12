@@ -281,6 +281,25 @@
   margin: 0;
   font-variant-numeric: tabular-nums;
 }
+.context-actions,
+.context-compacting {
+  margin-top: 14px;
+}
+.context-actions .btn {
+  width: 100%;
+  justify-content: center;
+}
+.context-actions svg,
+.context-compacting svg {
+  color: var(--file-icon);
+}
+.context-compacting {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  color: var(--text-2);
+}
 
 .context-connection {
   border-top: 1px solid var(--line);
@@ -393,6 +412,7 @@
 .composer-highlights {
   position: absolute;
   inset: 0;
+  max-width: 100%;
   overflow: hidden;
   padding: 16px 18px 8px;
   font-size: 14px;

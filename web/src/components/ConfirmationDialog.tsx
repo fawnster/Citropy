@@ -1,15 +1,17 @@
+import { useI18n } from "../lib/i18n.ts";
 import { CircleHelp, Trash2 } from "lucide-react";
 import { answerConfirmation, useApp } from "../lib/store.ts";
 import { Modal } from "./Modal.tsx";
 
 export function ConfirmationDialog() {
+  const t = useI18n();
   const confirmation = useApp((state) => state.confirmation);
   const connected = useApp((state) => state.connected);
   if (!confirmation) return null;
   return (
     <Modal
-      title={confirmation.title}
-      description={confirmation.description}
+      title={t(confirmation.title)}
+      description={t(confirmation.description)}
       danger={confirmation.danger}
       icon={
         confirmation.danger ? <Trash2 size={21} /> : <CircleHelp size={21} />
@@ -22,9 +24,7 @@ export function ConfirmationDialog() {
             className="btn"
             data-cancel
             onClick={() => answerConfirmation(false)}
-          >
-            Cancel
-          </button>
+          >{t("Cancel")}</button>
           <button
             type="button"
             className="btn"
@@ -32,7 +32,7 @@ export function ConfirmationDialog() {
             disabled={!connected}
             onClick={() => answerConfirmation(true)}
           >
-            {confirmation.label}
+            {t(confirmation.label)}
           </button>
         </>
       }
@@ -41,9 +41,7 @@ export function ConfirmationDialog() {
         <div className="confirmation-context">{confirmation.context}</div>
       )}
       {!connected && (
-        <p className="dialog-error" role="alert">
-          Reconnect to Citropy to continue.
-        </p>
+        <p className="dialog-error" role="alert">{t("Reconnect to Citropy to continue.")}</p>
       )}
     </Modal>
   );

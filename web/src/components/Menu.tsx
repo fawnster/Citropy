@@ -1,3 +1,4 @@
+import { useI18n } from "../lib/i18n.ts";
 import {
   useEffect,
   useId,
@@ -36,6 +37,7 @@ interface Props {
   width?: number;
   searchable?: boolean;
   searchPlaceholder?: string;
+  className?: string;
 }
 
 export function Menu({
@@ -46,7 +48,9 @@ export function Menu({
   width = 232,
   searchable = false,
   searchPlaceholder = "Search models",
+  className = "",
 }: Props) {
+  const t = useI18n();
   const uiScale = useApp((state) => state.uiScale);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
@@ -138,7 +142,7 @@ export function Menu({
         {open && (
           <motion.div
             ref={menu}
-            className="menu"
+            className={`menu ${className}`}
             popover="manual"
             data-align={align}
             style={{
@@ -186,8 +190,8 @@ export function Menu({
             {searchable && (
               <input
                 className="menu-search"
-                aria-label={searchPlaceholder}
-                placeholder={searchPlaceholder}
+                aria-label={t(searchPlaceholder)}
+                placeholder={t(searchPlaceholder)}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
               />
@@ -246,7 +250,7 @@ export function Menu({
                   .includes(query.toLowerCase()),
               ) && (
                 <div className="menu-empty">
-                  {query ? "No matches" : "No options available"}
+                  {query ? t("No matches") : t("No options available")}
                 </div>
               )}
             </div>

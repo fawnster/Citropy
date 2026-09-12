@@ -1,4 +1,5 @@
 import { motion } from "motion/react";
+import { useI18n } from "../../lib/i18n.ts";
 import type { TodoItem } from "../../../../shared/protocol.ts";
 
 function Mark({ status }: { status: TodoItem["status"] }) {
@@ -35,13 +36,14 @@ function Mark({ status }: { status: TodoItem["status"] }) {
 }
 
 export function TodoBoard({ items }: { items: TodoItem[] }) {
+  const t = useI18n();
   if (items.length === 0) return null;
   const done = items.filter((item) => item.status === "completed").length;
 
   return (
     <div className="todo">
       <div className="todo-head">
-        <span className="eyebrow">Plan</span>
+        <span className="eyebrow">{t("Plan")}</span>
         <span className="todo-progress">
           {done}/{items.length}
         </span>

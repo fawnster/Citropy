@@ -4,30 +4,31 @@ import { useApp } from "../lib/store.ts";
 import { Modal } from "./Modal.tsx";
 import { ProviderIcon } from "./ProviderIcon.tsx";
 import type { PermissionRequest } from "../../../shared/protocol.ts";
+import { useI18n } from "../lib/i18n.ts";
 
 function lines(value: unknown): string[] {
   return typeof value === "string" ? value.split("\n") : [];
 }
 
-function lede(request: PermissionRequest, project: string): string {
+function lede(request: PermissionRequest, project: string, t: ReturnType<typeof useI18n>): string {
   const where = request.detail ? `${request.detail}/` : "";
   switch (request.shape) {
     case "command":
-      return `Run this command in ${project}.`;
+      return t("Run this command in {project}.", { project });
     case "write":
-      return `Create ${where}${request.headline} in ${project}.`;
+      return t("Create {where}{headline} in {project}.", { where, headline: request.headline, project });
     case "edit":
-      return `Change ${where}${request.headline}.`;
+      return t("Change {where}{headline}.", { where, headline: request.headline });
     case "read":
-      return `Read ${where}${request.headline}.`;
+      return t("Read {where}{headline}.", { where, headline: request.headline });
     case "web":
-      return "Fetch this address from the internet.";
+      return t("Fetch this address from the internet.");
     case "computer":
-      return "Use the shared desktop screen, pointer, or keyboard.";
+      return t("Use the shared desktop screen, pointer, or keyboard.");
     case "task":
-      return "Start a subagent for this task.";
+      return t("Start a subagent for this task.");
     default:
-      return `Run the ${request.tool} tool.`;
+      return t("Run the {tool} tool.", { tool: request.tool });
   }
 }
 
@@ -77,6 +78,7 @@ function Body({ request }: { request: PermissionRequest }) {
 }
 
 export function PermissionLayer() {
+  const t = useI18n();
   const requests = useApp((state) => state.permissions);
   const request = requests[0];
   const project = useApp((state) => {
@@ -94,8 +96,8 @@ export function PermissionLayer() {
     <Modal
       key={request.id}
       className="permission-dialog"
-      title="Review this action"
-      description={lede(request, project)}
+      title={t("Review this action")}
+      description={lede(request, project, t)}
       icon={<Icon size={21} />}
       onClose={() => answerPermission(request.id, "deny")}
       footer={
@@ -108,7 +110,7 @@ export function PermissionLayer() {
             onClick={() => answerPermission(request.id, "deny")}
           >
             <Ban size={14} />
-            Deny
+            {t("Deny")}
           </button>
           <span className="composer-spacer" />
           <button
@@ -118,7 +120,7 @@ export function PermissionLayer() {
             onClick={() => answerPermission(request.id, "allow_always")}
           >
             <CheckCheck size={14} />
-            Allow this tool for this session
+            {t("Allow this tool for this session")}
           </button>
           <button
             className="btn"
@@ -128,7 +130,7 @@ export function PermissionLayer() {
             onClick={() => answerPermission(request.id, "allow")}
           >
             <Check size={14} />
-            Allow once
+            {t("Allow once")}
           </button>
         </>
       }
@@ -138,13 +140,13 @@ export function PermissionLayer() {
         <span className="truncate">{thread?.title ?? project}</span>
         <span>· {request.tool}</span>
         {requests.length > 1 && (
-          <span className="pill">{requests.length - 1} waiting</span>
+          <span className="pill">{requests.length - 1} {t("waiting")}</span>
         )}
       </div>
       <Body request={request} />
       {!connected && (
         <p className="dialog-error" role="alert">
-          Reconnect to Citropy to respond.
+          {t("Reconnect to Citropy to respond.")}
         </p>
       )}
     </Modal>

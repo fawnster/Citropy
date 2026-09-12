@@ -15,6 +15,7 @@ import { Menu } from "./Menu.tsx";
 import { Modal } from "./Modal.tsx";
 import { api, reportError } from "../lib/api.ts";
 import type { ThreadMeta } from "../../../shared/protocol.ts";
+import { useI18n } from "../lib/i18n.ts";
 
 export async function organizeConversation(id: string, patch: object) {
   await api(`threads/organize?threadId=${id}`, {
@@ -30,6 +31,7 @@ export function ConversationMenu({
   thread: ThreadMeta;
   onMove: (direction: number) => void;
 }) {
+  const t = useI18n();
   const [editing, setEditing] = useState<"title" | "pullRequest" | "snooze">();
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
@@ -75,33 +77,33 @@ export function ConversationMenu({
         items={[
           {
             id: "pin",
-            label: thread.pinned ? "Unpin conversation" : "Pin conversation",
+            label: thread.pinned ? t("Unpin conversation") : t("Pin conversation"),
             icon: thread.pinned ? <PinOff size={15} /> : <Pin size={15} />,
             onSelect: () => update({ pinned: !thread.pinned }),
           },
           {
             id: "rename",
-            label: "Rename…",
+            label: t("Rename…"),
             icon: <Pencil size={15} />,
             onSelect: () => edit("title"),
           },
           {
             id: "up",
-            label: "Move up",
+            label: t("Move up"),
             icon: <ArrowUp size={15} />,
             onSelect: () => onMove(-1),
           },
           {
             id: "down",
-            label: "Move down",
+            label: t("Move down"),
             icon: <ArrowDown size={15} />,
             onSelect: () => onMove(1),
           },
           {
             id: "pr",
             label: thread.pullRequest
-              ? "Edit pull request link…"
-              : "Link pull request…",
+              ? t("Edit pull request link…")
+              : t("Link pull request…"),
             icon: <GitPullRequest size={15} />,
             onSelect: () => edit("pullRequest"),
           },
@@ -110,8 +112,8 @@ export function ConversationMenu({
                 {
                   id: "snooze",
                   label: thread.snoozedUntil
-                    ? "Wake conversation"
-                    : "Snooze until…",
+                    ? t("Wake conversation")
+                    : t("Snooze until…"),
                   icon: <Clock size={15} />,
                   onSelect: () =>
                     thread.snoozedUntil
@@ -121,8 +123,8 @@ export function ConversationMenu({
                 {
                   id: "archive",
                   label: thread.archived
-                    ? "Restore conversation"
-                    : "Archive conversation",
+                    ? t("Restore conversation")
+                    : t("Archive conversation"),
                   icon: thread.archived ? (
                     <ArchiveRestore size={15} />
                   ) : (
@@ -138,7 +140,7 @@ export function ConversationMenu({
             id={id}
             className="thread-more"
             type="button"
-            aria-label={`Organize ${thread.title}`}
+            aria-label={`${t("Organize")} ${thread.title}`}
             aria-haspopup="menu"
             aria-expanded={open}
             onClick={toggle}
@@ -151,14 +153,14 @@ export function ConversationMenu({
         <Modal
           title={
             editing === "title"
-              ? "Rename conversation"
+              ? t("Rename conversation")
               : editing === "snooze"
-                ? "Snooze conversation"
-                : "Link a pull request"
+                ? t("Snooze conversation")
+                : t("Link a pull request")
           }
           description={
             editing === "snooze"
-              ? "Move this conversation out of your active list until the time you choose."
+              ? t("Move this conversation out of your active list until the time you choose.")
               : undefined
           }
           onClose={() => setEditing(undefined)}
@@ -174,24 +176,24 @@ export function ConversationMenu({
                 disabled={busy}
                 onClick={() => setEditing(undefined)}
               >
-                Cancel
+                {t("Cancel")}
               </button>
               <button
                 className="btn"
                 data-variant="primary"
                 disabled={busy || (editing !== "pullRequest" && !value.trim())}
               >
-                Save
+                {t("Save")}
               </button>
             </>
           }
         >
           <label className="feature-field">
             {editing === "title"
-              ? "Name"
+              ? t("Name")
               : editing === "snooze"
-                ? "Wake at"
-                : "GitHub pull request URL"}
+                ? t("Wake at")
+                : t("GitHub pull request URL")}
             <input
               type={editing === "snooze" ? "datetime-local" : "text"}
               value={value}

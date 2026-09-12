@@ -1,3 +1,4 @@
+import { currentLocale, translate } from "./i18n.ts";
 import type {
   ModelOption,
   ProviderId,
@@ -14,7 +15,7 @@ export const providerLabels: Record<ProviderId, string> = {
 export function modelLabel(models: ModelOption[], modelId?: string): string {
   return (
     selectedModel(models, modelId)?.label ??
-    (modelId && modelId !== "default" ? modelId : "Model unavailable")
+    (modelId && modelId !== "default" ? modelId : translate("Model unavailable"))
   );
 }
 
@@ -22,7 +23,7 @@ export function modelSource(
   provider: ProviderInfo | undefined,
   model?: ModelOption,
 ): string {
-  if (!provider) return "Provider unavailable";
+  if (!provider) return translate("Provider unavailable");
   if (provider.id !== "opencode") return provider.label;
   const source = model?.hint ?? model?.id.split("/")[0];
   if (!source) return provider.label;
@@ -40,9 +41,9 @@ export function modelSource(
 }
 
 export function effortLabel(effort: string): string {
-  return effort === "xhigh"
+  return translate(effort === "xhigh"
     ? "Extra high"
-    : effort.charAt(0).toUpperCase() + effort.slice(1);
+    : effort.charAt(0).toUpperCase() + effort.slice(1));
 }
 
 export function tokens(value: number): string {
@@ -71,21 +72,21 @@ export function duration(ms: number): string {
 
 export function ago(ts: number, now = Date.now()): string {
   const delta = Math.max(now - ts, 0);
-  if (delta < 45_000) return "just now";
+  if (delta < 45_000) return translate("just now");
   const minutes = Math.round(delta / 60_000);
-  if (minutes < 60) return `${minutes}m ago`;
+  if (minutes < 60) return translate("{count}m ago", { count: minutes });
   const hours = Math.round(delta / 3_600_000);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return translate("{count}h ago", { count: hours });
   const days = Math.round(delta / 86_400_000);
-  if (days < 7) return `${days}d ago`;
-  return new Date(ts).toLocaleDateString(undefined, {
+  if (days < 7) return translate("{count}d ago", { count: days });
+  return new Date(ts).toLocaleDateString(currentLocale(), {
     month: "short",
     day: "numeric",
   });
 }
 
 export function clock(ts: number): string {
-  return new Date(ts).toLocaleTimeString(undefined, {
+  return new Date(ts).toLocaleTimeString(currentLocale(), {
     hour: "2-digit",
     minute: "2-digit",
   });

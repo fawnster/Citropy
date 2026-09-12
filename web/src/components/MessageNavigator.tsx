@@ -2,6 +2,7 @@ import { memo, useMemo, useState } from "react";
 import { useApp } from "../lib/store.ts";
 import { clock, modelLabel } from "../lib/format.ts";
 import type { TimelineRow } from "../lib/timeline.ts";
+import { useI18n } from "../lib/i18n.ts";
 
 export const MessageNavigator = memo(function MessageNavigator({
   rows,
@@ -12,6 +13,7 @@ export const MessageNavigator = memo(function MessageNavigator({
   activeMessageId?: string;
   onSelect: (messageId: string) => void;
 }) {
+  const t = useI18n();
   const messages = useMemo(() => rows.filter((row) => row.first), [rows]);
   const [preview, setPreview] = useState<string>();
   const activeIndex = Math.max(
@@ -23,7 +25,7 @@ export const MessageNavigator = memo(function MessageNavigator({
   return (
     <nav
       className="message-nav"
-      aria-label="Conversation messages"
+      aria-label={t("Conversation messages")}
       onMouseLeave={() => setPreview(undefined)}
     >
       <div
@@ -58,7 +60,7 @@ export const MessageNavigator = memo(function MessageNavigator({
             type="button"
             className="message-nav-stop"
             data-message-index={index}
-            aria-label={`Go to message ${index + 1}`}
+            aria-label={`${t("Go to message")} ${index + 1}`}
             aria-current={index === activeIndex ? "location" : undefined}
             aria-describedby={
               row.messageId === preview ? "message-nav-preview" : undefined
@@ -98,11 +100,12 @@ function MessagePreview({
   messageId: string;
   index: number;
 }) {
+  const t = useI18n();
   const message = useApp((state) => state.messages[messageId]);
   const author = useApp((state) => {
     const message = state.messages[messageId];
     if (message?.role === "user")
-      return state.showGitHubIdentity ? state.githubAccount?.login ?? "You" : "You";
+      return state.showGitHubIdentity ? state.githubAccount?.login ?? t("You") : t("You");
     const thread = state.threads[state.activeThreadId ?? ""];
     const provider = state.providers.find(
       (entry) => entry.id === thread?.provider,
@@ -121,13 +124,13 @@ function MessagePreview({
           state.threads[threadId]?.running &&
           state.order[threadId]?.at(-1) === messageId && shell.role !== "user"
         )
-          return "Response in progress…";
+          return t("Response in progress…");
         return part.text.slice(0, 240);
       }
     }
     return (
       shell.attachments?.map((file) => file.label).join(", ").slice(0, 240) ||
-      "Tool activity"
+      t("Tool activity")
     );
   });
   if (!message) return null;

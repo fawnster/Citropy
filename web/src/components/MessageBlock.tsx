@@ -5,6 +5,7 @@ import { WorkGroup } from "./WorkGroup.tsx";
 import type { TimelineRow } from "../lib/timeline.ts";
 import { useApp } from "../lib/store.ts";
 import { UserRound } from "lucide-react";
+import { useI18n } from "../lib/i18n.ts";
 import { ProviderIcon } from "./ProviderIcon.tsx";
 import { selectedModel } from "../../../shared/model-options.ts";
 import {
@@ -25,6 +26,7 @@ export const MessageBlock = memo(function MessageBlock({
   first,
   last,
 }: Props) {
+  const t = useI18n();
   const shell = useApp((state) => state.messages[messageId]);
   const provider = useApp((state) =>
     state.activeThreadId
@@ -52,7 +54,7 @@ export const MessageBlock = memo(function MessageBlock({
       <article id={`message-${messageId}`} className="turn turn-user">
         <div
           className="message-avatar user-avatar"
-          aria-label={account?.login ?? "You"}
+          aria-label={account?.login ?? t("You")}
         >
           <UserRound size={17} />
           {account?.avatar_url && (
@@ -69,7 +71,7 @@ export const MessageBlock = memo(function MessageBlock({
         </div>
         <div className="message-content">
           <div className="turn-heading">
-            <strong>{account?.login ?? "You"}</strong>
+            <strong>{account?.login ?? t("You")}</strong>
             <time>{clock(shell.ts)}</time>
           </div>
           {shell.attachments?.length && thread ? (

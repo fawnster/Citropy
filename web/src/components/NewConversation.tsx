@@ -1,21 +1,25 @@
 import { useEffect, useState } from "react";
+import { useI18n } from "../lib/i18n.ts";
 import { Folder, GitBranch, GitFork, LoaderCircle } from "lucide-react";
 import { Modal } from "./Modal.tsx";
 import { ProviderIcon } from "./ProviderIcon.tsx";
 import { api } from "../lib/api.ts";
 import { loadThread, refreshGit } from "../lib/actions.ts";
 import { selectThread, useApp } from "../lib/store.ts";
+import { selectedModel } from "../../../shared/model-options.ts";
 import type { WorkspaceOptions } from "../../../shared/features.ts";
-import type { ThreadMeta, WorkspaceChoice } from "../../../shared/protocol.ts";
+import type { ProviderId, ThreadMeta, WorkspaceChoice } from "../../../shared/protocol.ts";
 
 export function NewConversation() {
-  const providerId = useApp((state) => state.newThreadProvider);
+  const t = useI18n();
+  const initialProvider = useApp((state) => state.newThreadProvider);
+  const [providerId, setProviderId] = useState(initialProvider);
+  const providers = useApp((state) => state.providers);
+  const connected = useApp((state) => state.connected);
   const project = useApp((state) =>
     state.projects.find((entry) => entry.id === state.activeProjectId),
   );
-  const provider = useApp((state) =>
-    state.providers.find((entry) => entry.id === providerId),
-  );
+  const provider = providers.find((entry) => entry.id === providerId);
   const [options, setOptions] = useState<WorkspaceOptions>();
   const [kind, setKind] = useState<WorkspaceChoice["kind"]>(
     project?.settings?.workspace ?? "current",
@@ -43,6 +47,7 @@ export function NewConversation() {
     return () => controller.abort();
   }, [project?.id]);
   if (!project || !provider) return null;
+  const currentModel = selectedModel(provider.models, model) ?? selectedModel(provider.models);
   const close = () => useApp.setState({ newThreadProvider: null });
   const create = async () => {
     setBusy(true);
@@ -53,7 +58,7 @@ export function NewConversation() {
         body: JSON.stringify({
           projectId: project.id,
           provider: provider.id,
-          model: model || undefined,
+          model: currentModel?.id,
           workspace: { kind, path, branch, base },
         }),
       });
@@ -75,13 +80,13 @@ export function NewConversation() {
   };
   return (
     <Modal
-      title="New conversation"
-      description={`Choose where to work in ${project.name}.`}
+      title={t("New conversation")}
+      description={t("Choose where to work in {project}.", { project: project.name })}
       icon={<GitFork size={22} />}
       busy={busy}
       onClose={close}
       onSubmit={create}
-      initialFocus="select"
+      initialFocus="#conversation-provider"
       footer={
         <>
           <button
@@ -91,67 +96,71 @@ export function NewConversation() {
             onClick={close}
             disabled={busy}
           >
-            Cancel
+            {t("Cancel")}
           </button>
           <button
             className="btn"
             data-variant="primary"
             disabled={
               busy ||
+              !connected ||
+              !provider.available ||
+              !provider.enabled ||
               !options ||
               (kind === "existing" && !path) ||
               (kind === "new" && !options.hasCommits)
             }
           >
-            {busy && <LoaderCircle size={15} className="spin" />}Create
-            conversation
+            {busy && <LoaderCircle size={15} className="spin" />}{t("Create conversation")}
           </button>
         </>
       }
     >
-      <label className="feature-field">
-        <span>
-          <ProviderIcon provider={provider.id} />
-          {provider.label}
-        </span>
-        <select
-          value={
-            model ||
-            provider.models.find((entry) => entry.isDefault)?.id ||
-            provider.models[0]?.id ||
-            ""
-          }
-          onChange={(event) => setModel(event.target.value)}
-        >
-          {provider.models.map((entry) => (
-            <option key={entry.id} value={entry.id}>
-              {entry.label}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="feature-form-grid">
+        <label className="feature-field">
+          <span><ProviderIcon provider={provider.id} />{t("Provider")}</span>
+          <select
+            id="conversation-provider"
+            value={provider.id}
+            disabled={busy}
+            onChange={(event) => {
+              const id = event.target.value as ProviderId;
+              setProviderId(id);
+              setModel(project.settings?.provider === id ? project.settings.model ?? "" : "");
+            }}
+          >
+            {providers.filter((entry) => entry.available && entry.enabled).map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
+          </select>
+        </label>
+        <label className="feature-field">
+          {t("Model")}
+          <select value={currentModel?.id ?? ""} disabled={busy} onChange={(event) => setModel(event.target.value)}>
+            {provider.models.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}
+          </select>
+        </label>
+      </div>
       <div
         className="workspace-choices"
         role="radiogroup"
-        aria-label="Conversation workspace"
+        aria-label={t("Conversation workspace")}
       >
         {[
           {
             id: "current",
-            label: "Current folder",
-            detail: "Use the project's existing checkout.",
+            label: t("Current folder"),
+            detail: t("Use the project's existing checkout."),
             icon: Folder,
           },
           {
             id: "new",
-            label: "New worktree",
-            detail: "A separate branch and folder for this conversation.",
+            label: t("New worktree"),
+            detail: t("A separate branch and folder for this conversation."),
             icon: GitFork,
           },
           {
             id: "existing",
-            label: "Existing worktree",
-            detail: "Continue in a worktree you already have.",
+            label: t("Existing worktree"),
+            detail: t("Continue in a worktree you already have."),
             icon: GitBranch,
           },
         ].map(({ id, label, detail, icon: Icon }) => (
@@ -177,26 +186,25 @@ export function NewConversation() {
         <>
           {options && !options.hasCommits ? (
             <p className="feature-note">
-              Create your first commit in Source control before creating a
-              worktree.
+              {t("Create your first commit in Source control before creating a worktree.")}
             </p>
           ) : (
             <div className="feature-form-grid">
               <label className="feature-field">
-                Branch name
+                {t("Branch name")}
                 <input
                   value={branch}
                   onChange={(event) => setBranch(event.target.value)}
-                  placeholder="Automatically generated"
+                  placeholder={t("Automatically generated")}
                 />
               </label>
               <label className="feature-field">
-                Start from
+                {t("Start from")}
                 <select
                   value={base}
                   onChange={(event) => setBase(event.target.value)}
                 >
-                  <option value="HEAD">Current commit</option>
+                  <option value="HEAD">{t("Current commit")}</option>
                   {options?.branches.map((name) => (
                     <option key={name}>{name}</option>
                   ))}
@@ -206,19 +214,19 @@ export function NewConversation() {
           )}
           {project.settings?.actions?.some((action) => action.setup) && (
             <p className="feature-note">
-              The project's setup actions will run in the new worktree.
+              {t("The project's setup actions will run in the new worktree.")}
             </p>
           )}
         </>
       )}
       {kind === "existing" && (
         <label className="feature-field">
-          Worktree
+          {t("Worktree")}
           <select
             value={path}
             onChange={(event) => setPath(event.target.value)}
           >
-            <option value="">Select a worktree</option>
+            <option value="">{t("Select a worktree")}</option>
             {options?.worktrees
               .filter((entry) => !entry.locked)
               .map((entry) => (

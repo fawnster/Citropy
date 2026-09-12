@@ -233,7 +233,7 @@ test("renderer panels release background work and ignore stale replies", { timeo
     await page.locator(".preview-body").getByText("The current file", { exact: true }).waitFor();
     await slowFile.fulfill({ json: { name: "slow.txt", path: "slow.txt", mime: "text/plain", size: 22, text: "Obsolete file contents" } });
     await settle();
-    assert.equal(await page.locator(".preview-body").textContent(), "The current file");
+    assert.equal(await page.locator(".preview-body code").textContent(), "The current file");
     assert.equal(await page.getByText("Obsolete file contents").count(), 0);
     await page.locator(".preview").getByRole("button", { name: "Close preview", exact: true }).click();
   });

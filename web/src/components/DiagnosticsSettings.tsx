@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Activity, Cpu, MemoryStick, RefreshCw } from "lucide-react";
 import { api } from "../lib/api.ts";
 import type { DiagnosticReport } from "../../../shared/features.ts";
+import { useI18n } from "../lib/i18n.ts";
 
 const memory = (bytes: number) =>
   bytes >= 1024 ** 3
@@ -9,6 +10,7 @@ const memory = (bytes: number) =>
     : `${Math.round(bytes / 1024 ** 2)} MB`;
 
 export function DiagnosticsSettings() {
+  const t = useI18n();
   const [data, setData] = useState<DiagnosticReport>();
   const [history, setHistory] = useState<
     Array<{ time: number; memory: number }>
@@ -52,14 +54,14 @@ export function DiagnosticsSettings() {
             checked={live}
             onChange={(event) => setLive(event.target.checked)}
           />
-          Live updates every 3 seconds
+          {t("Live updates every 3 seconds")}
         </label>
         <button
           className="btn"
           onClick={() => setRevision((value) => value + 1)}
         >
           <RefreshCw size={15} />
-          Refresh
+          {t("Refresh")}
         </button>
       </div>
       {error && (
@@ -72,45 +74,38 @@ export function DiagnosticsSettings() {
           <div className="metric-grid">
             <div>
               <MemoryStick size={20} />
-              <span>Server memory</span>
+              <span>{t("Server memory")}</span>
               <strong>{memory(data.server.rss)}</strong>
-              <small>{memory(data.server.heapUsed)} JavaScript heap</small>
+              <small>{memory(data.server.heapUsed)}{" "}{t("JavaScript heap")}</small>
             </div>
             <div>
               <Cpu size={20} />
-              <span>System memory</span>
+              <span>{t("System memory")}</span>
               <strong>
                 {memory(data.system.memoryTotal - data.system.memoryFree)}
               </strong>
-              <small>
-                of {memory(data.system.memoryTotal)} · {data.system.cores} CPU
-                cores
-              </small>
+              <small>{" "}{t("of")}{" "}{memory(data.system.memoryTotal)} · {data.system.cores}{" "}{t("CPU cores")}{" "}</small>
             </div>
             <div>
               <Activity size={20} />
-              <span>Active work</span>
-              <strong>{data.running} conversations</strong>
+              <span>{t("Active work")}</span>
+              <strong>{data.running}{" "}{t("conversations")}</strong>
               <small>
-                {data.terminals} terminals · {data.browsers} browser tabs
-              </small>
+                {data.terminals}{" "}{t("terminals ·")}{" "}{data.browsers}{" "}{t("browser tabs")}{" "}</small>
             </div>
           </div>
           <section className="resource-chart">
             <div className="feature-section-heading">
-              <h2>Server memory</h2>
-              <span>
-                Last{" "}
+              <h2>{t("Server memory")}</h2>
+              <span>{" "}{t("Last")}{" "}
                 {history.length > 1
                   ? Math.round((history.at(-1)!.time - history[0]!.time) / 1000)
-                  : 0}{" "}
-                seconds
-              </span>
+                  : 0}{" "}{" "}{t("seconds")}{" "}</span>
             </div>
             <svg
               viewBox="0 0 600 90"
               role="img"
-              aria-label="Recent server memory usage"
+              aria-label={t("Recent server memory usage")}
               preserveAspectRatio="none"
             >
               {history.length === 1 && (
@@ -132,17 +127,17 @@ export function DiagnosticsSettings() {
           </section>
           <section>
             <div className="feature-section-heading">
-              <h2>Citropy processes</h2>
-              <span>{data.processes.length} processes</span>
+              <h2>{t("Citropy processes")}</h2>
+              <span>{data.processes.length}{" "}{t("processes")}</span>
             </div>
             <div className="feature-table-wrap scroll">
               <table className="feature-table">
                 <thead>
                   <tr>
-                    <th>Process</th>
+                    <th>{t("Process")}</th>
                     <th>PID</th>
                     <th>CPU</th>
-                    <th>Memory</th>
+                    <th>{t("Memory")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -157,15 +152,12 @@ export function DiagnosticsSettings() {
                 </tbody>
               </table>
             </div>
-            <p className="feature-note">
-              CPU is the operating system's process average. Server uptime:{" "}
-              {Math.floor(data.uptime / 60)} minutes. Updates stop when this
-              view closes.
-            </p>
+            <p className="feature-note">{" "}{t("CPU is the operating system's process average. Server uptime:")}{" "}
+              {Math.floor(data.uptime / 60)}{" "}{t("minutes. Updates stop when this view closes.")}{" "}</p>
           </section>
         </>
       ) : (
-        !error && <div className="pane-empty">Reading resource usage…</div>
+        !error && <div className="pane-empty">{t("Reading resource usage…")}</div>
       )}
     </div>
   );

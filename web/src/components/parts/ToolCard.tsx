@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { useI18n } from "../../lib/i18n.ts";
 import { useDisclosure } from "../../lib/use-disclosure.ts";
 import { Collapsible } from "../Collapsible.tsx";
 import { AlertTriangle, Ban, Check, ChevronRight, ExternalLink, shapeIcon } from "../icons.ts";
@@ -22,17 +23,20 @@ const VERBS: Record<string, [string, string]> = {
   Agent: ["Delegating", "Delegated"],
 };
 
-function label(name: string, status: ToolPart["status"]): string {
+function label(name: string, status: ToolPart["status"], t: ReturnType<typeof useI18n>): string {
   const pair = VERBS[name];
   if (!pair) {
     const short = name.startsWith("mcp__") ? (name.split("__")[1] ?? "tool") : name;
-    return status === "running" ? `Running ${short}` : short;
+    return status === "running" ? `${t("Running")} ${short}` : short;
   }
-  if (status === "denied") return `Blocked ${pair[1].toLowerCase()}`;
-  return status === "running" ? pair[0] : pair[1];
+  if (status === "denied") return `${t("Blocked")} ${t(pair[1]).toLowerCase()}`;
+  return status === "running"
+    ? t(pair[0])
+    : t(pair[1], undefined, "past");
 }
 
 export function ToolCard({ part }: { part: ToolPart }) {
+  const t = useI18n();
   const [open, setOpen] = useDisclosure(part.id, "tool", Boolean(part.patch));
   const Icon = shapeIcon[part.shape];
   const elapsed = part.endedAt ? part.endedAt - part.startedAt : null;
@@ -56,7 +60,7 @@ export function ToolCard({ part }: { part: ToolPart }) {
         <span className="tool-icon">
           <Icon size={13} />
         </span>
-        <span className="tool-name">{label(part.name, part.status)}</span>
+        <span className="tool-name">{label(part.name, part.status, t)}</span>
         <span className="tool-headline mono truncate">{part.headline}</span>
         <span className="tool-meta">
           {part.detail && <span className="tool-detail truncate">{part.detail}</span>}
@@ -86,11 +90,11 @@ export function ToolCard({ part }: { part: ToolPart }) {
           {!part.patch && !output && part.status === "running" && (
             <div className="tool-waiting">
               <span className="tool-waiting-bar" />
-              Running
+              {t("Running")}
             </div>
           )}
           {!part.patch && !output && part.status !== "running" && (
-            <div className="tool-empty">No output</div>
+            <div className="tool-empty">{t("No output")}</div>
           )}
         </div>
       </Collapsible>
@@ -99,13 +103,15 @@ export function ToolCard({ part }: { part: ToolPart }) {
 }
 
 function StatusMark({ status }: { status: ToolPart["status"] }) {
-  if (status === "running") return <span className="tool-spin" aria-label="running" />;
-  if (status === "ok") return <Check size={12} className="tool-ok" aria-label="done" />;
-  if (status === "denied") return <Ban size={12} className="tool-bad" aria-label="denied" />;
-  return <AlertTriangle size={12} className="tool-bad" aria-label="failed" />;
+  const t = useI18n();
+  if (status === "running") return <span className="tool-spin" aria-label={t("running")} />;
+  if (status === "ok") return <Check size={12} className="tool-ok" aria-label={t("done")} />;
+  if (status === "denied") return <Ban size={12} className="tool-bad" aria-label={t("denied")} />;
+  return <AlertTriangle size={12} className="tool-bad" aria-label={t("failed")} />;
 }
 
 function Output({ text, shape, partId }: { text: string; shape: ToolPart["shape"]; partId: string }) {
+  const t = useI18n();
   const [expanded, setExpanded] = useDisclosure(partId, "output");
   const lines = useMemo(() => text.split("\n"), [text]);
   const cap = shape === "command" ? 18 : 14;
@@ -118,7 +124,7 @@ function Output({ text, shape, partId }: { text: string; shape: ToolPart["shape"
       <pre className="tool-output" dangerouslySetInnerHTML={{ __html: html }} />
       {hidden > 0 && (
         <button className="diff-more" type="button" onClick={() => setExpanded(true)}>
-          Show {hidden} more {hidden === 1 ? "line" : "lines"}
+          {t("Show {count} more {unit}", { count: hidden, unit: hidden === 1 ? t("line") : t("lines") })}
         </button>
       )}
     </>

@@ -1,4 +1,6 @@
 import type { Part, ToolPart, ToolShape } from "../../../shared/protocol.ts";
+import { translate } from "./i18n.ts";
+import type { Translator } from "./translations.ts";
 
 export type Row = { kind: "part"; id: string } | { kind: "group"; ids: string[] };
 
@@ -41,12 +43,12 @@ const NOUN: Record<ToolShape, [string, string, string]> = {
   generic: ["Used", "tool", "tools"],
 };
 
-function phrase(shape: ToolShape, count: number): string {
+function phrase(shape: ToolShape, count: number, t: Translator): string {
   const [verb, one, many] = NOUN[shape];
-  return `${verb} ${count} ${count === 1 ? one : many}`;
+  return `${t(verb, undefined, "summary")} ${count} ${t(count === 1 ? one : many)}`;
 }
 
-export function summarize(tools: ToolPart[]): string {
+export function summarize(tools: ToolPart[], t: Translator = translate): string {
   const counts = new Map<ToolShape, Set<string>>();
   const plain = new Map<ToolShape, number>();
 
@@ -64,18 +66,17 @@ export function summarize(tools: ToolPart[]): string {
   const order: ToolShape[] = ["read", "edit", "write", "command", "search", "web", "computer", "task", "generic", "todo"];
   for (const shape of order) {
     const unique = counts.get(shape);
-    if (unique) parts.push(phrase(shape, unique.size));
+    if (unique) parts.push(phrase(shape, unique.size, t));
     const count = plain.get(shape);
-    if (count) parts.push(phrase(shape, count));
+    if (count) parts.push(phrase(shape, count, t));
   }
 
-  if (parts.length === 0) return "Worked";
+  if (parts.length === 0) return t("Worked");
   const sentence = parts.map((text, index) =>
     index === 0 ? text : `${text.charAt(0).toLowerCase()}${text.slice(1)}`,
   );
   if (sentence.length === 1) return sentence[0] as string;
-  if (sentence.length === 2) return `${sentence[0]} and ${sentence[1]}`;
-  return `${sentence.slice(0, -1).join(", ")} and ${sentence.at(-1)}`;
+  return t("{first} and {last}", { first: sentence.slice(0, -1).join(", "), last: sentence.at(-1)! });
 }
 
 export function groupStats(tools: ToolPart[]): { added: number; removed: number; failed: number; running: boolean } {

@@ -1,12 +1,13 @@
 import { spawn, execFile } from "node:child_process";
-import { access, realpath, readFile } from "node:fs/promises";
+import { access, realpath, readFile, mkdtemp, writeFile, rm } from "node:fs/promises";
 import { constants } from "node:fs";
-import { delimiter, join } from "node:path";
-import { homedir } from "node:os";
+import { delimiter, dirname, join } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import { promisify, stripVTControlCharacters } from "node:util";
 import { valid, gt } from "semver";
 import { providers } from "./index.ts";
 import { bus } from "../bus.ts";
+import { notifyUpdateAvailable } from "../update-notifications.ts";
 import type { ProviderId } from "../../shared/protocol.ts";
 import type { ProviderMaintenance } from "../../shared/provider-settings.ts";
 
@@ -36,6 +37,7 @@ interface UpdatePlan {
   executable?: string;
   args?: string[];
   reason?: string;
+  installer?: string;
 }
 
 async function executablePath(binary: string): Promise<string | undefined> {
@@ -133,12 +135,21 @@ async function resolveUpdatePlan(provider: ProviderId): Promise<UpdatePlan> {
         };
     }
   }
+  if (provider === "codex" && process.platform !== "win32") {
+    const installDirectory = process.env.CODEX_INSTALL_DIR || join(homedir(), ".local", "bin");
+    const standalone = join(process.env.CODEX_HOME || join(homedir(), ".codex"), "packages", "standalone", "releases");
+    if (binaryPath === join(installDirectory, "codex") && (target === binaryPath || target.startsWith(`${standalone}/`))) {
+      const shell = await executablePath("sh");
+      if (shell) return { binaryPath, method: "Standalone installer", executable: shell, args: [], installer: "https://chatgpt.com/codex/install.sh" };
+      return { binaryPath, reason: "The standalone installer needs sh on PATH." };
+    }
+  }
   const native =
     provider === "claude"
       ? /\/claude\/versions\/[^/]+$/.test(target)
       : provider === "opencode"
         ? target === join(homedir(), ".opencode", "bin", "opencode")
-        : target === join(homedir(), ".local", "bin", "codex");
+        : false;
   if (native) {
     const args = provider === "opencode" ? ["upgrade"] : ["update"];
     const help = await probe(binaryPath, [...args, "--help"]).catch(() => "");
@@ -264,6 +275,7 @@ export async function providerMaintenance(
       ]);
       const current = versionNumber(version);
       const target = versionNumber(latest);
+      if (current && target && gt(target, current)) notifyUpdateAvailable(provider.label, target, "Providers");
       return {
         provider: provider.id,
         status: "idle" as const,
@@ -281,7 +293,7 @@ export async function providerMaintenance(
         binaryPath: plan.binaryPath,
         method: plan.method,
         command: plan.executable
-          ? [plan.executable, ...plan.args!].join(" ")
+          ? plan.installer || [plan.executable, ...plan.args!].join(" ")
           : undefined,
         reason: plan.reason,
       } satisfies ProviderMaintenance;
@@ -289,64 +301,80 @@ export async function providerMaintenance(
   );
 }
 
-function runUpdate(
+async function runUpdate(
   plan: UpdatePlan,
   state: ProviderMaintenance,
 ): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(plan.executable!, plan.args!, {
-      cwd: homedir(),
-      stdio: ["ignore", "pipe", "pipe"],
-      detached: process.platform !== "win32",
-      env: { ...process.env, CI: "1", NO_COLOR: "1", TERM: "dumb" },
+  let directory: string | undefined;
+  let args = plan.args!;
+  try {
+    if (plan.installer) {
+      const response = await fetch(plan.installer, { signal: AbortSignal.timeout(30000) });
+      if (!response.ok) throw new Error("Could not download the official Codex installer.");
+      const script = await response.text();
+      if (script.length > 512 * 1024 || !script.startsWith("#!/bin/sh")) throw new Error("The Codex installer response was invalid.");
+      directory = await mkdtemp(join(tmpdir(), "citropy-codex-update-"));
+      const path = join(directory, "install.sh");
+      await writeFile(path, script, { mode: 0o600, flag: "wx" });
+      args = [path];
+    }
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(plan.executable!, args, {
+        cwd: homedir(),
+        stdio: ["ignore", "pipe", "pipe"],
+        detached: process.platform !== "win32",
+        env: { ...process.env, CI: "1", NO_COLOR: "1", TERM: "dumb", ...(plan.installer ? { CODEX_NON_INTERACTIVE: "1", CODEX_INSTALL_DIR: dirname(plan.binaryPath!) } : {}) },
+      });
+      const append = (chunk: Buffer) => {
+        state.output = stripVTControlCharacters(
+          (state.output || "") + chunk.toString(),
+        ).slice(-10000);
+      };
+      child.stdout.on("data", append);
+      child.stderr.on("data", append);
+      const terminate = () => {
+        try {
+          if (process.platform !== "win32" && child.pid)
+            process.kill(-child.pid, "SIGKILL");
+          else child.kill("SIGKILL");
+        } catch {}
+      };
+      let timedOut = false;
+      const timer = setTimeout(() => {
+        timedOut = true;
+        terminate();
+      }, 300000);
+      timer.unref();
+      process.once("exit", terminate);
+      const finish = (error?: Error) => {
+        clearTimeout(timer);
+        process.off("exit", terminate);
+        child.stdout.off("data", append);
+        child.stderr.off("data", append);
+        child.off("error", onError);
+        child.off("close", onClose);
+        if (error) reject(error);
+        else resolve();
+      };
+      const onError = (error: Error) => finish(error);
+      const onClose = (code: number | null) =>
+        finish(
+          timedOut
+            ? new Error(
+                "The update timed out after five minutes. Check the output before retrying.",
+              )
+            : code === 0
+              ? undefined
+              : new Error(
+                  `The updater exited with code ${code ?? "unknown"}. Check the output for details.`,
+                ),
+        );
+      child.once("error", onError);
+      child.once("close", onClose);
     });
-    const append = (chunk: Buffer) => {
-      state.output = stripVTControlCharacters(
-        (state.output || "") + chunk.toString(),
-      ).slice(-10000);
-    };
-    child.stdout.on("data", append);
-    child.stderr.on("data", append);
-    const terminate = () => {
-      try {
-        if (process.platform !== "win32" && child.pid)
-          process.kill(-child.pid, "SIGKILL");
-        else child.kill("SIGKILL");
-      } catch {}
-    };
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      terminate();
-    }, 300000);
-    timer.unref();
-    process.once("exit", terminate);
-    const finish = (error?: Error) => {
-      clearTimeout(timer);
-      process.off("exit", terminate);
-      child.stdout.off("data", append);
-      child.stderr.off("data", append);
-      child.off("error", onError);
-      child.off("close", onClose);
-      if (error) reject(error);
-      else resolve();
-    };
-    const onError = (error: Error) => finish(error);
-    const onClose = (code: number | null) =>
-      finish(
-        timedOut
-          ? new Error(
-              "The update timed out after five minutes. Check the output before retrying.",
-            )
-          : code === 0
-            ? undefined
-            : new Error(
-                `The updater exited with code ${code ?? "unknown"}. Check the output for details.`,
-              ),
-      );
-    child.once("error", onError);
-    child.once("close", onClose);
-  });
+  } finally {
+    if (directory) await rm(directory, { recursive: true, force: true });
+  }
 }
 
 export function startProviderUpdate(
@@ -374,7 +402,7 @@ export function startProviderUpdate(
       Object.assign(state, {
         binaryPath: plan.binaryPath,
         method: plan.method,
-        command: [plan.executable, ...plan.args!].join(" "),
+        command: plan.installer || [plan.executable, ...plan.args!].join(" "),
       });
       const before = await providers[provider].detect();
       state.message = "Checking for updates and installing…";

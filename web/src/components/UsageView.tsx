@@ -5,6 +5,7 @@ import { tokens, cost, providerLabels } from "../lib/format.ts";
 import { ProviderIcon } from "./ProviderIcon.tsx";
 import { SectionSidebar } from "./SectionSidebar.tsx";
 import type { UsageReport } from "../../../shared/features.ts";
+import { currentLocale, useI18n } from "../lib/i18n.ts";
 
 export function UsageView({
   sidebarOpen,
@@ -15,6 +16,7 @@ export function UsageView({
   onBack: () => void;
   navigation?: ReactNode;
 }) {
+  const t = useI18n();
   const [data, setData] = useState<UsageReport>();
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -35,12 +37,12 @@ export function UsageView({
     return () => controller.abort();
   }, [revision]);
   return (
-    <section className="section-view" aria-label="Usage">
+    <section className="section-view" aria-label={t("Usage")}>
       {sidebarOpen && (
-        <SectionSidebar title="Usage" onBack={onBack} navigation={navigation}>
+        <SectionSidebar title={t("Usage")} onBack={onBack} navigation={navigation}>
           <button className="section-link" aria-current="page">
             <BarChart3 size={17} />
-            <span>Overview</span>
+            <span>{t("Overview")}</span>
           </button>
         </SectionSidebar>
       )}
@@ -48,8 +50,8 @@ export function UsageView({
         <div className="settings-inner usage-inner">
           <header className="settings-heading">
             <div>
-              <h1>Usage</h1>
-              <p>Account allowance and tokens used in Citropy.</p>
+            <h1>{t("Usage")}</h1>
+            <p>{t("Account allowance and tokens used in Citropy.")}</p>
             </div>
             <button
               className="btn"
@@ -57,7 +59,7 @@ export function UsageView({
               onClick={() => setRevision((value) => value + 1)}
             >
               <RefreshCw size={15} className={busy ? "spin" : ""} />
-              Refresh
+              {t("Refresh")}
             </button>
           </header>
           {error && (
@@ -67,14 +69,14 @@ export function UsageView({
           )}
           {!data && !error ? (
             <div className="pane-empty" role="status">
-              Reading provider usage…
+              {t("Reading provider usage…")}
             </div>
           ) : (
             data && (
               <div className="feature-stack">
                 <section>
                   <h2 className="settings-group-heading">
-                    Remaining allowance
+                    {t("Remaining allowance")}
                   </h2>
                   <div className="allowance-grid">
                     {data.providers.map((entry) => (
@@ -83,78 +85,83 @@ export function UsageView({
                           <ProviderIcon provider={entry.provider} />
                           {providerLabels[entry.provider]}
                         </h3>
-                        {entry.windows.map((window) => (
+                        {entry.windows.map((window) => {
+                          const label = window.label.split(" · ").map((part) => {
+                            const hours = /^(\d+(?:\.\d+)?) hours$/.exec(part);
+                            return hours ? t("{hours} hours", { hours: hours[1]! }) : t(part);
+                          }).join(" · ");
+                          return (
                           <div className="allowance-window" key={window.label}>
                             <div>
-                              <span>{window.label}</span>
+                              <span>{label}</span>
                               <strong>
                                 {Math.max(0, 100 - window.usedPercent).toFixed(
                                   0,
                                 )}
-                                % left
+                                {t("% left")}
                               </strong>
                             </div>
                             <progress
                               value={Math.max(0, 100 - window.usedPercent)}
                               max={100}
-                              aria-label={`${window.label} remaining`}
+                              aria-label={t("{period} remaining", { period: label })}
                             />
                             <small>
                               {window.resetsAt
-                                ? `Resets ${new Date(window.resetsAt).toLocaleString()}`
-                                : "Reset time not reported"}
+                                ? t("Resets {date}", { date: new Date(window.resetsAt).toLocaleString(currentLocale()) })
+                                : t("Reset time not reported")}
                             </small>
                           </div>
-                        ))}
+                          );
+                        })}
                         {entry.error && (
-                          <p className="feature-note">{entry.error}</p>
+                          <p className="feature-note">{t(entry.error)}</p>
                         )}
                         <small>
-                          Checked{" "}
-                          {new Date(entry.updatedAt).toLocaleTimeString()}
+                          {t("Checked")}{" "}
+                          {new Date(entry.updatedAt).toLocaleTimeString(currentLocale())}
                         </small>
                       </article>
                     ))}
                   </div>
                   <p className="feature-note">
-                    Allowance is shared with other apps using the same account.
-                    Tokens below cover saved Citropy conversations.
+                    {t("Allowance is shared with other apps using the same account. Tokens below cover saved Citropy conversations.")}
                   </p>
                 </section>
                 <div className="metric-grid usage-metrics">
                   <div>
-                    <span>Input tokens</span>
+                    <span>{t("Input tokens")}</span>
                     <strong>{tokens(data.totals.input)}</strong>
                   </div>
                   <div>
-                    <span>Output tokens</span>
+                    <span>{t("Output tokens")}</span>
                     <strong>{tokens(data.totals.output)}</strong>
                   </div>
                   <div>
-                    <span>Cache read / write</span>
+                    <span>{t("Cache read / write")}</span>
                     <strong>
                       {tokens(data.totals.cacheRead)} /{" "}
                       {tokens(data.totals.cacheWrite)}
                     </strong>
                   </div>
                   <div>
-                    <span>Reported cost</span>
+                    <span>{t("Reported cost")}</span>
                     <strong>
                       {data.totals.costUsd
                         ? cost(data.totals.costUsd)
-                        : "Not reported"}
+                        : t("Not reported")}
                     </strong>
                   </div>
                 </div>
                 <section>
                   <div className="feature-section-heading">
-                    <h2>Conversation usage</h2>
+                    <h2>{t("Conversation usage")}</h2>
                     <select
-                      aria-label="Filter usage by provider"
+                      aria-label={t("Filter usage by provider")}
                       value={provider}
                       onChange={(event) => setProvider(event.target.value)}
                     >
-                      <option value="">All providers</option>
+                      <option value="">{t("All providers")}</option>
                       <option value="claude">Claude Code</option>
                       <option value="codex">Codex</option>
                       <option value="opencode">OpenCode</option>
@@ -164,12 +171,12 @@ export function UsageView({
                     <table className="feature-table">
                       <thead>
                         <tr>
-                          <th>Conversation</th>
-                          <th>Input</th>
-                          <th>Output</th>
-                          <th>Cache read</th>
-                          <th>Cache write</th>
-                          <th>Cost</th>
+                          <th>{t("Conversation")}</th>
+                          <th>{t("Input")}</th>
+                          <th>{t("Output")}</th>
+                          <th>{t("Cache read")}</th>
+                          <th>{t("Cache write")}</th>
+                          <th>{t("Cost")}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -186,7 +193,7 @@ export function UsageView({
                                 </strong>
                                 <small>
                                   {providerLabels[thread.provider]} ·{" "}
-                                  {thread.model || "Model not reported"}
+                                  {thread.model || t("Model not reported")}
                                 </small>
                               </td>
                               <td>

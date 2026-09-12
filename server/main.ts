@@ -1,5 +1,6 @@
 import { assertApplicationReady, lockForAppUpdate, unlockAppUpdate } from "./update-lock.ts";
-import { providerUpdating } from "./providers/maintenance.ts";
+import { providerUpdating, providerMaintenance } from "./providers/maintenance.ts";
+import { notifyUpdateAvailable } from "./update-notifications.ts";
 import { handleFeatures } from "./features.ts";
 import { computerState, stopComputer } from "./computer.ts";
 import { workspacePath, chooseThreadWorkspace } from "./workspaces.ts";
@@ -27,6 +28,7 @@ import {
   attachDesktop,
   authorizeDesktop,
   desktopRequest,
+  desktopEvents,
 } from "./desktop.ts";
 import { panelList, openPanel, closePanel } from "./panels.ts";
 import { describeProviders } from "./providers/index.ts";
@@ -660,8 +662,19 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
   socket.on("close", unsubscribe);
 });
 
+desktopEvents.on("event", (event) => {
+  if (event.type === "update.available" && typeof event.version === "string") notifyUpdateAvailable("Citropy", event.version, "Application");
+});
+
+let lastUpdateCheck = 0;
+const checkUpdates = () => {
+  if (Date.now() - lastUpdateCheck < 4 * 60 * 60 * 1000) return;
+  lastUpdateCheck = Date.now();
+  void providerMaintenance().catch(() => {});
+};
 const providerTimer = setInterval(() => {
   if (wss.clients.size) void refreshProviders();
+  if (wss.clients.size) checkUpdates();
 }, 60_000);
 providerTimer.unref();
 
@@ -677,6 +690,7 @@ server.listen(port, host, async () => {
       process.stderr.write(`${error.message}\n`),
     );
   await refreshProviders();
+  checkUpdates();
   process.send?.({ t: "ready" });
   const available = providerInfo.filter((entry) => entry.available).map((entry) => entry.label);
   process.stdout.write(`\n  Citropy listening on ${origin}\n`);

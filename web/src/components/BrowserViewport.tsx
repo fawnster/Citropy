@@ -9,6 +9,7 @@ import {
 } from "lucide-react";
 import { Menu } from "./Menu.tsx";
 import type { BrowserAction, BrowserState } from "../../../shared/workbench.ts";
+import { useI18n } from "../lib/i18n.ts";
 
 const presets = [
   { id: "desktop", label: "Desktop", width: 1920, height: 1080, mobile: false, Icon: Monitor },
@@ -24,6 +25,7 @@ interface Props {
 }
 
 export function BrowserViewport({ state, disabled, onResize }: Props) {
+  const t = useI18n();
   const modeHint = useId();
   const [custom, setCustom] = useState(false);
   const [width, setWidth] = useState(String(state.width));
@@ -48,21 +50,21 @@ export function BrowserViewport({ state, disabled, onResize }: Props) {
     <div className="browser-viewport">
       <div className="browser-viewport-bar">
         <Menu
-          header="Page resolution"
+          header={t("Page resolution")}
           width={244}
           trigger={({ id, open, toggle }) => (
             <button
               id={id}
               type="button"
               className="browser-viewport-trigger"
-              aria-label="Page resolution"
+              aria-label={t("Page resolution")}
               aria-haspopup="menu"
               aria-expanded={open}
               disabled={disabled}
               onClick={toggle}
             >
               <Icon size={14} className={`browser-device-${selected?.id ?? "custom"}`} />
-              <span>{selected?.label ?? "Custom"}</span>
+              <span>{selected ? t(selected.label) : t("Custom")}</span>
               <span className="browser-viewport-size">{state.width} × {state.height}</span>
               <ChevronDown size={12} />
             </button>
@@ -70,7 +72,7 @@ export function BrowserViewport({ state, disabled, onResize }: Props) {
           items={[
             ...presets.map(({ id, label, width, height, mobile, Icon }) => ({
               id,
-              label,
+              label: t(label),
               hint: `${width} × ${height}`,
               icon: <Icon size={16} className={`browser-device-${id}`} />,
               selected: selected?.id === id,
@@ -81,8 +83,8 @@ export function BrowserViewport({ state, disabled, onResize }: Props) {
             })),
             {
               id: "custom",
-              label: "Custom size",
-              hint: "Set the page width and height",
+              label: t("Custom size"),
+              hint: t("Set the page width and height"),
               icon: <SlidersHorizontal size={16} className="browser-device-custom" />,
               selected: !selected,
               onSelect: () => {
@@ -96,8 +98,8 @@ export function BrowserViewport({ state, disabled, onResize }: Props) {
         <button
           type="button"
           className="icon-btn"
-          aria-label="Rotate page viewport"
-          title="Rotate viewport"
+          aria-label={t("Rotate page viewport")}
+          title={t("Rotate viewport")}
           disabled={disabled || state.height < 320 || state.width > 2160}
           onClick={() => onResize({
             action: "resize",
@@ -112,14 +114,14 @@ export function BrowserViewport({ state, disabled, onResize }: Props) {
       <label className="browser-mode">
         <Smartphone size={15} className="browser-device-phone" />
         <span>
-          <span>Mobile mode</span>
-          <small id={modeHint}>Mobile sites and touch. Reloads when changed.</small>
+          <span>{t("Mobile mode")}</span>
+          <small id={modeHint}>{t("Mobile sites and touch. Reloads when changed.")}</small>
         </span>
         <input
           className="setting-switch"
           type="checkbox"
           role="switch"
-          aria-label="Mobile mode"
+          aria-label={t("Mobile mode")}
           aria-describedby={modeHint}
           checked={Boolean(state.mobile)}
           disabled={disabled || Boolean(state.dialog)}
@@ -143,7 +145,7 @@ export function BrowserViewport({ state, disabled, onResize }: Props) {
         >
           <div className="browser-viewport-fields">
             <label>
-              Width
+              {t("Width")}
               <input
                 type="number"
                 min={320}
@@ -157,7 +159,7 @@ export function BrowserViewport({ state, disabled, onResize }: Props) {
             </label>
             <span aria-hidden="true">×</span>
             <label>
-              Height
+              {t("Height")}
               <input
                 type="number"
                 min={240}
@@ -172,10 +174,10 @@ export function BrowserViewport({ state, disabled, onResize }: Props) {
           </div>
           <div className="browser-viewport-actions">
             <button type="button" className="btn" onClick={() => setCustom(false)}>
-              Cancel
+              {t("Cancel")}
             </button>
             <button type="submit" className="btn primary" disabled={disabled || !valid}>
-              Apply size
+              {t("Apply size")}
             </button>
           </div>
         </form>

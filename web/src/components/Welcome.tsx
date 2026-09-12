@@ -1,9 +1,11 @@
+import { useI18n } from "../lib/i18n.ts";
 import { Folder, MessageSquarePlus } from "./icons.ts";
 import { createThread, openProject, chooseWorkspace } from "../lib/actions.ts";
 import { shortPath } from "../lib/format.ts";
 import { useApp } from "../lib/store.ts";
 
 export function Welcome() {
+  const t = useI18n();
   const projects = useApp((state) => state.projects);
   const providers = useApp((state) => state.providers);
   const home = useApp((state) => state.home);
@@ -15,29 +17,27 @@ export function Welcome() {
   return (
     <div className="welcome">
       <div className="welcome-inner">
-        <h1>{hasProject ? "Start a thread" : "Open a workspace"}</h1>
+        <h1>{hasProject ? t("Start a thread") : t("Open a workspace")}</h1>
         <p className="lede">
           {hasProject
-            ? "Describe a change, work with your provider, and review the result here."
-            : "Choose a project folder to start working with your coding provider."}
+            ? t("Describe a change, work with your provider, and review the result here.")
+            : t("Choose a project folder to start working with your coding provider.")}
         </p>
 
         {hasProject ? (
           <button className="btn" type="button" data-variant="primary" onClick={() => createThread()} disabled={!providers.some((provider) => provider.available && provider.enabled)}>
-            <MessageSquarePlus size={14} />
-            New thread
-          </button>
+            <MessageSquarePlus size={14} />{t("New thread")}</button>
         ) : (
           <button className="btn" type="button" data-variant="primary" onClick={chooseWorkspace} disabled={choosing}>
             <Folder size={16} />
-            {choosing ? "Choose a folder in the system dialog…" : "Choose folder…"}
+            {choosing ? t("Choose a folder in the system dialog…") : t("Choose folder…")}
           </button>
         )}
 
-        {hasProject && !providers.some((provider) => provider.available && provider.enabled) && <p className="settings-note">Enable a provider in Settings to start a conversation.</p>}
+        {hasProject && !providers.some((provider) => provider.available && provider.enabled) && <p className="settings-note">{t("Enable a provider in Settings to start a conversation.")}</p>}
         {projects.length > 0 && (
           <div className="recent-list">
-            <span className="eyebrow">Recent</span>
+            <span className="eyebrow">{t("Recent")}</span>
             {projects.slice(0, 6).map((project) => (
               <button
                 key={project.id}
@@ -52,15 +52,6 @@ export function Welcome() {
             ))}
           </div>
         )}
-
-        <div className="provider-row">
-          {providers.filter((provider) => provider.enabled).map((provider) => (
-            <span key={provider.id} className="pill" title={provider.version ?? provider.binary}>
-              <span className="status-dot" data-tone={provider.available ? "live" : undefined} />
-              {provider.label}
-            </span>
-          ))}
-        </div>
       </div>
     </div>
   );

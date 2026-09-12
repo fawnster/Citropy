@@ -21,7 +21,9 @@ import {
   UserRound,
 } from "lucide-react";
 import { SectionSidebar } from "../SectionSidebar.tsx";
+import { WorkspaceSelector } from "../WorkspaceSelector.tsx";
 import { useApp, selectProject, viewportWidth } from "../../lib/store.ts";
+import { useI18n } from "../../lib/i18n.ts";
 import { useGitHub } from "../../lib/use-github.ts";
 import { github } from "../../lib/actions.ts";
 import { GitHubItems } from "./GitHubItems.tsx";
@@ -62,6 +64,7 @@ export function GitHub({
   navigation?: ReactNode;
   status: ReturnType<typeof useGitHub<"status">>;
 }) {
+  const t = useI18n();
   const connected = useApp((state) => state.connected);
   const projectId = useApp((state) => state.activeProjectId);
   const project = useApp((state) =>
@@ -91,9 +94,9 @@ export function GitHub({
     section === "Account" ||
     sections.find((entry) => entry.name === section)?.global;
   return (
-    <section className="section-view github-view" aria-label="GitHub">
+    <section className="section-view github-view" aria-label={t("GitHub")}>
       {sidebarOpen && (
-        <SectionSidebar title="GitHub" onBack={onBack} navigation={navigation}>
+        <SectionSidebar title="GitHub" onBack={onBack} navigation={navigation} workspace={<WorkspaceSelector />}>
           {sections.map(({ name, icon: Icon, global }) => (
             <button
               className="section-link"
@@ -111,7 +114,7 @@ export function GitHub({
           ))}
           {repo && (
             <div className="github-sidebar-repo">
-              <span>Selected repository</span>
+              <span>{t("Selected repository")}</span>
               <strong>{repo}</strong>
             </div>
           )}
@@ -120,8 +123,8 @@ export function GitHub({
             className="github-sidebar-account"
             aria-label={
               status.data?.account
-                ? `Account settings for ${status.data.account.login}`
-                : "Connect GitHub account"
+                ? t("Account settings for {name}", { name: status.data.account.login })
+                : t("Connect GitHub account")
             }
             aria-current={section === "Account" ? "page" : undefined}
             onClick={() => {
@@ -134,7 +137,7 @@ export function GitHub({
             ) : (
               <UserRound size={21} />
             )}
-            <span>{status.data?.account?.login ?? "Connect GitHub"}</span>
+            <span>{status.data?.account?.login ?? t("Connect GitHub")}</span>
             {status.data?.account && <Check size={14} />}
           </button>
         </SectionSidebar>
@@ -147,10 +150,10 @@ export function GitHub({
             <p>
               {global
                 ? section === "Repositories"
-                  ? "Your repositories and the projects you contribute to."
+                  ? t("Your repositories and the projects you contribute to.")
                   : section === "Notifications"
-                    ? "Updates that need your attention across GitHub."
-                    : "Your GitHub connection on this computer."
+                    ? t("Updates that need your attention across GitHub.")
+                    : t("Your GitHub connection on this computer.")
                 : repository.data?.description || section}
             </p>
           </div>
@@ -160,13 +163,9 @@ export function GitHub({
                 className="btn"
                 onClick={() => setSection("Repositories")}
               >
-                <BookOpen size={15} />
-                Browse
-              </button>
+                <BookOpen size={15} />{" "}{t("Browse")}{" "}</button>
               <button className="btn" onClick={() => setClone(repo)}>
-                <Download size={15} />
-                Clone
-              </button>
+                <Download size={15} />{" "}{t("Clone")}{" "}</button>
               <GitHubLink href={repository.data.html_url}>GitHub</GitHubLink>
             </div>
           )}
@@ -174,7 +173,7 @@ export function GitHub({
         {!connected && (
           <div className="github-connection" role="status">
             <LoaderCircle size={16} className="git-spinner" />
-            <span>Reconnecting to Citropy… Your loaded pages will stay here.</span>
+            <span>{t("Reconnecting to Citropy… Your loaded pages will stay here.")}</span>
           </div>
         )}
         <GitHubFeedback
@@ -191,13 +190,13 @@ export function GitHub({
             <Github size={38} />
             <h2>
               {status.data.installed
-                ? "Connect your GitHub account"
-                : "Install GitHub CLI"}
+                ? t("Connect your GitHub account")
+                : t("Install GitHub CLI")}
             </h2>
             <p>
               {status.data.installed
-                ? "Citropy uses the GitHub account signed in on this computer. Sign in, then refresh the connection."
-                : "Install GitHub CLI to connect repositories, pull requests, and issues."}
+                ? t("Citropy uses the GitHub account signed in on this computer. Sign in, then refresh the connection.")
+                : t("Install GitHub CLI to connect repositories, pull requests, and issues.")}
             </p>
             {status.data.installed ? (
               <button
@@ -210,20 +209,14 @@ export function GitHub({
                     setMessage((error as Error).message);
                   }
                 }}
-              >
-                Sign in to GitHub
-              </button>
+              >{" "}{t("Sign in to GitHub")}{" "}</button>
             ) : (
-              <GitHubLink href="https://cli.github.com/">
-                Get GitHub CLI
-              </GitHubLink>
+              <GitHubLink href="https://cli.github.com/">{" "}{t("Get GitHub CLI")}{" "}</GitHubLink>
             )}
             <button className="btn" onClick={status.refresh}>
-              <RefreshCw size={15} />
-              Refresh connection
-            </button>
+              <RefreshCw size={15} />{" "}{t("Refresh connection")}{" "}</button>
             <details>
-              <summary>Connection details</summary>
+              <summary>{t("Connection details")}</summary>
               <pre>{status.data.error}</pre>
             </details>
           </div>
@@ -262,43 +255,34 @@ export function GitHub({
                     <p>@{status.data.account.login}</p>
                   </div>
                   <span className="github-state" data-tone="good">
-                    <Check size={16} />
-                    Connected
-                  </span>
+                    <Check size={16} />{" "}{t("Connected")}{" "}</span>
                 </div>
                 <div className="github-account-details">
                   <div>
-                    <strong>GitHub host</strong>
+                    <strong>{t("GitHub host")}</strong>
                     <span>github.com</span>
                   </div>
                   <div>
-                    <strong>Authentication</strong>
-                    <span>GitHub CLI on this computer</span>
+                    <strong>{t("Authentication")}</strong>
+                    <span>{t("GitHub CLI on this computer")}</span>
                   </div>
                   <div>
-                    <strong>Workspace</strong>
+                    <strong>{t("Workspace")}</strong>
                     <span>
                       {status.data.repositories[0]?.repo ??
-                        "No GitHub remote connected"}
+                        t("No GitHub remote connected")}
                     </span>
                   </div>
                 </div>
-                <p className="github-meta">
-                  Citropy uses your existing GitHub permissions. Credentials stay
-                  on this computer and are never sent to the browser.
-                </p>
+                <p className="github-meta">{" "}{t("Citropy uses your existing GitHub permissions. Credentials stay on this computer and are never sent to the browser.")}{" "}</p>
                 <div className="github-detail-actions">
                   <button
                     className="btn"
                     onClick={status.refresh}
                     disabled={status.loading}
                   >
-                    <RefreshCw size={14} />
-                    Refresh connection
-                  </button>
-                  <GitHubLink href="https://github.com/settings/profile">
-                    Manage account
-                  </GitHubLink>
+                    <RefreshCw size={14} />{" "}{t("Refresh connection")}{" "}</button>
+                  <GitHubLink href="https://github.com/settings/profile">{" "}{t("Manage account")}{" "}</GitHubLink>
                 </div>
               </div>
             )}
@@ -324,20 +308,16 @@ export function GitHub({
                         {repository.data.forks_count}
                       </span>
                       <span>
-                        {repository.data.private ? "Private" : "Public"}
+                        {repository.data.private ? t("Private") : t("Public")}
                       </span>
-                      {repository.data.archived && <span>Archived</span>}
+                      {repository.data.archived && <span>{t("Archived")}</span>}
                       {projectId &&
                         !status.data.repositories.some(
                           (remote) => remote.repo === repo,
                         ) && (
-                          <button onClick={() => setConnecting(true)}>
-                            Connect workspace
-                          </button>
+                          <button onClick={() => setConnecting(true)}>{" "}{t("Connect workspace")}{" "}</button>
                         )}
-                      <button onClick={() => setFork(true)}>
-                        Fork repository
-                      </button>
+                      <button onClick={() => setFork(true)}>{" "}{t("Fork repository")}{" "}</button>
                     </div>
                     {section === "Pull requests" || section === "Issues" ? (
                       <GitHubItems
@@ -367,9 +347,9 @@ export function GitHub({
       </div>
       {clone && (
         <GitHubDialog
-          title="Clone repository"
-          description={`Clone ${clone} into a new folder named ${clone.split("/")[1]}. Choose its parent folder in the system file explorer.`}
-          submitLabel="Choose folder and clone"
+          title={t("Clone repository")}
+          description={t("Clone {repository} into a new folder named {folder}. Choose its parent folder in the system file explorer.", { repository: clone, folder: clone.split("/")[1]! })}
+          submitLabel={t("Choose folder and clone")}
           onClose={() => setClone(null)}
           onSubmit={async () => {
             const result = await github("clone", { repo: clone });
@@ -379,17 +359,14 @@ export function GitHub({
             }
           }}
         >
-          <p className="github-meta">
-            The repository will open as a workspace when the clone finishes.
-            Existing folders will be preserved.
-          </p>
+          <p className="github-meta">{" "}{t("The repository will open as a workspace when the clone finishes. Existing folders will be preserved.")}{" "}</p>
         </GitHubDialog>
       )}
       {connecting && projectId && (
         <GitHubDialog
-          title="Connect workspace"
-          description={`Connect ${project?.name} to ${repo}. This adds a Git remote without pulling or pushing any files.`}
-          submitLabel="Connect repository"
+          title={t("Connect workspace")}
+          description={t("Connect {workspace} to {repository}. This adds a Git remote without pulling or pushing any files.", { workspace: project?.name ?? "", repository: repo })}
+          submitLabel={t("Connect repository")}
           onClose={() => setConnecting(false)}
           onSubmit={async (data) => {
             setMessage(
@@ -404,17 +381,15 @@ export function GitHub({
             status.refresh();
           }}
         >
-          <label className="git-field">
-            Remote name
-            <input name="remote" defaultValue="origin" required />
+          <label className="git-field">{" "}{t("Remote name")}{" "}<input name="remote" defaultValue="origin" required />
           </label>
         </GitHubDialog>
       )}
       {fork && (
         <GitHubDialog
-          title="Fork repository"
-          description={`Create a copy of ${repo} in your GitHub account.`}
-          submitLabel="Create fork"
+          title={t("Fork repository")}
+          description={t("Create a copy of {repository} in your GitHub account.", { repository: repo })}
+          submitLabel={t("Create fork")}
           onClose={() => setFork(false)}
           onSubmit={async () => {
             const result = await github("mutate", {
@@ -447,6 +422,7 @@ function RepositoryBrowser({
   hasCommits: boolean;
   onGit: () => void;
 }) {
+  const t = useI18n();
   const [page, setPage] = useState(1);
   const [query, setQuery] = useState("");
   const [search, setSearch] = useState("");
@@ -463,13 +439,11 @@ function RepositoryBrowser({
             <strong>{workspaceName}</strong>
             <p>
               {hasCommits
-                ? "Publish this workspace, or choose a repository and connect it."
-                : "Create your first commit in Source control before publishing this workspace."}
+                ? t("Publish this workspace, or choose a repository and connect it.")
+                : t("Create your first commit in Source control before publishing this workspace.")}
             </p>
           </div>
-          <button className="btn" onClick={onGit}>
-            Source control
-          </button>
+          <button className="btn" onClick={onGit}>{" "}{t("Source control")}{" "}</button>
           <button
             className="btn"
             disabled={!hasCommits}
@@ -477,14 +451,12 @@ function RepositoryBrowser({
               setPublishing(true);
               setCreating(true);
             }}
-          >
-            Publish workspace
-          </button>
+          >{" "}{t("Publish workspace")}{" "}</button>
         </div>
       )}
       {workspace.length > 0 && (
         <div className="github-workspace-repos">
-          <span>{workspaceName} workspace</span>
+          <span>{workspaceName}{" "}{t("workspace")}</span>
           {workspace.map((repo) => (
             <button className="btn" key={repo} onClick={() => onSelect(repo)}>
               <FolderGit2 size={15} />
@@ -504,29 +476,29 @@ function RepositoryBrowser({
         >
           <Search size={16} />
           <input
-            aria-label="Search repositories"
+            aria-label={t("Search repositories")}
             placeholder={
-              scope === "mine" ? "Find a repository…" : "Search all of GitHub…"
+              scope === "mine" ? t("Find a repository…") : t("Search all of GitHub…")
             }
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
-          <button className="btn">Search</button>
+          <button className="btn">{t("Search")}</button>
         </form>
         <select
-          aria-label="Repository scope"
+          aria-label={t("Repository scope")}
           value={scope}
           onChange={(event) => {
             setScope(event.target.value as typeof scope);
             setPage(1);
           }}
         >
-          <option value="mine">Your repositories</option>
-          <option value="all">All GitHub</option>
+          <option value="mine">{t("Your repositories")}</option>
+          <option value="all">{t("All GitHub")}</option>
         </select>
         <button
           className="icon-btn"
-          aria-label="Refresh repositories"
+          aria-label={t("Refresh repositories")}
           disabled={list.loading}
           onClick={list.refresh}
         >
@@ -540,9 +512,7 @@ function RepositoryBrowser({
             setCreating(true);
           }}
         >
-          <Plus size={15} />
-          New repository
-        </button>
+          <Plus size={15} />{" "}{t("New repository")}{" "}</button>
       </div>
       <GitHubFeedback
         error={list.error}
@@ -557,7 +527,7 @@ function RepositoryBrowser({
             <img
               className="github-repository-icon"
               src={repo.owner.avatar_url}
-              alt={`${repo.owner.login} avatar`}
+              alt={t("{name} avatar", { name: repo.owner.login })}
               loading="lazy"
               width={36}
               height={36}
@@ -571,22 +541,18 @@ function RepositoryBrowser({
               <div className="github-meta">
                 {repo.private ? (
                   <span>
-                    <LockKeyhole size={12} />
-                    Private
-                  </span>
+                    <LockKeyhole size={12} />{" "}{t("Private")}{" "}</span>
                 ) : (
-                  <span>Public</span>
+                  <span>{t("Public")}</span>
                 )}
                 {repo.language && <span>{repo.language}</span>}
-                {repo.fork && <span>Fork</span>}
-                {repo.archived && <span>Archived</span>}
-                <span>Updated {githubDate(repo.updated_at)}</span>
+                {repo.fork && <span>{t("Fork")}</span>}
+                {repo.archived && <span>{t("Archived")}</span>}
+                <span>{t("Updated {date}", { date: githubDate(repo.updated_at) })}</span>
               </div>
             </button>
             <button className="btn" onClick={() => onClone(repo.full_name)}>
-              <Download size={14} />
-              Clone
-            </button>
+              <Download size={14} />{" "}{t("Clone")}{" "}</button>
           </article>
         ))}
       </div>
@@ -599,13 +565,13 @@ function RepositoryBrowser({
       )}
       {creating && (
         <GitHubDialog
-          title={publishing ? "Publish workspace" : "Create repository"}
+          title={publishing ? t("Publish workspace") : t("Create repository")}
           description={
             publishing
-              ? `Create a GitHub repository for ${workspaceName} and push the current branch. Only committed files are published.`
-              : "Create a repository in your GitHub account with an initial README. You can clone it after creation."
+              ? t("Create a GitHub repository for {workspace} and push the current branch. Only committed files are published.", { workspace: workspaceName ?? "" })
+              : t("Create a repository in your GitHub account with an initial README. You can clone it after creation.")
           }
-          submitLabel={publishing ? "Create and publish" : "Create repository"}
+          submitLabel={publishing ? t("Create and publish") : t("Create repository")}
           onClose={() => setCreating(false)}
           onSubmit={async (data) => {
             const input = {
@@ -620,24 +586,18 @@ function RepositoryBrowser({
             onSelect(result.full_name);
           }}
         >
-          <label className="git-field">
-            Repository name
-            <input
+          <label className="git-field">{" "}{t("Repository name")}{" "}<input
               name="name"
-              placeholder="my-project"
+              placeholder={t("my-project")}
               required
               pattern="[A-Za-z0-9_.\-]+"
             />
           </label>
-          <label className="git-field">
-            Description
-            <textarea name="description" rows={3} />
+          <label className="git-field">{" "}{t("Description")}{" "}<textarea name="description" rows={3} />
           </label>
-          <label className="git-field">
-            Visibility
-            <select name="visibility" defaultValue="private">
-              <option value="private">Private</option>
-              <option value="public">Public</option>
+          <label className="git-field">{" "}{t("Visibility")}{" "}<select name="visibility" defaultValue="private">
+              <option value="private">{t("Private")}</option>
+              <option value="public">{t("Public")}</option>
             </select>
           </label>
         </GitHubDialog>
@@ -647,6 +607,7 @@ function RepositoryBrowser({
 }
 
 function Notifications({ onSelect }: { onSelect: (repo: string) => void }) {
+  const t = useI18n();
   const [page, setPage] = useState(1);
   const [all, setAll] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
@@ -663,12 +624,10 @@ function Notifications({ onSelect }: { onSelect: (repo: string) => void }) {
               setAll(event.target.checked);
               setPage(1);
             }}
-          />
-          Include read notifications
-        </label>
+          />{" "}{t("Include read notifications")}{" "}</label>
         <button
           className="icon-btn"
-          aria-label="Refresh notifications"
+          aria-label={t("Refresh notifications")}
           disabled={list.loading}
           onClick={list.refresh}
         >
@@ -700,15 +659,13 @@ function Notifications({ onSelect }: { onSelect: (repo: string) => void }) {
             </div>
             <GitHubLink
               href={`https://github.com/notifications?query=repo%3A${encodeURIComponent(notification.repository.full_name)}`}
-            >
-              Open
-            </GitHubLink>
+            >{" "}{t("Open")}{" "}</GitHubLink>
             {notification.unread && (
               <button
                 className="icon-btn"
                 disabled={Boolean(busy)}
-                title="Mark as read"
-                aria-label={`Mark ${notification.subject.title} as read`}
+                title={t("Mark as read")}
+                aria-label={t("Mark {title} as read", { title: notification.subject.title })}
                 onClick={async () => {
                   setBusy(notification.id);
                   setError("");

@@ -5,8 +5,10 @@ import { confirmAction, useApp } from "../lib/store.ts";
 import { ProviderIcon } from "./ProviderIcon.tsx";
 import { Prose } from "./parts/Prose.tsx";
 import type { SkillInfo } from "../../../shared/features.ts";
+import { useI18n } from "../lib/i18n.ts";
 
 export function SkillsSettings() {
+  const t = useI18n();
   const projects = useApp((state) => state.projects);
   const active = useApp((state) => state.activeProjectId);
   const [projectId, setProjectId] = useState(active ?? "");
@@ -51,12 +53,12 @@ export function SkillsSettings() {
     if (
       action === "delete" &&
       !(await confirmAction({
-        title: `Delete ${skill.name}?`,
+        title: t("Delete {name}?", { name: skill.name }),
         context: skill.path,
         description: skill.scope === "builtin"
-          ? "Remove this shared skill from all Citropy providers. Its instructions can be restored in Computer use settings."
-          : "Remove this installed skill from its provider. Citropy keeps a recovery copy of its instructions in deleted-skills.",
-        label: "Delete skill",
+          ? t("Remove this shared skill from all Citropy providers. Its instructions can be restored in Computer use settings.")
+          : t("Remove this installed skill from its provider. Citropy keeps a recovery copy of its instructions in deleted-skills."),
+        label: t("Delete skill"),
         danger: true,
       }))
     )
@@ -89,34 +91,32 @@ export function SkillsSettings() {
         <label className="feature-search">
           <Search size={16} />
           <input
-            aria-label="Search skills"
-            placeholder="Find a skill…"
+            aria-label={t("Search skills")}
+            placeholder={t("Find a skill…")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
         <select
-          aria-label="Filter skills by provider"
+          aria-label={t("Filter skills by provider")}
           value={provider}
           onChange={(event) => setProvider(event.target.value)}
         >
-          <option value="">All providers</option>
+          <option value="">{t("All providers")}</option>
           <option value="claude">Claude Code</option>
           <option value="codex">Codex</option>
           <option value="opencode">OpenCode</option>
         </select>
         <button
           className="icon-btn"
-          aria-label="Refresh skills"
+          aria-label={t("Refresh skills")}
           disabled={Boolean(busy)}
           onClick={() => setRevision((value) => value + 1)}
         >
           <RefreshCw size={17} />
         </button>
       </div>
-      <label className="feature-field">
-        Include project skills
-        <select
+      <label className="feature-field">{" "}{t("Include project skills")}{" "}<select
           disabled={Boolean(busy)}
           value={projectId}
           onChange={(event) => {
@@ -124,7 +124,7 @@ export function SkillsSettings() {
             setExpanded("");
           }}
         >
-          <option value="">Personal and plugin skills only</option>
+          <option value="">{t("Personal and plugin skills only")}</option>
           {projects.map((project) => (
             <option key={project.id} value={project.id}>
               {project.name}
@@ -133,30 +133,13 @@ export function SkillsSettings() {
         </select>
       </label>
       <p className="feature-note">
-        {filtered.filter((skill) => skill.enabled).length} enabled ·{" "}
-        {filtered.length} installed. Changes apply to the installed skill,
-        including its provider CLI. Finish active provider conversations before
-        changing skills.
-      </p>
+        {filtered.filter((skill) => skill.enabled).length}{" "}{t("enabled ·")}{" "}
+        {filtered.length}{" "}{t("installed. Changes apply to the installed skill, including its provider CLI. Finish active provider conversations before changing skills.")}{" "}</p>
       <details className="skills-about">
-        <summary>How skills are shared</summary>
-        <p>
-          Personal skills are available across projects for their provider.
-          Project skills belong to the selected workspace. Plugin skills come
-          from installed plugins.
-        </p>
-        <p>
-          Citropy also reads shared skills from <code>~/.agents/skills</code>{" "}
-          and the workspace’s <code>.agents/skills</code>. The provider filter
-          shows which providers can use each skill. Codex uses its own reported
-          inventory. A shared file can affect several providers when disabled or
-          deleted.
-        </p>
-        <p>
-          Type <code>@</code> in a conversation to choose an enabled skill.
-          Citropy passes its instructions or native skill reference to that
-          conversation’s provider.
-        </p>
+        <summary>{t("How skills are shared")}</summary>
+        <p>{" "}{t("Personal skills are available across projects for their provider. Project skills belong to the selected workspace. Plugin skills come from installed plugins.")}{" "}</p>
+        <p>{" "}{t("Citropy also reads shared skills from")}{" "}<code>~/.agents/skills</code>{" "}{" "}{t("and the workspace’s")}{" "}<code>.agents/skills</code>{t(". The provider filter shows which providers can use each skill. Codex uses its own reported inventory. A shared file can affect several providers when disabled or deleted.")}{" "}</p>
+        <p>{" "}{t("Type")}{" "}<code>@</code>{" "}{t("in a conversation to choose an enabled skill. Citropy passes its instructions or native skill reference to that conversation’s provider.")}{" "}</p>
       </details>
       {error && (
         <p className="feature-error" role="alert">
@@ -180,16 +163,16 @@ export function SkillsSettings() {
                   {skill.name}
                   <ChevronDown size={14} />
                 </strong>
-                <span>{skill.description || "No description provided."}</span>
+                <span>{skill.description || t("No description provided.")}</span>
                 <small>
-                  {skill.scope === "builtin" ? "Citropy · All providers" : skill.scope} · {skill.path}
+                  {skill.scope === "builtin" ? t("Citropy · All providers") : t(skill.scope)} · {skill.path}
                 </small>
               </button>
               <input
                 className="setting-switch"
                 type="checkbox"
                 role="switch"
-                aria-label={`Enable ${skill.name} for ${skill.provider}`}
+                aria-label={t("Enable {name} for {provider}", { name: skill.name, provider: skill.provider })}
                 checked={skill.enabled}
                 disabled={Boolean(busy)}
                 onChange={() =>
@@ -199,7 +182,7 @@ export function SkillsSettings() {
               <button
                 type="button"
                 className="icon-btn"
-                aria-label={`Delete ${skill.name} for ${skill.provider}`}
+                aria-label={t("Delete {name} for {provider}", { name: skill.name, provider: skill.provider })}
                 disabled={Boolean(busy)}
                 onClick={() => change(skill, "delete")}
               >
@@ -208,7 +191,7 @@ export function SkillsSettings() {
             </div>
             {expanded === skill.id && (
               <div className="skill-content">
-                <Prose text={content || "Loading instructions…"} live={false} />
+                <Prose text={content || t("Loading instructions…")} live={false} />
               </div>
             )}
           </article>
@@ -219,10 +202,10 @@ export function SkillsSettings() {
           <BookOpen size={28} />
           <p>
             {busy === "loading"
-              ? "Reading installed skills…"
+              ? t("Reading installed skills…")
               : query
-                ? "No matching skills."
-                : "No skills found in these locations."}
+                ? t("No matching skills.")
+                : t("No skills found in these locations.")}
           </p>
         </div>
       )}

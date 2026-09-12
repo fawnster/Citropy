@@ -1,6 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none" role="img" aria-labelledby="title description">
   <title id="title">Citropy</title>
   <desc id="description">A yellow lemon half breaking into square pixels.</desc>
+  <rect x="4" y="4" width="248" height="248" rx="54" fill="#171717"/>
   <g fill="#F4D34E">
     <path fill-rule="evenodd" d="M120 36c-49 0-88 41-88 92s39 92 88 92V36Zm0 12c-41 0-76 34-76 80s35 80 76 80V48Z"/>
     <path d="M110 59c-21 3-38 14-49 33l49 27V59Zm-55 45c-8 15-8 33 0 48l49-24-49-24Zm6 60c11 19 28 30 49 33v-60l-49 27Z"/>

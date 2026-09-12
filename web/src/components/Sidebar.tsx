@@ -4,6 +4,9 @@ import {
   Pin,
   Clock,
   GitPullRequest,
+  CircleCheck,
+  Archive,
+  MessagesSquare,
 } from "lucide-react";
 import { ConversationMenu } from "./ConversationMenu.tsx";
 import { api, reportError } from "../lib/api.ts";
@@ -15,10 +18,6 @@ import {
   Search,
   Folder,
   ChevronRight,
-  ChevronDown,
-  FolderOpen,
-  Plus,
-  X,
   Check,
   RotateCcw,
 } from "./icons.ts";
@@ -27,17 +26,16 @@ import type { ThreadMeta } from "../../../shared/protocol.ts";
 import { ThreadPulse } from "./ThreadPulse.tsx";
 import { ResizeHandle } from "./ResizeHandle.tsx";
 import { ProviderIcon } from "./ProviderIcon.tsx";
-import { Menu } from "./Menu.tsx";
+import { WorkspaceSelector } from "./WorkspaceSelector.tsx";
 import {
-  chooseWorkspace,
-  closeProject,
   createThread,
   loadThread,
   removeThread,
   finishThread,
 } from "../lib/actions.ts";
 import { selectProject, selectThread, useApp } from "../lib/store.ts";
-import { modelLabel, providerLabels, shortPath } from "../lib/format.ts";
+import { modelLabel, providerLabels } from "../lib/format.ts";
+import { currentLocale, useI18n } from "../lib/i18n.ts";
 
 export function Sidebar({
   onSettings,
@@ -52,16 +50,16 @@ export function Sidebar({
   onConversation: () => void;
   onUsage: () => void;
 }) {
+  const t = useI18n();
   const threadMap = useApp((state) => state.threads);
   const order = useApp((state) => state.threadOrder);
   const activeProjectId = useApp((state) => state.activeProjectId);
   const activeThreadId = useApp((state) => state.activeThreadId);
   const providers = useApp((state) => state.providers);
   const projects = useApp((state) => state.projects);
-  const home = useApp((state) => state.home);
-  const choosingWorkspace = useApp((state) => state.choosingWorkspace);
-  const project = projects.find((entry) => entry.id === activeProjectId);
   const [finishedOpen, setFinishedOpen] = useState(false);
+  const [pinnedOpen, setPinnedOpen] = useState(true);
+  const [currentOpen, setCurrentOpen] = useState(true);
   const [snoozedOpen, setSnoozedOpen] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [dragging, setDragging] = useState<string>();
@@ -69,9 +67,17 @@ export function Sidebar({
   while (activeRoot?.parentThreadId)
     activeRoot = threadMap[activeRoot.parentThreadId];
   const activeFinished = Boolean(activeRoot?.finished);
+  const activePinned = Boolean(activeRoot?.pinned && !activeRoot.finished);
+  const activeCurrent = Boolean(activeRoot && !activeRoot.finished && !activeRoot.pinned && !activeRoot.archived && !activeRoot.snoozedUntil);
   useEffect(() => {
     if (activeFinished) setFinishedOpen(true);
   }, [activeThreadId, activeFinished]);
+  useEffect(() => {
+    if (activePinned) setPinnedOpen(true);
+  }, [activeThreadId, activePinned]);
+  useEffect(() => {
+    if (activeCurrent) setCurrentOpen(true);
+  }, [activeThreadId, activeCurrent]);
   const connected = useApp((state) => state.connected);
   const searchResult = useApp((state) => state.searchResult);
   const [allProjects, setAllProjects] = useState(false);
@@ -117,16 +123,11 @@ export function Sidebar({
     (thread) => !thread.archived && !thread.snoozedUntil,
   );
   const finished = awake.filter((thread) => thread.finished).sort(sortThreads);
-  const current = awake
-    .filter((thread) => !thread.finished)
-    .sort(
-      (a, b) =>
-        Number(Boolean(b.pinned)) - Number(Boolean(a.pinned)) ||
-        sortThreads(a, b),
-    );
+  const pinned = awake.filter((thread) => !thread.finished && thread.pinned).sort(sortThreads);
+  const current = awake.filter((thread) => !thread.finished && !thread.pinned).sort(sortThreads);
   const reorder = async (source: string, target: string) => {
     if (source === target || query || !activeProjectId) return;
-    const ordered = [...current, ...finished, ...snoozed, ...archived].map(
+    const ordered = [...pinned, ...current, ...finished, ...snoozed, ...archived].map(
       (thread) => thread.id,
     );
     const from = ordered.indexOf(source),
@@ -246,22 +247,21 @@ export function Sidebar({
                 thread.changedFiles ||
                 thread.status !== "idle") && (
                 <span className="thread-row-meta">
-                  {thread.pinned && <Pin size={12} aria-label="Pinned" />}
+                  {thread.pinned && <Pin size={12} aria-label={t("Pinned")} />}
                   {Boolean(thread.changedFiles) && (
                     <span>
                       {thread.changedFiles}{" "}
-                      {thread.changedFiles === 1 ? "file" : "files"}
+                      {thread.changedFiles === 1 ? t("file") : t("files")}
                     </span>
                   )}
                   {thread.status !== "idle" && (
                     <span className="thread-status" title={thread.status}>
                       <ThreadPulse status={thread.status} />
                       {thread.status === "error"
-                        ? "Failed"
+                        ? t("Failed")
                         : thread.status === "awaiting"
-                          ? "Approval"
-                          : thread.status.charAt(0).toUpperCase() +
-                            thread.status.slice(1)}
+                          ? t("Approval")
+                          : t(thread.status)}
                     </span>
                   )}
                 </span>
@@ -275,8 +275,8 @@ export function Sidebar({
               {thread.snoozedUntil && (
                 <span className="thread-row-meta">
                   <Clock size={12} />
-                  Until{" "}
-                  {new Date(thread.snoozedUntil).toLocaleString(undefined, {
+                  {t("Until")} {" "}
+                  {new Date(thread.snoozedUntil).toLocaleString(currentLocale(), {
                     month: "short",
                     day: "numeric",
                     hour: "2-digit",
@@ -297,14 +297,14 @@ export function Sidebar({
           <div className="thread-row-footer">
             <time
               dateTime={new Date(thread.updatedAt).toISOString()}
-              title={new Date(thread.updatedAt).toLocaleString()}
+              title={new Date(thread.updatedAt).toLocaleString(currentLocale())}
             >
-              {new Date(thread.updatedAt).toLocaleDateString(undefined, {
+              {new Date(thread.updatedAt).toLocaleDateString(currentLocale(), {
                 month: "short",
                 day: "numeric",
               })}{" "}
               ·{" "}
-              {new Date(thread.updatedAt).toLocaleTimeString(undefined, {
+              {new Date(thread.updatedAt).toLocaleTimeString(currentLocale(), {
                 hour: "2-digit",
                 minute: "2-digit",
               })}
@@ -319,7 +319,7 @@ export function Sidebar({
                       ? snoozed
                       : thread.finished
                         ? finished
-                        : current;
+                        : thread.pinned ? pinned : current;
                   const next =
                     group[
                       group.findIndex((entry) => entry.id === thread.id) + direction
@@ -332,10 +332,10 @@ export function Sidebar({
                 type="button"
                 title={
                   thread.running || thread.status === "awaiting"
-                    ? "Stop this conversation before finishing"
-                    : `${thread.finished ? "Reopen" : "Finish"} ${thread.title}`
+                    ? t("Stop this conversation before finishing")
+                    : `${thread.finished ? t("Reopen") : t("Finish")} ${thread.title}`
                 }
-                aria-label={`${thread.finished ? "Reopen" : "Finish"} ${thread.title}`}
+                aria-label={`${thread.finished ? t("Reopen") : t("Finish")} ${thread.title}`}
                 disabled={
                   !connected ||
                   thread.running ||
@@ -354,7 +354,7 @@ export function Sidebar({
               <button
                 className="thread-row-kill"
                 type="button"
-                title={`Delete ${thread.title}`}
+                title={`${t("Delete")} ${thread.title}`}
                 onClick={() => removeThread(thread.id)}
               >
                 <Trash2 size={13} />
@@ -370,7 +370,7 @@ export function Sidebar({
             rel="noreferrer"
           >
             <GitPullRequest size={12} />
-            Pull request #{thread.pullRequest.split("/").at(-1)}
+            {t("Pull request")} #{thread.pullRequest.split("/").at(-1)}
           </a>
         )}
         {!query && (
@@ -388,108 +388,30 @@ export function Sidebar({
   };
 
   return (
-    <aside className="rail" aria-label="Conversations">
+    <aside className="rail" aria-label={t("Conversations")}>
       <div className="rail-head">
-        <Menu
-          align="start"
-          header="Workspaces"
-          width={320}
-          searchable
-          searchPlaceholder="Find a workspace"
-          items={[
-            ...projects.map((entry) => ({
-              id: entry.id,
-              label: entry.name,
-              hint: shortPath(entry.path, home),
-              selected: entry.id === activeProjectId,
-              icon: <FolderOpen size={16} />,
-              onSelect: () => {
-                if (entry.id !== activeProjectId) selectProject(entry.id);
-                setQuery("");
-              },
-            })),
-            {
-              id: "open",
-              label: "Open folder…",
-              icon: <Plus size={16} />,
-              onSelect: chooseWorkspace,
-            },
-            ...(project
-              ? [
-                  {
-                    id: "close",
-                    label: `Close ${project.name}`,
-                    icon: <X size={16} />,
-                    danger: true,
-                    onSelect: () => closeProject(project.id),
-                  },
-                ]
-              : []),
-          ]}
-          trigger={({ toggle, id, open }) => (
-            <button
-              id={id}
-              type="button"
-              className="workspace-select"
-              aria-label={`Choose workspace, ${project?.name ?? "none selected"}`}
-              aria-haspopup="menu"
-              aria-expanded={open}
-              onClick={toggle}
-              disabled={choosingWorkspace}
-              title={project?.path}
-            >
-              <FolderOpen size={18} />
-              <span className="truncate">
-                {choosingWorkspace
-                  ? "Choosing folder…"
-                  : (project?.name ?? "Open a workspace")}
-              </span>
-              <ChevronDown size={14} />
-            </button>
-          )}
-        />
+        <WorkspaceSelector onSelect={() => setQuery("")} />
       </div>
       <div className="thread-toolbar">
         <label className="thread-search">
           <Search size={14} aria-hidden="true" />
           <input
-            aria-label="Find a conversation"
-            placeholder="Search conversations"
+            aria-label={t("Find a conversation")}
+            placeholder={t("Search conversations")}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
         </label>
-        <Menu
-          align="end"
-          header="Choose a provider"
-          width={240}
-          items={providers
-            .filter((provider) => provider.available && provider.enabled)
-            .map((provider) => ({
-              id: provider.id,
-              label: provider.label,
-              icon: <ProviderIcon provider={provider.id} />,
-              onSelect: () => {
-                onConversation();
-                createThread(provider.id);
-              },
-            }))}
-          trigger={({ toggle, id, open }) => (
-            <button
-              id={id}
-              aria-haspopup="menu"
-              aria-expanded={open}
-              className="new-thread"
-              aria-label="New thread"
-              title="New thread"
-              type="button"
-              onClick={toggle}
-              disabled={!activeProjectId}
-            >
-              <MessageSquarePlus size={18} />
-            </button>
-          )}
-        />
+        <button
+          className="new-thread"
+          aria-label={t("New thread")}
+          title={t("New thread")}
+          type="button"
+          onClick={() => { onConversation(); createThread(); }}
+          disabled={!activeProjectId || !providers.some((provider) => provider.available && provider.enabled)}
+        >
+          <MessageSquarePlus size={18} />
+        </button>
       </div>
       {query.trim() && (
         <label className="search-scope">
@@ -498,65 +420,87 @@ export function Sidebar({
             checked={allProjects}
             onChange={(event) => setAllProjects(event.target.checked)}
           />
-          All workspaces
+          {t("All workspaces")}
         </label>
       )}
       <div className="rail-list scroll">
-        {current.map(renderThread)}
+        {pinned.length > 0 && (
+          <section className="thread-category" data-category="pinned">
+            <button className="finished-toggle" type="button" aria-expanded={pinnedOpen || Boolean(query)} onClick={() => setPinnedOpen((open) => !open)}>
+              <ChevronRight size={12} className="category-chevron" />
+              <Pin size={14} className="category-icon" />
+              <span>{t("Pinned")}</span><span>{pinned.length}</span>
+            </button>
+            {(pinnedOpen || query) && pinned.map(renderThread)}
+          </section>
+        )}
+        {current.length > 0 && (
+          <section className="thread-category" data-category="active">
+            <button className="finished-toggle" type="button" aria-expanded={currentOpen || Boolean(query)} onClick={() => setCurrentOpen((open) => !open)}>
+              <ChevronRight size={12} className="category-chevron" />
+              <MessagesSquare size={14} className="category-icon" />
+              <span>{t("Active", undefined, "conversations")}</span><span>{current.length}</span>
+            </button>
+            {(currentOpen || query) && current.map(renderThread)}
+          </section>
+        )}
         {snoozed.length > 0 && (
-          <>
+          <section className="thread-category" data-category="snoozed">
             <button
               className="finished-toggle"
               type="button"
               aria-expanded={snoozedOpen || Boolean(query)}
               onClick={() => setSnoozedOpen((open) => !open)}
             >
-              <ChevronRight size={13} />
-              <span>Snoozed</span>
+              <ChevronRight size={12} className="category-chevron" />
+              <Clock size={14} className="category-icon" />
+              <span>{t("Snoozed")}</span>
               <span>{snoozed.length}</span>
             </button>
             {(snoozedOpen || query) && snoozed.map(renderThread)}
-          </>
+          </section>
         )}
         {archived.length > 0 && (
-          <>
+          <section className="thread-category" data-category="archived">
             <button
               className="finished-toggle"
               type="button"
               aria-expanded={archivedOpen || Boolean(query)}
               onClick={() => setArchivedOpen((open) => !open)}
             >
-              <ChevronRight size={13} />
-              <span>Archived</span>
+              <ChevronRight size={12} className="category-chevron" />
+              <Archive size={14} className="category-icon" />
+              <span>{t("Archived", undefined, "conversations")}</span>
               <span>{archived.length}</span>
             </button>
             {(archivedOpen || query) && archived.map(renderThread)}
-          </>
+          </section>
         )}
         {finished.length > 0 && (
-          <>
+          <section className="thread-category" data-category="finished">
             <button
               className="finished-toggle"
               type="button"
               aria-expanded={finishedOpen || Boolean(query)}
               onClick={() => setFinishedOpen((open) => !open)}
             >
-              <ChevronRight size={13} />
-              <span>Finished</span>
+              <ChevronRight size={12} className="category-chevron" />
+              <CircleCheck size={14} className="category-icon category-finished" />
+              <span>{t("Finished")}</span>
               <span>{finished.length}</span>
             </button>
             {(finishedOpen || Boolean(query)) && finished.map(renderThread)}
-          </>
+          </section>
         )}
         {threads.length === 0 && (
           <div className="rail-empty">
             {query
               ? !connected
-                ? "Reconnect to search conversations."
+                ? t("Reconnect to search conversations.")
                 : !matches
-                  ? "Searching…"
-                  : "No matching conversations."
-              : "Your conversations will appear here."}
+                  ? t("Searching…")
+                  : t("No matching conversations.")
+              : t("Your conversations will appear here.")}
           </div>
         )}
       </div>

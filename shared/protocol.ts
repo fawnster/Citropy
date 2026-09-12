@@ -297,7 +297,8 @@ export interface NotificationPreferences {
 }
 
 export interface NotificationTarget {
-  view: "chat" | "git" | "github";
+  view: "chat" | "git" | "github" | "settings";
+  section?: "Providers" | "Application";
   projectId?: string;
   threadId?: string;
 }
@@ -307,7 +308,8 @@ export interface AppNotification {
   title: string;
   text: string;
   level: "success" | "error" | "info";
-  kind: "chat" | "git" | "github";
+  kind: "chat" | "git" | "github" | "update";
+  dedupeKey?: string;
   createdAt: number;
   read: boolean;
   target: NotificationTarget;

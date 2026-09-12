@@ -14,6 +14,7 @@ import type {
   BrowserProfile,
   ImportBrowser,
 } from "../../../shared/features.ts";
+import { useI18n } from "../lib/i18n.ts";
 
 interface Profiles {
   selected: string;
@@ -21,6 +22,7 @@ interface Profiles {
 }
 
 export function BrowserProfiles() {
+  const t = useI18n();
   const projects = useApp((state) => state.projects);
   const [projectId, setProjectId] = useState(
     useApp.getState().activeProjectId ?? projects[0]?.id ?? "",
@@ -70,11 +72,11 @@ export function BrowserProfiles() {
         setProfileId(result.selected);
       } else if (result.imported !== undefined) {
         setMessage(
-          `Imported ${result.imported} cookies. ${result.skipped || 0} expired, partitioned, or protected cookies were skipped.`,
+          t("Imported {imported} cookies. {skipped} expired, partitioned, or protected cookies were skipped.", { imported: result.imported, skipped: result.skipped || 0 }),
         );
         setData(await api<Profiles>(`browser/profiles${query}`));
       } else {
-        setMessage("Browser data cleared.");
+        setMessage(t("Browser data cleared."));
         setData(await api<Profiles>(`browser/profiles${query}`));
       }
       setName("");
@@ -87,12 +89,12 @@ export function BrowserProfiles() {
   const clear = async (kind: string) => {
     if (
       await confirmAction({
-        title: `Clear ${kind} from this profile?`,
+        title: t("Clear {kind} from this profile?", { kind: t(kind) }),
         description:
           kind === "cookies"
-            ? "Websites in this browser profile will sign out."
-            : "Cached pages and resources will be downloaded again.",
-        label: `Clear ${kind}`,
+            ? t("Websites in this browser profile will sign out.")
+            : t("Cached pages and resources will be downloaded again."),
+        label: t("Clear {kind}", { kind: t(kind) }),
         danger: true,
       })
     )
@@ -101,7 +103,7 @@ export function BrowserProfiles() {
   return (
     <div className="feature-stack">
       <label className="feature-field">
-        Workspace
+        {t("Workspace")}
         <select
           disabled={busy}
           value={projectId}
@@ -116,29 +118,27 @@ export function BrowserProfiles() {
       </label>
       <section className="settings-group">
         <div className="feature-section-heading">
-          <h2>Browser profiles</h2>
+          <h2>{t("Browser profiles")}</h2>
           <button
             className="icon-btn"
             type="button"
             disabled={busy}
-            aria-label="Refresh browser profiles"
+            aria-label={t("Refresh browser profiles")}
             onClick={() => setRevision((value) => value + 1)}
           >
             <RefreshCw size={16} />
           </button>
         </div>
         <p className="feature-note">
-          Keep logins separate. The selected profile is used for new browser
-          tabs; open tabs keep their current profile.
+          {t("Keep logins separate. The selected profile is used for new browser tabs; open tabs keep their current profile.")}
         </p>
         {data?.profiles.map((profile) => (
           <div className="profile-row" key={profile.id}>
             <Globe size={21} />
             <span>
-              <strong>{profile.name}</strong>
+              <strong>{profile.id === "workspace" ? t("Workspace") : profile.name}</strong>
               <small>
-                {profile.cookies} cookies · {profile.activeTabs} open tabs
-              </small>
+                {profile.cookies}{" "}{t("cookies ·")}{" "}{profile.activeTabs}{" "}{t("open tabs")}{" "}</small>
             </span>
             <button
               className="btn"
@@ -148,10 +148,10 @@ export function BrowserProfiles() {
               {data.selected === profile.id ? (
                 <>
                   <Check size={14} />
-                  Selected
+                  {t("Selected")}
                 </>
               ) : (
-                "Use profile"
+                t("Use profile")
               )}
             </button>
             {profile.id !== "workspace" && (
@@ -160,17 +160,17 @@ export function BrowserProfiles() {
                 disabled={busy || profile.activeTabs > 0}
                 title={
                   profile.activeTabs
-                    ? "Close this profile's tabs first"
-                    : "Delete profile"
+                    ? t("Close this profile's tabs first")
+                    : t("Delete profile")
                 }
-                aria-label={`Delete ${profile.name}`}
+                aria-label={t("Delete {name}", { name: profile.name })}
                 onClick={async () => {
                   if (
                     await confirmAction({
-                      title: `Delete ${profile.name}?`,
+                      title: t("Delete {name}?", { name: profile.name }),
                       description:
                         "Remove this profile and its saved browser data.",
-                      label: "Delete profile",
+                      label: t("Delete profile"),
                       danger: true,
                     })
                   )
@@ -190,37 +190,31 @@ export function BrowserProfiles() {
           }}
         >
           <input
-            aria-label="New browser profile name"
+            aria-label={t("New browser profile name")}
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="Profile name"
+            placeholder={t("Profile name")}
             maxLength={60}
           />
           <button className="btn" disabled={busy || !name.trim() || !data}>
             <Plus size={15} />
-            Add profile
+            {t("Add profile")}
           </button>
         </form>
       </section>
       <section className="settings-group">
-        <h2 className="settings-group-heading">Import signed-in sessions</h2>
-        <p className="feature-note">
-          Copy cookies from a browser on this computer. Close that browser
-          first. Your system may ask to unlock its keyring. Some sites may
-          require you to sign in again.
-        </p>
+        <h2 className="settings-group-heading">{t("Import signed-in sessions")}</h2>
+        <p className="feature-note">{" "}{t("Copy cookies from a browser on this computer. Close that browser first. Your system may ask to unlock its keyring. Some sites may require you to sign in again.")}{" "}</p>
         <div className="feature-form-grid">
-          <label className="feature-field">
-            Import from
-            <select
+          <label className="feature-field">{" "}{t("Import from")}{" "}<select
               disabled={busy}
               value={sourceId}
               onChange={(event) => setSourceId(event.target.value)}
             >
               <option value="">
                 {sources.length
-                  ? "Select a browser"
-                  : "No supported browser profiles found"}
+                  ? t("Select a browser")
+                  : t("No supported browser profiles found")}
               </option>
               {sources.map((source) => (
                 <option key={source.id} value={source.id}>
@@ -229,16 +223,14 @@ export function BrowserProfiles() {
               ))}
             </select>
           </label>
-          <label className="feature-field">
-            Citropy profile
-            <select
+          <label className="feature-field">{" "}{t("Citropy profile")}{" "}<select
               disabled={busy}
               value={profileId}
               onChange={(event) => setProfileId(event.target.value)}
             >
               {data?.profiles.map((profile) => (
                 <option key={profile.id} value={profile.id}>
-                  {profile.name}
+                  {profile.id === "workspace" ? t("Workspace") : profile.name}
                 </option>
               ))}
             </select>
@@ -251,13 +243,12 @@ export function BrowserProfiles() {
           onClick={() => action("import", { profileId, sourceId })}
         >
           <Download size={15} />
-          {busy ? "Working…" : "Import cookies"}
+          {busy ? t("Working…") : t("Import cookies")}
         </button>
       </section>
       <section className="settings-group">
-        <h2 className="settings-group-heading">Profile data</h2>
-        <p className="feature-note">
-          Applies to{" "}
+        <h2 className="settings-group-heading">{t("Profile data")}</h2>
+        <p className="feature-note">{" "}{t("Applies to")}{" "}
           {data?.profiles.find((profile) => profile.id === profileId)?.name ??
             "the selected profile"}
           .
@@ -268,16 +259,12 @@ export function BrowserProfiles() {
             disabled={busy || !data}
             onClick={() => clear("cookies")}
           >
-            <Cookie size={15} />
-            Clear cookies
-          </button>
+            <Cookie size={15} />{" "}{t("Clear cookies")}{" "}</button>
           <button
             className="btn"
             disabled={busy || !data}
             onClick={() => clear("cache")}
-          >
-            Clear cache
-          </button>
+          >{" "}{t("Clear cache")}{" "}</button>
         </div>
       </section>
       {message && (
@@ -291,9 +278,7 @@ export function BrowserProfiles() {
         </p>
       )}
       {!projectId && (
-        <p className="feature-note">
-          Open a workspace to manage browser profiles.
-        </p>
+        <p className="feature-note">{" "}{t("Open a workspace to manage browser profiles.")}{" "}</p>
       )}
     </div>
   );

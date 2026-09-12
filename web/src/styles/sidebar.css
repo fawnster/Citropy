@@ -77,6 +77,18 @@
 .app-update-control {
   min-width: 0;
 }
+.app-update-settings {
+  position: relative;
+  flex: none;
+  max-width: 100%;
+}
+.app-update-settings .app-update-popover {
+  left: auto;
+  right: 0;
+  top: calc(100% + 8px);
+  bottom: auto;
+  width: min(310px, calc(100vw - 48px));
+}
 .rail-action.app-update-button {
   position: relative;
   width: 100%;
@@ -495,7 +507,9 @@
   align-items: center;
   gap: 7px;
   width: 100%;
-  padding: 20px 11px 10px;
+  padding: 14px 11px 10px;
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
   font-size: 11px;
   color: var(--text-3);
 }
@@ -503,15 +517,25 @@
   margin-left: auto;
   font-variant-numeric: tabular-nums;
 }
-.finished-toggle svg {
+.finished-toggle .category-chevron {
   transition: transform var(--dur-fast);
 }
-.finished-toggle[aria-expanded="true"] svg {
+.finished-toggle[aria-expanded="true"] .category-chevron {
   transform: rotate(90deg);
 }
 .finished-toggle:hover {
   color: var(--text);
 }
+
+.category-icon { color: var(--task-icon); }
+.category-finished { color: var(--ok); }
+.thread-category:first-child .finished-toggle { margin-top: 0; border-top: 0; }
+.workspace-menu .workspace-folder-icon { color: var(--file-icon); }
+.workspace-menu .menu-search { padding: 10px 11px; }
+.workspace-menu .menu-search:focus-visible { outline: 1px solid var(--file-icon); outline-offset: 1px; }
+.workspace-menu .menu-section { padding-top: 12px; }
+.workspace-menu .menu-item[data-danger] .menu-icon { color: var(--heat); }
+.workspace-menu .menu-item[data-danger]:hover .menu-icon { color: var(--bad); }
 
 .rail-footer {
   display: grid;

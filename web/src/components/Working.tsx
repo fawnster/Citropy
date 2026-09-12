@@ -2,10 +2,12 @@ import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import type { ThreadStatus } from "../../../shared/protocol.ts";
 import { duration } from "../lib/format.ts";
+import { useI18n } from "../lib/i18n.ts";
 
 interface Props {
   status: ThreadStatus | undefined;
   tool?: string;
+  compacting?: boolean;
 }
 
 const LABEL: Partial<Record<ThreadStatus, string>> = {
@@ -14,7 +16,8 @@ const LABEL: Partial<Record<ThreadStatus, string>> = {
   working: "Working",
 };
 
-export function Working({ status, tool }: Props) {
+export function Working({ status, tool, compacting }: Props) {
+  const t = useI18n();
   const [start] = useState(() => Date.now());
   const [now, setNow] = useState(start);
 
@@ -23,7 +26,7 @@ export function Working({ status, tool }: Props) {
     return () => clearInterval(timer);
   }, []);
 
-  const text = tool ? `Running ${tool}` : (status && LABEL[status]) || "Working";
+  const text = compacting ? t("Compacting context") : tool ? `${t("Running")} ${tool}` : t((status && LABEL[status]) || "Working");
 
   return (
     <motion.div
@@ -37,7 +40,7 @@ export function Working({ status, tool }: Props) {
         <i />
         <i />
       </span>
-      <span className="working-text">{text}</span>
+      <span className="working-text" role="status">{text}</span>
       <span className="working-time mono">{duration(now - start)}</span>
     </motion.div>
   );

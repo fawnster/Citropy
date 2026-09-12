@@ -14,8 +14,10 @@ import { confirmAction, useApp } from "../lib/store.ts";
 import { send } from "../lib/socket.ts";
 import type { ProviderInfo } from "../../../shared/protocol.ts";
 import type { ProviderMaintenance } from "../../../shared/provider-settings.ts";
+import { useI18n } from "../lib/i18n.ts";
 
 export function ProviderSettings() {
+  const t = useI18n();
   const providers = useApp((state) => state.providers);
   const connected = useApp((state) => state.connected);
   const threads = useApp((state) => state.threads);
@@ -85,7 +87,7 @@ export function ProviderSettings() {
   return (
     <>
       <div className="provider-maintenance-heading">
-        <h2 className="settings-group-heading">Installed providers</h2>
+      <h2 className="settings-group-heading">{t("Installed providers")}</h2>
         <button
           className="btn"
           disabled={!connected || updating || checking}
@@ -94,9 +96,7 @@ export function ProviderSettings() {
           <RefreshCw
             size={14}
             className={checking ? "git-spinner" : undefined}
-          />
-          Check for updates
-        </button>
+          />{" "}{t("Check for updates")}{" "}</button>
       </div>
       <div className="settings-group provider-settings-group">
         {providers.map((provider) => {
@@ -126,30 +126,30 @@ export function ProviderSettings() {
                       {state?.version ??
                         provider.version ??
                         (provider.enabled
-                          ? "No version detected"
-                          : "Not checked while disabled")}
+                          ? t("No version detected")
+                          : t("Not checked while disabled"))}
                     </small>
                   </div>
                 </div>
                 <div className="provider-setting-status">
                   <span data-available={provider.available && provider.enabled}>
                     {!provider.enabled
-                      ? "Disabled"
+                      ? t("Disabled")
                       : provider.available
-                        ? "Enabled"
-                        : "Not installed"}
+                        ? t("Enabled")
+                        : t("Not installed")}
                   </span>
                   <small>
                     {provider.enabled
-                      ? `${provider.models.length} models`
-                      : "Not in new threads"}
+                      ? t("{count} models", { count: provider.models.length })
+                      : t("Not in new threads")}
                   </small>
                 </div>
                 <input
                   className="setting-switch"
                   type="checkbox"
                   role="switch"
-                  aria-label={`Enable ${provider.label}`}
+                  aria-label={t("Enable {provider}", { provider: provider.label })}
                   checked={provider.enabled}
                   disabled={!connected || isUpdating}
                   onChange={async (event) => {
@@ -158,8 +158,8 @@ export function ProviderSettings() {
                       !enabled &&
                       active &&
                       !(await confirmAction({
-                        title: `Disable ${provider.label}?`,
-                        description: `This stops ${active} active ${active === 1 ? "conversation" : "conversations"}. Saved conversations will remain available.`,
+                        title: t("Disable {provider}?", { provider: provider.label }),
+                        description: t("This stops {count} active {conversations}. Saved conversations will remain available.", { count: active, conversations: active === 1 ? t("conversation") : t("conversations") }),
                         label: "Disable provider",
                         danger: true,
                       }))
@@ -181,21 +181,19 @@ export function ProviderSettings() {
               <div className="provider-maintenance">
                 <div className="provider-update-row">
                   <div className="provider-installation">
-                    <span>{state?.method ?? "CLI installation"}</span>
+                    <span>{t(state?.method ?? "CLI installation")}</span>
                     <small title={state?.binaryPath}>
                       {state?.binaryPath ?? provider.binary}
                     </small>
                   </div>
                   {state?.updateStatus === "current" && !isUpdating ? (
                     <span className="provider-up-to-date" role="status">
-                      <Check size={14} />
-                      Up to date
-                    </span>
+                      <Check size={14} />{" "}{t("Up to date")}{" "}</span>
                   ) : (
                     <button
                       type="button"
                       className="btn"
-                      aria-label={`Update ${provider.label}`}
+                      aria-label={t("Update {provider}", { provider: provider.label })}
                       disabled={
                         !connected ||
                         !state?.available ||
@@ -204,9 +202,9 @@ export function ProviderSettings() {
                       }
                       title={
                         active
-                          ? "Finish or stop active conversations before updating."
+                          ? t("Finish or stop active conversations before updating.")
                           : (state?.reason ??
-                            "Check for updates and install with the existing installer.")
+                            t("Check for updates and install with the existing installer."))
                       }
                       onClick={() => void update(provider)}
                     >
@@ -216,18 +214,15 @@ export function ProviderSettings() {
                         <ArrowUpToLine size={14} />
                       )}
                       {isUpdating
-                        ? "Updating…"
+                        ? t("Updating…")
                         : state?.updateStatus === "available"
-                          ? `Update to ${state.latestVersion}`
-                          : "Check & update"}
+                          ? t("Update to {version}", { version: state.latestVersion ?? "" })
+                          : t("Check & update")}
                     </button>
                   )}
                 </div>
                 {active > 0 && (
-                  <p className="provider-maintenance-note">
-                    Updates are available after this provider finishes its
-                    active conversations.
-                  </p>
+                  <p className="provider-maintenance-note">{" "}{t("Updates are available after this provider finishes its active conversations.")}{" "}</p>
                 )}
                 {state?.reason && (
                   <p className="provider-maintenance-note">{state.reason}</p>
@@ -244,7 +239,7 @@ export function ProviderSettings() {
                 )}
                 {state?.output && (
                   <details className="provider-update-output">
-                    <summary>Update details</summary>
+                    <summary>{t("Update details")}</summary>
                     <code>{state.command}</code>
                     <pre className="scroll">{state.output}</pre>
                   </details>
@@ -258,10 +253,10 @@ export function ProviderSettings() {
               >
                 <FileText size={17} />
                 <span>
-                  <strong>Global instructions</strong>
+                  <strong>{t("Global instructions")}</strong>
                   <small>
                     {provider.id === "claude" ? "CLAUDE.md" : "AGENTS.md"}
-                    <span> · Guidance for all projects</span>
+                    <span>{" "}{t("· Guidance for all projects")}</span>
                   </small>
                 </span>
                 <ChevronRight size={16} />
@@ -276,18 +271,12 @@ export function ProviderSettings() {
           <button
             className="btn"
             onClick={() => setRefresh((value) => value + 1)}
-          >
-            Retry
-          </button>
+          >{" "}{t("Retry")}{" "}</button>
         </p>
       )}
-      <p className="settings-note">
-        Updates use the provider’s existing installer. Disabling a provider
-        stops its active work and removes it from new thread choices. Saved
-        conversations stay available.
-      </p>
+      <p className="settings-note">{" "}{t("Updates use the provider’s existing installer. Disabling a provider stops its active work and removes it from new thread choices. Saved conversations stay available.")}{" "}</p>
       <p className="settings-connection" role="status">
-        {connected ? "Connected to Citropy" : "Disconnected from Citropy"}
+        {connected ? t("Connected to Citropy") : t("Disconnected from Citropy")}
       </p>
       {editor && (
         <ProviderInstructions

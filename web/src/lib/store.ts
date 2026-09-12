@@ -2,6 +2,7 @@ import { resolveResponse } from "./requests.ts";
 import type { ComputerState } from "../../../shared/computer.ts";
 import "./migrate-preferences.ts";
 import { create } from "zustand";
+import type { Language } from "./translations.ts";
 import type { GitHubUser } from "../../../shared/github.ts";
 import type {
   BrowserState,
@@ -97,6 +98,7 @@ export interface AppState {
   inspectorOpen: boolean;
   sidebarOpen: boolean;
   theme: Theme;
+  language: Language;
   uiScale: number;
   panelWidths: Partial<Record<PanelId, number>>;
   textStreaming: boolean;
@@ -173,8 +175,8 @@ export const useApp = create<AppState>(() => ({
   git: {},
   permissions: [],
   toasts: [],
-  activeProjectId: localStorage.getItem("citropy.project"),
-  activeThreadId: localStorage.getItem("citropy.thread"),
+  activeProjectId: typeof localStorage === "undefined" ? null : localStorage.getItem("citropy.project"),
+  activeThreadId: typeof localStorage === "undefined" ? null : localStorage.getItem("citropy.thread"),
   followRequest: 0,
   readingThreadId: null,
   panels: [],
@@ -198,6 +200,7 @@ export const useApp = create<AppState>(() => ({
     typeof window !== "undefined" && window.citropyDesktop ? "dark" : "light",
   ),
   uiScale: initialScale,
+  language: readPref<Language>("citropy.language", "en") === "es" ? "es" : "en",
   panelWidths: readPanelWidths(),
   textStreaming: readFlag("citropy.textStreaming", true),
   typingAnimation: readFlag("citropy.typingAnimation", false),
@@ -214,6 +217,12 @@ export function setPanelWidth(panel: PanelId, width?: number): void {
   else panelWidths[panel] = Math.round(width);
   useApp.setState({ panelWidths });
   localStorage.setItem("citropy.panelWidths", JSON.stringify(panelWidths));
+}
+
+export function setLanguage(language: Language): void {
+  if (language !== "en" && language !== "es") return;
+  useApp.setState({ language });
+  localStorage.setItem("citropy.language", language);
 }
 
 function normalize(

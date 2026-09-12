@@ -1,3 +1,4 @@
+import { useI18n } from "../lib/i18n.ts";
 import { useRef, useState } from "react";
 import { motion, useReducedMotion } from "motion/react";
 import { GitBranch, Github, Settings, BarChart3 } from "lucide-react";
@@ -17,6 +18,7 @@ export function SidebarFooter({
   onUsage: () => void;
   activeView?: string;
 }) {
+  const t = useI18n();
   const [compact, setCompact] = useState(
     () => localStorage.getItem("citropy.compactNavigation") === "1",
   );
@@ -30,17 +32,17 @@ export function SidebarFooter({
   const actions = [
     { name: "Source control", icon: GitBranch, run: onGit, tone: "git" },
     { name: "GitHub", icon: Github, run: onGitHub, tone: "github" },
-    { name: "Settings", icon: Settings, run: onSettings, tone: "settings" },
     { name: "Usage", icon: BarChart3, run: onUsage, tone: "usage" },
+    { name: "Settings", icon: Settings, run: onSettings, tone: "settings" },
   ];
   return (
     <div className="rail-footer navigation-footer" data-compact={compact}>
       <button
         type="button"
         className="navigation-handle"
-        aria-label={compact ? "Expand navigation" : "Collapse navigation"}
+        aria-label={t(compact ? "Expand navigation" : "Collapse navigation")}
         aria-expanded={!compact}
-        title={compact ? "Drag up to show labels" : "Drag down for icons only"}
+        title={t(compact ? "Drag up to show labels" : "Drag down for icons only")}
         onPointerDown={(event) => {
           drag.current = event.clientY;
           moved.current = false;
@@ -66,7 +68,7 @@ export function SidebarFooter({
           moved.current = false;
         }}
       />
-      <nav className="navigation-actions" aria-label="Workspace navigation">
+      <nav className="navigation-actions" aria-label={t("Workspace navigation")}>
         {actions.map(({ name, icon: Icon, run, tone }) => (
           <motion.button
             layout="position"
@@ -74,17 +76,17 @@ export function SidebarFooter({
             className="rail-action"
             data-tone={tone}
             aria-current={activeView === tone ? "page" : undefined}
-            key={name}
+            key={t(name)}
             onClick={run}
-            aria-label={name}
-            title={compact ? name : undefined}
+            aria-label={t(name)}
+            title={compact ? t(name) : undefined}
             transition={{
               duration: reducedMotion ? 0 : 0.2,
               ease: [0.2, 0, 0, 1],
             }}
           >
             <Icon size={17} />
-            <span>{name}</span>
+            <span>{t(name)}</span>
           </motion.button>
         ))}
         <span className="navigation-update-divider" aria-hidden="true" />

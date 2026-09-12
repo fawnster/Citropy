@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from "react";
+import { useI18n } from "../lib/i18n.ts";
 import { ChevronDown, ChevronUp, Clock3, Paperclip } from "lucide-react";
 import { Pencil, X } from "./icons.ts";
 import { editQueued } from "../lib/actions.ts";
@@ -24,6 +25,7 @@ export function QueueList({
   provider?: ProviderInfo;
   onEdit: (item: QueuedMessage) => void;
 }) {
+  const t = useI18n();
   const connected = useApp((state) => state.connected);
   const held = useApp((state) => state.offline[thread.id] ?? NONE);
   const queued = thread.queue ?? NONE;
@@ -41,12 +43,12 @@ export function QueueList({
     item.createdAt >= last.createdAt ? item : last,
   );
   const state = !connected
-    ? "Sends when Citropy reconnects"
+      ? t("Sends when Citropy reconnects")
     : queued.length && thread.running
-      ? `Sends when ${provider?.label ?? "the provider"} finishes`
+      ? t("Sends when {provider} finishes", { provider: provider?.label ?? t("the provider") })
       : queued.length
-        ? "Paused until the next reply finishes"
-        : "Not sent yet";
+        ? t("Paused until the next reply finishes")
+        : t("Not sent yet");
   const steer =
     thread.running && !thread.compacting ? provider?.steerHint : undefined;
   const edit = (item: QueuedMessage) =>
@@ -75,13 +77,13 @@ export function QueueList({
         className="composer-queue-summary"
         aria-expanded={expanded}
         aria-controls={id}
-        aria-label={`${expanded ? "Collapse" : "Expand"} ${count} queued ${count === 1 ? "message" : "messages"}`}
+        aria-label={`${expanded ? t("Collapse") : t("Expand")} ${count} ${t(count === 1 ? "queued message" : "queued messages")}`}
         title={state}
         onClick={() => setExpanded((value) => !value)}
       >
         <Clock3 size={14} />
         <strong>
-          Queued <span className="composer-queue-count">{count}</span>
+          {t("Queued")} <span className="composer-queue-count">{count}</span>
         </strong>
         <span className="composer-queue-divider" />
         <QueuedText item={latest} />
@@ -89,7 +91,7 @@ export function QueueList({
       </button>
       <div id={id} hidden={!expanded} className="composer-queue-details">
         <p className="composer-queue-state">{state}</p>
-        <ol className="composer-queue-list scroll" aria-label="Queued messages">
+        <ol className="composer-queue-list scroll" aria-label={t("Queued messages")}>
           {queued.map((item, index) => (
             <li className="composer-queue-item" key={item.id}>
               <QueuedText item={item} />
@@ -100,7 +102,7 @@ export function QueueList({
                     type="button"
                     className="btn"
                     disabled={!connected}
-                    title={thread.running ? steer : "Send this message now."}
+                    title={thread.running ? steer : t("Send this message now.")}
                     onClick={() =>
                       send({
                         t: "queue.send",
@@ -109,15 +111,15 @@ export function QueueList({
                       })
                     }
                   >
-                    {thread.running ? "Send now" : "Send"}
+                    {thread.running ? t("Send now") : t("Send")}
                   </button>
                 )}
                 {index > 0 && (
                   <button
                     type="button"
                     className="icon-btn"
-                    aria-label="Move up"
-                    title="Move up"
+                    aria-label={t("Move up")}
+                    title={t("Move up")}
                     disabled={!connected}
                     onClick={() =>
                       send({
@@ -134,8 +136,8 @@ export function QueueList({
                 <button
                   type="button"
                   className="icon-btn"
-                  aria-label="Edit"
-                  title="Edit"
+                  aria-label={t("Edit")}
+                  title={t("Edit")}
                   disabled={!connected}
                   onClick={() => void edit(item)}
                 >
@@ -144,8 +146,8 @@ export function QueueList({
                 <button
                   type="button"
                   className="icon-btn"
-                  aria-label="Remove"
-                  title="Remove"
+                  aria-label={t("Remove")}
+                  title={t("Remove")}
                   disabled={!connected}
                   onClick={() =>
                     send({
@@ -164,24 +166,24 @@ export function QueueList({
             <li className="composer-queue-item" key={item.id}>
               <QueuedText item={item} />
               <span className="composer-queue-note">
-                {connected ? "Not sent" : "Waiting for connection"}
+                {connected ? t("Not sent") : t("Waiting for connection")}
               </span>
               <div className="composer-queue-actions">
                 {connected && (
                   <button
                     type="button"
                     className="btn"
-                    title="Try sending it again."
+                    title={t("Try sending it again.")}
                     onClick={() => void flushHeld()}
                   >
-                    Send
+                    {t("Send")}
                   </button>
                 )}
                 <button
                   type="button"
                   className="icon-btn"
-                  aria-label="Edit"
-                  title="Edit"
+                  aria-label={t("Edit")}
+                  title={t("Edit")}
                   onClick={() => editHeld(item.id)}
                 >
                   <Pencil size={14} />
@@ -189,8 +191,8 @@ export function QueueList({
                 <button
                   type="button"
                   className="icon-btn"
-                  aria-label="Remove"
-                  title="Remove"
+                  aria-label={t("Remove")}
+                  title={t("Remove")}
                   onClick={() => removeHeld(item.id)}
                 >
                   <X size={15} />
