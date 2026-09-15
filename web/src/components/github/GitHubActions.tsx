@@ -1,3 +1,4 @@
+import { AnimatePresence } from "motion/react";
 import { ResizeHandle } from "../ResizeHandle.tsx";
 import { useEffect, useState } from "react";
 import { ArrowLeft, Play, RefreshCw, Terminal } from "lucide-react";
@@ -209,7 +210,7 @@ export function GitHubActions({
           )}
         </div>
       </div>
-      {jobId && (
+      <AnimatePresence>{jobId && (
         <GitHubDialog
           title={t("Job logs")}
           description={t("{repository} · job {job}", { repository: repo, job: jobId })}
@@ -226,8 +227,8 @@ export function GitHubActions({
           </button>
           <pre className="github-logs scroll">{logs.data}</pre>
         </GitHubDialog>
-      )}
-      {action && (
+      )}</AnimatePresence>
+      <AnimatePresence>{action && (
         <GitHubDialog
           title={
             action === "dispatch"
@@ -356,7 +357,7 @@ export function GitHubActions({
             </label>
           )}
         </GitHubDialog>
-      )}
+      )}</AnimatePresence>
     </div>
   );
 }

@@ -1,5 +1,6 @@
+import { isRemote } from "../lib/environment.ts";
 import { useI18n } from "../lib/i18n.ts";
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   Globe2,
   TerminalSquare,
@@ -10,6 +11,7 @@ import {
   Plus,
   X,
   Monitor,
+  MoreHorizontal,
 } from "lucide-react";
 import { Changes } from "./Changes.tsx";
 import { ResizeHandle } from "./ResizeHandle.tsx";
@@ -78,17 +80,39 @@ export function Inspector({ visible }: { visible: boolean }) {
   const activePanels = useApp((state) => state.activePanels);
   const connected = useApp((state) => state.connected);
   const initialized = useRef(new Set<string>());
+  const tabStrip = useRef<HTMLDivElement>(null);
+  const focusTab = useRef(false);
+  const [tabWidth, setTabWidth] = useState(0);
   const tabs = panels.filter((panel) => panel.projectId === projectId);
   const activeId =
     projectId && tabs.some((panel) => panel.id === activePanels[projectId])
       ? activePanels[projectId]
       : tabs[0]?.id;
+  const tabLimit = tabWidth > 0 && tabs.length * 58 - 2 > tabWidth
+    ? Math.max(1, Math.floor((tabWidth - 32) / 58))
+    : tabs.length;
+  const visibleTabs = tabs.slice(0, tabLimit);
+  const selectedTab = tabs.find(panel => panel.id === activeId);
+  if (selectedTab && !visibleTabs.includes(selectedTab)) visibleTabs[visibleTabs.length - 1] = selectedTab;
+  const hiddenTabs = tabs.filter(panel => !visibleTabs.includes(panel));
 
-  useEffect(() => {
-    if (visible && activeId)
-      document
-        .getElementById(`panel-tab-${activeId}`)
-        ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  useLayoutEffect(() => {
+    if (!visible || !tabStrip.current) return;
+    const element = tabStrip.current;
+    const style = getComputedStyle(element);
+    setTabWidth(element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight));
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setTabWidth(Math.floor(entry.contentRect.width));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [visible]);
+
+  useLayoutEffect(() => {
+    if (visible && activeId && focusTab.current) {
+      document.getElementById(`panel-tab-${activeId}`)?.focus({ preventScroll: true });
+      focusTab.current = false;
+    }
   }, [visible, activeId]);
 
   useEffect(() => {
@@ -116,7 +140,7 @@ export function Inspector({ visible }: { visible: boolean }) {
           header={t("Open a panel")}
           width={292}
           align="end"
-          items={options.map((option) => ({
+          items={options.filter(option => !isRemote() || !["browser", "computer"].includes(option.kind)).map((option) => ({
             id: option.kind,
             label: t(option.label),
             hint: t(option.hint),
@@ -142,10 +166,12 @@ export function Inspector({ visible }: { visible: boolean }) {
         />
       </div>
       <div
-        className="workbench-tabs scroll"
+        className="workbench-tabs"
+        ref={tabStrip}
         role="tablist"
         aria-label={t("Open workspace panels")}
         onKeyDown={(event) => {
+          if (!(event.target instanceof HTMLElement) || !event.target.closest('[role="tab"]')) return;
           if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
             return;
           event.preventDefault();
@@ -161,12 +187,12 @@ export function Inspector({ visible }: { visible: boolean }) {
                   tabs.length;
           const panel = tabs[next];
           if (panel) {
+            focusTab.current = panel.id !== activeId;
             selectPanel(panel.id);
-            document.getElementById(`panel-tab-${panel.id}`)?.focus();
           }
         }}
       >
-        {tabs.map((panel) => {
+        {visibleTabs.map((panel) => {
           const Icon = options.find(
             (option) => option.kind === panel.kind,
           )!.icon;
@@ -181,6 +207,7 @@ export function Inspector({ visible }: { visible: boolean }) {
                 type="button"
                 id={`panel-tab-${panel.id}`}
                 role="tab"
+                aria-label={title}
                 aria-selected={activeId === panel.id}
                 aria-controls={`panel-body-${panel.id}`}
                 tabIndex={activeId === panel.id ? 0 : -1}
@@ -203,11 +230,48 @@ export function Inspector({ visible }: { visible: boolean }) {
             </div>
           );
         })}
+        {hiddenTabs.length > 0 && <Menu
+          header={t("Open workspace panels")}
+          align="end"
+          width={300}
+          items={hiddenTabs.map(panel => {
+            const Icon = options.find(option => option.kind === panel.kind)!.icon;
+            const title = panel.kind === "browser" || panel.kind === "terminal" ? panel.title : t(panel.title);
+            return {
+              id: panel.id,
+              label: title,
+              icon: <Icon size={16} className={`panel-icon-${panel.kind}`} />,
+              onSelect: () => {
+                focusTab.current = true;
+                selectPanel(panel.id);
+              },
+              action: connected ? {
+                label: t("Close {name}", { name: title }),
+                icon: <X size={13} />,
+                onSelect: () => send({ t: "panel.close", id: panel.id }),
+              } : undefined,
+            };
+          })}
+          trigger={({ id, open, toggle }) => (
+            <button
+              id={id}
+              type="button"
+              className="workbench-overflow"
+              aria-label={t("More panels")}
+              title={t("More panels")}
+              aria-haspopup="menu"
+              aria-expanded={open}
+              onClick={toggle}
+            >
+              <MoreHorizontal size={16} />
+            </button>
+          )}
+        />}
       </div>
       <div className="inspector-body">
         {panels.map((panel) => {
-          const active =
-            visible && panel.projectId === projectId && panel.id === activeId;
+          const selected = panel.projectId === projectId && panel.id === activeId;
+          const active = visible && selected;
           return (
             <div
               key={panel.id}
@@ -215,7 +279,7 @@ export function Inspector({ visible }: { visible: boolean }) {
               className="inspector-pane"
               role="tabpanel"
               aria-labelledby={`panel-tab-${panel.id}`}
-              data-show={active}
+              data-show={selected}
             >
               {panel.kind === "computer" ? (
                 <ComputerPane active={active} />

@@ -50,6 +50,7 @@ test("conversation persistence and lifecycle recovery", async (t) => {
       return {
         send() {},
         interrupt() {},
+        async stopShell(taskId) { session.stoppedShell = taskId; },
         dispose() {
           session.disposed = true;
           options.emit({ type: "exit", code: 0 });
@@ -179,6 +180,100 @@ test("conversation persistence and lifecycle recovery", async (t) => {
     return { socket, events };
   }
   const first = await connect();
+  await t.test("a folder selected by the desktop opens without launching another picker", async () => {
+    const selected = join(directory, "Selected folder # ✓");
+    const bin = join(directory, "picker-bin");
+    const marker = join(directory, "picker-opened");
+    fs.mkdirSync(selected);
+    fs.mkdirSync(bin);
+    fs.writeFileSync(join(bin, "kdialog"), `#!${process.execPath}\nrequire('node:fs').writeFileSync(${JSON.stringify(marker)}, 'opened');process.exit(1);\n`, { mode: 0o700 });
+    const previousPath = process.env.PATH;
+    const projectCount = store.projects.size;
+    process.env.PATH = `${bin}:${previousPath}`;
+    try {
+      let selectedId;
+      for (const path of [selected, `${selected}/`, join(directory, "missing-folder")]) {
+        const start = first.events.length;
+        first.socket.send(JSON.stringify({ t: "project.choose", path }));
+        const result = await waitFor(() => first.events.slice(start).find(event => event.t === "project.chosen"));
+        if (path.endsWith("missing-folder")) {
+          assert.equal(result.projectId, null);
+          assert.match(result.error, /ENOENT/);
+        } else {
+          assert.ok(result.projectId, JSON.stringify(result));
+          assert.equal(store.projects.get(result.projectId).path, selected);
+          if (selectedId) assert.equal(result.projectId, selectedId);
+          selectedId = result.projectId;
+        }
+      }
+      assert.equal(store.projects.size, projectCount + 1);
+      assert.equal(fs.existsSync(marker), false, "Opening a selected folder must not launch the system picker again.");
+      store.closeProject(selectedId);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+  await t.test("running shells survive unloaded history and background replies, with owned stop controls", async (subtest) => {
+    const previousSessions = sessions.length;
+    const { shellList } = await import("../server/shells.ts");
+    const entry = store.createThread({ projectId: project.id, provider: "claude", title: "Background server", permissionMode: "manual" });
+    const other = store.createThread({ projectId: project.id, provider: "claude", title: "Another task", permissionMode: "manual" });
+    subtest.after(() => {
+      disposeRuntime(entry.id);
+      disposeRuntime(other.id);
+      store.removeThread(entry.id);
+      store.removeThread(other.id);
+      sessions.splice(previousSessions);
+    });
+    await runtimeFor(entry.id).send("Start a server");
+    const session = sessions.at(-1);
+    await runtimeFor(other.id).send("Unrelated work");
+    const independent = sessions.at(-1);
+    const emit = event => session.options.emit(event);
+    const id = `${entry.id}:server`;
+    const find = () => shellList().find(shell => shell.id === id);
+    emit({ type: "tool.start", callId: "server", name: "Bash", input: { command: "npm run dev" } });
+    assert.equal(find().stopMode, "task");
+    emit({ type: "shell.background", callId: "server", taskId: "native-server" });
+    emit({ type: "tool.output", callId: "server", output: "Server ready" });
+    emit({ type: "tool.end", callId: "server", ok: true, output: "" });
+    assert.equal(find().output, "Server ready");
+    emit({ type: "turn.end" });
+    assert.equal(entry.running, false);
+    assert.equal(find().status, "running");
+    assert.equal(find().stopMode, "shell");
+    assert.equal(runtimeFor(entry.id).busy, true);
+    const { reloadProviderSessions } = await import("../server/runtime.ts");
+    reloadProviderSessions(new Set(["claude"]));
+    assert.equal(session.disposed, false);
+    const count = entry.messages.length;
+    emit({ type: "tool.output", callId: "server", output: "\nGET / 200", append: true });
+    assert.equal(entry.messages.length, count);
+    const snapshot = (await connect()).events.find(event => event.t === "hello").snapshot;
+    assert.match(snapshot.shells.find(shell => shell.id === id).output, /GET \/ 200/);
+    const rejected = await fetch(`${url}/api/shells/stop`, { method: "POST", headers: { "content-type": "application/json", origin: "https://unrelated.invalid" }, body: JSON.stringify({ id }) });
+    assert.equal(rejected.status, 403);
+    assert.equal(session.stoppedShell, undefined);
+    const stopped = await fetch(`${url}/api/shells/stop`, { method: "POST", headers: { "content-type": "application/json", origin: url }, body: JSON.stringify({ id }) });
+    assert.equal(stopped.status, 200);
+    assert.equal(session.stoppedShell, "native-server");
+    assert.equal(find().status, "stopped");
+    assert.equal(session.disposed, false);
+    assert.equal(independent.disposed, false);
+    assert.equal(runtimeFor(entry.id).busy, false);
+    await runtimeFor(entry.id).send("Run another shell");
+    emit({ type: "tool.start", callId: "foreground", name: "Bash", input: { command: "long test" } });
+    const fallback = await fetch(`${url}/api/shells/stop`, { method: "POST", headers: { "content-type": "application/json", origin: url }, body: JSON.stringify({ id: `${entry.id}:foreground` }) });
+    assert.equal(fallback.status, 200);
+    assert.equal(session.disposed, true);
+    assert.equal(independent.disposed, false);
+    assert.equal(entry.status, "stopped");
+    disposeRuntime(other.id);
+    store.removeThread(entry.id);
+    store.removeThread(other.id);
+    assert.equal(find(), undefined);
+  });
   await t.test("catalog refresh keeps the last good models on failure without resetting conversation state", async () => {
     const listModels = providers.claude.listModels;
     try {
@@ -196,6 +291,80 @@ test("conversation persistence and lifecycle recovery", async (t) => {
     } finally {
       providers.claude.listModels = listModels;
       await describeProviders();
+    }
+  });
+
+  await t.test("empty threads can change provider while existing sessions and rejected changes stay intact", async () => {
+    const fresh = store.createThread({ projectId: project.id, provider: "claude", model: "test", title: "Provider selection", permissionMode: "manual" });
+    store.setUsage(fresh.id, { ...fresh.usage, contextMax: 200000 });
+    first.socket.send(JSON.stringify({ t: "thread.config", id: fresh.id, provider: "codex", model: "test", effort: "low", requestId: "switch-provider" }));
+    await waitFor(() => first.events.some(event => event.t === "thread.accepted" && event.requestId === "switch-provider"));
+    assert.equal(fresh.provider, "codex");
+    assert.equal(fresh.effort, "low");
+    assert.equal(fresh.usage.contextMax, 0);
+    store.flush();
+    assert.equal(new Store().threads.get(fresh.id).provider, "codex");
+    for (const [id, patch] of [["session", { externalId: "saved-session" }], ["running", { running: true }], ["queue", { queue: [{ id: "queued", text: "Waiting", createdAt: 1 }] }]]) {
+      store.patchThread(fresh.id, patch);
+      first.socket.send(JSON.stringify({ t: "thread.config", id: fresh.id, provider: "claude", model: "test", requestId: `blocked-${id}` }));
+      await waitFor(() => first.events.some(event => event.t === "request.error" && event.requestId === `blocked-${id}`));
+      assert.equal(fresh.provider, "codex");
+      store.patchThread(fresh.id, { externalId: undefined, running: false, queue: [] });
+    }
+    store.addMessage(fresh.id, { id: "provider-message", role: "user", ts: 1, parts: [{ id: "provider-text", kind: "text", text: "Keep this history" }] });
+    first.socket.send(JSON.stringify({ t: "thread.config", id: fresh.id, provider: "claude", model: "test", requestId: "blocked-history" }));
+    await waitFor(() => first.events.some(event => event.t === "request.error" && event.requestId === "blocked-history"));
+    assert.equal(fresh.provider, "codex");
+    assert.equal(fresh.messages[0].parts[0].text, "Keep this history");
+    store.removeThread(fresh.id);
+  });
+
+  await t.test("changing access preserves inactive task status and applies to the next session", async (subtest) => {
+    const previousSessions = sessions.length;
+    const created = [];
+    subtest.after(() => {
+      for (const id of created) { disposeRuntime(id); store.removeThread(id); }
+      sessions.splice(previousSessions);
+    });
+    for (const provider of ["claude", "codex", "opencode"]) {
+      for (const status of ["idle", "stopped", "error"]) {
+        const entry = store.createThread({ projectId: project.id, provider, model: "test", title: `Access ${provider} ${status}`, permissionMode: "manual" });
+        created.push(entry.id);
+        const runtime = runtimeFor(entry.id);
+        await runtime.send("First message");
+        const old = sessions.at(-1);
+        old.options.emit({ type: "session", externalId: `native-${entry.id}` });
+        if (status === "stopped") runtime.stop();
+        else old.options.emit({ type: "turn.end", ...(status === "error" ? { error: "Previous failure" } : {}) });
+        assert.equal(entry.status, status);
+        await waitFor(() => first.events.some(event => event.t === "thread.upsert" && event.thread.id === entry.id && event.thread.externalId === `native-${entry.id}` && event.thread.status === status && !event.thread.running));
+        const offset = first.events.length;
+        const requestId = `access-${entry.id}`;
+        first.socket.send(JSON.stringify({ t: "thread.config", id: entry.id, permissionMode: "bypass", requestId }));
+        await waitFor(() => first.events.some(event => event.t === "thread.accepted" && event.requestId === requestId));
+        assert.equal(entry.permissionMode, "bypass");
+        assert.equal(entry.status, status);
+        assert.equal(entry.running, false);
+        assert.equal(old.disposed, true);
+        assert.ok(first.events.slice(offset).filter(event => event.t === "thread.upsert" && event.thread.id === entry.id).every(event => event.thread.status === status));
+        const messageCount = entry.messages.length;
+        old.options.emit({ type: "exit", code: 1 });
+        assert.equal(entry.status, status);
+        assert.equal(entry.messages.length, messageCount);
+        await runtimeFor(entry.id).send("Continue with the new access");
+        const next = sessions.at(-1);
+        assert.notEqual(next, old);
+        assert.equal(next.options.permissionMode, "bypass");
+        assert.equal(next.options.externalId, `native-${entry.id}`);
+        const rejected = `busy-${entry.id}`;
+        first.socket.send(JSON.stringify({ t: "thread.config", id: entry.id, permissionMode: "manual", requestId: rejected }));
+        await waitFor(() => first.events.some(event => event.t === "request.error" && event.requestId === rejected));
+        assert.equal(entry.permissionMode, "bypass");
+        assert.equal(entry.running, true);
+        assert.equal(next.disposed, false);
+        runtimeFor(entry.id).stop();
+        assert.equal(entry.status, "stopped");
+      }
     }
   });
 

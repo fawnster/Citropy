@@ -23,6 +23,7 @@ function launch(options: StartOptions, signal: AbortSignal, textOnly = false): P
     const permission = options.permissionMode === "bypass" ? { "*": "allow" } : { "*": options.permissionMode === "plan" ? "deny" : "ask", read: "allow", glob: "allow", grep: "allow", list: "allow", task: "allow", edit: options.permissionMode === "acceptEdits" ? "allow" : options.permissionMode === "plan" ? "deny" : "ask", "citropy_*": "allow" };
     const config = { ...inherited, permission: textOnly ? { "*": "deny" } : permission, mcp: { ...inherited.mcp, ...(options.mcp ? { citropy: { type: "remote", ...options.mcp, oauth: false, enabled: true } } : {}) } };
     const child = spawn("opencode", ["serve", "--port", "0", "--hostname", "127.0.0.1"], {
+      detached: process.platform !== "win32",
       cwd: options.cwd,
       env: { ...process.env, NO_COLOR: "1", OPENCODE_CONFIG_CONTENT: JSON.stringify(config) },
       stdio: ["ignore", "pipe", "pipe"],
@@ -33,7 +34,7 @@ function launch(options: StartOptions, signal: AbortSignal, textOnly = false): P
       settled = true;
       clearTimeout(timer);
       signal.removeEventListener("abort", abort);
-      stopProcess(child);
+      stopProcess(child, true);
       reject(error);
     };
     const abort = () => fail(signal.reason instanceof Error ? signal.reason : new Error("OpenCode startup cancelled"));
@@ -79,7 +80,7 @@ export async function generateOpenCodeText(cwd: string, model: string, prompt: s
     return (result.parts ?? []).filter((part: OcPart) => part.type === "text").map((part: OcPart) => part.text ?? "").join("\n");
   } finally {
     if (sessionId) await fetch(`${instance.base}/session/${encodeURIComponent(sessionId)}`, { method: "DELETE", signal: AbortSignal.timeout(2000) }).catch(() => {});
-    stopProcess(instance.child);
+    stopProcess(instance.child, true);
     await waitForStoppedProcesses();
   }
 }
@@ -93,7 +94,7 @@ export async function discoverOpenCodeCommands(cwd: string): Promise<ProviderCom
     return await response.json() as ProviderCommand[];
   } finally {
     controller.abort();
-    stopProcess(instance.child);
+    stopProcess(instance.child, true);
   }
 }
 
@@ -114,9 +115,10 @@ class OpenCodeSession implements AgentSession {
   #abort = new AbortController();
   #queue: Array<{ text: string; attachments: Attachment[] }> = [];
   #ready: Promise<void>;
+  #prompting: Promise<void> | null = null;
   #blocks = new Set<string>();
   #emitted = new Map<string, number>();
-  #tools = new Set<string>();
+  #tools = new Map<string, string>();
   #roles = new Map<string, string>();
   #busy = false;
   #compacting = false;
@@ -137,7 +139,7 @@ class OpenCodeSession implements AgentSession {
 
   async #boot(): Promise<void> {
     const instance = await launch(this.#options, this.#abort.signal);
-    if (this.#abort.signal.aborted) { stopProcess(instance.child); return; }
+    if (this.#abort.signal.aborted) { stopProcess(instance.child, true); return; }
     this.#instance = instance;
     if (this.#options.externalId) {
       this.#sessionId = this.#options.externalId;
@@ -154,7 +156,7 @@ class OpenCodeSession implements AgentSession {
     });
     const queued = this.#queue;
     this.#queue = [];
-    for (const entry of queued) void this.#prompt(entry.text, entry.attachments);
+    for (const entry of queued) this.send(entry.text, entry.attachments);
   }
 
   async #post(path: string, body: unknown): Promise<unknown> {
@@ -221,9 +223,9 @@ class OpenCodeSession implements AgentSession {
 
   async #prompt(text: string, attachments: Attachment[] = []): Promise<void> {
     this.#busy = true;
-    const body = this.#body(text, attachments);
     this.#options.emit({ type: "status", status: "thinking" });
     try {
+      const body = this.#body(text, attachments);
       const command = /^\/([\w.:-]+)(?:\s+([\s\S]*))?$/.exec(text.trim());
       if (command) {
         const response = await fetch(`${this.#instance!.base}/command`, { signal: this.#abort.signal });
@@ -250,7 +252,9 @@ class OpenCodeSession implements AgentSession {
       void this.#ready;
       return;
     }
-    void this.#prompt(text, attachments);
+    const pending = this.#prompt(text, attachments);
+    this.#prompting = pending;
+    void pending.finally(() => { if (this.#prompting === pending) this.#prompting = null; });
   }
 
   async steer(text: string, attachments: Attachment[] = [], skills: Array<{ name: string; path: string }> = []): Promise<void> {
@@ -273,19 +277,24 @@ class OpenCodeSession implements AgentSession {
     } finally { this.#compacting = false; }
   }
 
-  interrupt(): void {
+  async interrupt(): Promise<void> {
     if (this.#queue.length) this.#options.emit({ type: "notice", level: "warn", text: this.#queue.length === 1 ? "Stopped before OpenCode started your latest message. Send it again to run it." : `Stopped before OpenCode started your last ${this.#queue.length} messages. Send them again to run them.` });
     this.#queue = [];
     if (this.#compacting) this.#compactionError = "Context compaction was stopped.";
     cancelThread(this.#options.threadId);
-    if (!this.#sessionId) return;
-    void this.#post(`/session/${this.#sessionId}/abort`, {}).catch(() => {});
+    if (!this.#sessionId) {
+      this.#options.emit({ type: "turn.end" });
+      return;
+    }
+    const pending = this.#prompting;
+    await this.#post(`/session/${this.#sessionId}/abort`, {});
+    await pending;
   }
 
   dispose(): void {
     cancelThread(this.#options.threadId);
     this.#abort.abort();
-    if (this.#instance) stopProcess(this.#instance.child);
+    if (this.#instance) stopProcess(this.#instance.child, true);
     this.#instance = null;
     this.#queue = [];
     this.#blocks.clear();
@@ -330,18 +339,22 @@ class OpenCodeSession implements AgentSession {
 
     if (type === "message.updated") {
       const info = props.info as
-        | { id?: string; role?: string; tokens?: { input: number; output: number; cache?: { read: number; write: number } }; cost?: number; time?: { completed?: number } }
+        | { id?: string; role?: string; tokens?: { input: number; output: number; reasoning?: number; total?: number; cache?: { read: number; write: number } }; cost?: number; time?: { completed?: number } }
         | undefined;
       if (info?.id && info.role) this.#roles.set(info.id, info.role);
       if (!info || info.role !== "assistant") return;
       if (info.tokens && info.id) {
         const input = info.tokens.input ?? 0;
-        const output = info.tokens.output ?? 0;
+        const output = (info.tokens.output ?? 0) + (info.tokens.reasoning ?? 0);
+        const total = info.tokens.total;
+        const contextTokens = typeof total === "number" && Number.isFinite(total) && total > 0
+          ? total
+          : input + output + (info.tokens.cache?.read ?? 0) + (info.tokens.cache?.write ?? 0);
         emit({
           type: "usage",
           usage: {
             ...this.#usage.update(info.id, { input, output, cacheRead: info.tokens.cache?.read ?? 0, cacheWrite: info.tokens.cache?.write ?? 0, costUsd: info.cost ?? 0 }),
-            contextTokens: input + output + (info.tokens.cache?.read ?? 0) + (info.tokens.cache?.write ?? 0),
+            ...(contextTokens > 0 ? { contextTokens } : {}),
             contextMax: this.#options.contextMax ?? 0,
           },
         });
@@ -377,6 +390,7 @@ class OpenCodeSession implements AgentSession {
     this.#blocks.clear();
     this.#emitted.clear();
     cancelThread(this.#options.threadId, false);
+    this.#tools.clear();
     this.#options.emit({ type: "turn.end", ...(error ? { error } : {}) });
   }
 
@@ -416,13 +430,16 @@ class OpenCodeSession implements AgentSession {
       return;
     }
 
+    const serializedInput = JSON.stringify(input);
     if (!this.#tools.has(callId)) {
-      this.#tools.add(callId);
+      this.#tools.set(callId, serializedInput);
       emit({ type: "tool.start", callId, name, input });
       emit({ type: "status", status: "working", tool: name });
-    } else {
+    } else if (this.#tools.get(callId) !== serializedInput) {
+      this.#tools.set(callId, serializedInput);
       emit({ type: "tool.input", callId, input });
     }
+    if (name === "Bash" && typeof part.state?.metadata?.output === "string") emit({ type: "tool.output", callId, output: part.state.metadata.output });
     if (status === "completed" || status === "error") {
       this.#tools.delete(callId);
       emit({

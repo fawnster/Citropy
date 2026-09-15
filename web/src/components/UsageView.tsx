@@ -38,14 +38,12 @@ export function UsageView({
   }, [revision]);
   return (
     <section className="section-view" aria-label={t("Usage")}>
-      {sidebarOpen && (
-        <SectionSidebar title={t("Usage")} onBack={onBack} navigation={navigation}>
+      <SectionSidebar open={sidebarOpen} title={t("Usage")} onBack={onBack} navigation={navigation}>
           <button className="section-link" aria-current="page">
             <BarChart3 size={17} />
             <span>{t("Overview")}</span>
           </button>
-        </SectionSidebar>
-      )}
+      </SectionSidebar>
       <div className="settings scroll">
         <div className="settings-inner usage-inner">
           <header className="settings-heading">

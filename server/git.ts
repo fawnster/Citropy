@@ -30,6 +30,7 @@ export async function isRepo(cwd: string): Promise<boolean> {
 export async function status(cwd: string): Promise<GitStatus> {
   const porcelain = await tryGit(cwd, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
   const branchLine = (await tryGit(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"])).trim();
+  const upstream = (await tryGit(cwd, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])).trim() || null;
   const counts = await numstat(cwd);
 
   const files: GitFile[] = [];
@@ -66,7 +67,7 @@ export async function status(cwd: string): Promise<GitStatus> {
   }
 
   files.sort((x, y) => x.path.localeCompare(y.path));
-  return { branch: branchLine || "detached", ahead, behind, files, clean: files.length === 0 };
+  return { branch: branchLine || "detached", upstream, ahead, behind, files, clean: files.length === 0 };
 }
 
 async function numstat(cwd: string): Promise<Map<string, { added: number; removed: number }>> {
@@ -240,6 +241,30 @@ export function pushCurrentBranch(cwd: string, checkReady: () => void): Promise<
   });
 }
 
+function commitDiff(diff: string): string {
+  const limit = 60000;
+  if (diff.length <= limit) return diff;
+  const sections = diff.split(/(?=^diff --git |^@@ )/m).map((text) => {
+    const boundary = text.startsWith("@@ ") ? text.indexOf("\n") + 1 : text.length;
+    return { header: text.slice(0, boundary), body: text.slice(boundary) };
+  });
+  let remaining = limit - sections.reduce((total, section) => total + section.header.length, 0);
+  const hunks = sections.filter((section) => section.body).sort((a, b) => a.body.length - b.body.length);
+  if (remaining < hunks.reduce((total, section) => total + Math.min(section.body.length, 200), 0))
+    throw new Error("The changes are too large to summarize completely. Stage fewer files or write the commit message in Source control.");
+  const omitted = "\n[... diff excerpt omitted ...]\n";
+  for (const [index, section] of hunks.entries()) {
+    const allowance = Math.floor(remaining / (hunks.length - index));
+    if (section.body.length > allowance) {
+      const start = Math.floor((allowance - omitted.length) / 2);
+      const end = allowance - omitted.length - start;
+      section.body = section.body.slice(0, start) + omitted + section.body.slice(-end);
+    }
+    remaining -= section.body.length;
+  }
+  return sections.map((section) => section.header + section.body).join("");
+}
+
 export function assistedCommit(
   cwd: string,
   scope: "staged" | "all",
@@ -264,11 +289,12 @@ export function assistedCommit(
         return (await git(cwd, ["write-tree"], env)).trim();
       };
       const tree = await snapshot();
-      const summary = await git(cwd, ["diff", "--cached", "--stat", "--no-ext-diff", "--no-textconv"], env);
+      const summary = await git(cwd, ["diff", "--cached", "--numstat", "--summary", "--no-ext-diff", "--no-textconv", "--no-color"], env);
       if (!summary.trim()) throw new Error(scope === "staged" ? "There are no staged changes to commit." : "There are no changes to commit.");
+      if (summary.length > 12000) throw new Error("The changes are too large to summarize completely. Stage fewer files or write the commit message in Source control.");
       const diff = await git(cwd, ["diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=3"], env);
       const recentSubjects = await tryGit(cwd, ["log", "-5", "--format=%s"]);
-      const message = await generate({ summary: summary.slice(0, 12000), diff: diff.slice(0, 60000), recentSubjects: recentSubjects.slice(0, 2000), truncated: diff.length > 60000 || summary.length > 12000 });
+      const message = await generate({ summary, diff: commitDiff(diff), recentSubjects: recentSubjects.slice(0, 2000), truncated: diff.length > 60000 });
       checkReady();
       if ((await tryGit(cwd, ["rev-parse", "--verify", "HEAD"])).trim() !== head ||
           (await tryGit(cwd, ["symbolic-ref", "--quiet", "HEAD"])).trim() !== branch ||

@@ -1,3 +1,4 @@
+import { AnimatePresence } from "motion/react";
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Bell,
@@ -95,8 +96,7 @@ export function GitHub({
     sections.find((entry) => entry.name === section)?.global;
   return (
     <section className="section-view github-view" aria-label={t("GitHub")}>
-      {sidebarOpen && (
-        <SectionSidebar title="GitHub" onBack={onBack} navigation={navigation} workspace={<WorkspaceSelector />}>
+      <SectionSidebar open={sidebarOpen} title="GitHub" onBack={onBack} navigation={navigation} workspace={<WorkspaceSelector />}>
           {sections.map(({ name, icon: Icon, global }) => (
             <button
               className="section-link"
@@ -140,8 +140,7 @@ export function GitHub({
             <span>{status.data?.account?.login ?? t("Connect GitHub")}</span>
             {status.data?.account && <Check size={14} />}
           </button>
-        </SectionSidebar>
-      )}
+      </SectionSidebar>
       <div className="github-main">
         <header className="github-heading">
           <div className="github-heading-copy">
@@ -345,7 +344,7 @@ export function GitHub({
           </>
         )}
       </div>
-      {clone && (
+      <AnimatePresence>{clone && (
         <GitHubDialog
           title={t("Clone repository")}
           description={t("Clone {repository} into a new folder named {folder}. Choose its parent folder in the system file explorer.", { repository: clone, folder: clone.split("/")[1]! })}
@@ -361,8 +360,8 @@ export function GitHub({
         >
           <p className="github-meta">{" "}{t("The repository will open as a workspace when the clone finishes. Existing folders will be preserved.")}{" "}</p>
         </GitHubDialog>
-      )}
-      {connecting && projectId && (
+      )}</AnimatePresence>
+      <AnimatePresence>{connecting && projectId && (
         <GitHubDialog
           title={t("Connect workspace")}
           description={t("Connect {workspace} to {repository}. This adds a Git remote without pulling or pushing any files.", { workspace: project?.name ?? "", repository: repo })}
@@ -384,8 +383,8 @@ export function GitHub({
           <label className="git-field">{" "}{t("Remote name")}{" "}<input name="remote" defaultValue="origin" required />
           </label>
         </GitHubDialog>
-      )}
-      {fork && (
+      )}</AnimatePresence>
+      <AnimatePresence>{fork && (
         <GitHubDialog
           title={t("Fork repository")}
           description={t("Create a copy of {repository} in your GitHub account.", { repository: repo })}
@@ -400,7 +399,7 @@ export function GitHub({
             repository.refresh();
           }}
         />
-      )}
+      )}</AnimatePresence>
     </section>
   );
 }
@@ -563,7 +562,7 @@ function RepositoryBrowser({
           onChange={setPage}
         />
       )}
-      {creating && (
+      <AnimatePresence>{creating && (
         <GitHubDialog
           title={publishing ? t("Publish workspace") : t("Create repository")}
           description={
@@ -601,7 +600,7 @@ function RepositoryBrowser({
             </select>
           </label>
         </GitHubDialog>
-      )}
+      )}</AnimatePresence>
     </div>
   );
 }

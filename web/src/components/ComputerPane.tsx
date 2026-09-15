@@ -1,3 +1,4 @@
+import { AnimatePresence } from "motion/react";
 import { useEffect, useRef, useState } from "react";
 import { Monitor, MousePointer2, Pause, Play, RefreshCw, Square, LoaderCircle, Check, AlertCircle, Maximize2 } from "lucide-react";
 import { Modal } from "./Modal.tsx";
@@ -156,9 +157,9 @@ export function ComputerPane({ active }: { active: boolean }) {
           <p className="computer-session-note">{state.shortcut ? t("Ctrl+Alt+Escape stops control from any app.") : t("Use Stop sharing here or in your desktop's sharing indicator.")}{" "}{t("Automatically stops after five minutes without actions.")}</p>
         </>
       )}
-      {expanded && <Modal title={t("Computer preview")} description={owner?.title} icon={<Monitor size={20} className="panel-icon-computer" />} className="computer-preview-dialog" onClose={() => setExpanded(false)} footer={<><button type="button" className="btn" data-cancel onClick={() => setExpanded(false)}>{t("Close preview")}</button><button type="button" className="btn computer-stop" onClick={() => void operation("computer/stop")}><Square size={14} />{" "}{t("Stop sharing")}</button></>}>
+      <AnimatePresence>{expanded && <Modal title={t("Computer preview")} description={owner?.title} icon={<Monitor size={20} className="panel-icon-computer" />} className="computer-preview-dialog" onClose={() => setExpanded(false)} footer={<><button type="button" className="btn" data-cancel onClick={() => setExpanded(false)}>{t("Close preview")}</button><button type="button" className="btn computer-stop" onClick={() => void operation("computer/stop")}><Square size={14} />{" "}{t("Stop sharing")}</button></>}>
         {frame && <img className="computer-large-image" src={`data:image/jpeg;base64,${frame.image}`} alt={t("Shared desktop at a larger size")} />}
-      </Modal>}
+      </Modal>}</AnimatePresence>
       {(error || state.error) && <p className="feature-error" role="alert"><AlertCircle size={16} /> {error || state.error}</p>}
       {state.activity.length > 0 && <div className="computer-activity"><h4>{t("Recent activity")}</h4>{state.activity.slice(0, 20).map((item) => <div className="computer-activity-row" key={item.id}>{item.status === "running" ? <LoaderCircle className="spin" size={14} /> : item.status === "error" ? <AlertCircle size={14} className="text-err" /> : <Check size={14} className="text-ok" />}<span>{item.action}<small>{item.error || (item.actor === "user" ? t("You") : t("Provider"))}</small></span><time>{new Date(item.at).toLocaleTimeString(currentLocale(), { hour: "2-digit", minute: "2-digit" })}</time></div>)}</div>}
     </section>

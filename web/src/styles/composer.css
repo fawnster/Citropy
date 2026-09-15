@@ -11,17 +11,8 @@
 .composer-shell {
   width: min(var(--reading), 100%);
   margin: 0 auto;
-  border: 1px solid var(--line-strong);
   border-radius: 16px;
-  background: var(--panel);
-  transition:
-    border-color var(--dur-fast),
-    box-shadow var(--dur-fast);
-}
-
-.composer-shell:focus-within {
-  border-color: var(--accent-line);
-  box-shadow: 0 0 0 1px var(--accent-soft);
+  background: var(--raised);
 }
 
 .composer-input {
@@ -137,6 +128,18 @@
     background var(--dur-instant) var(--ease-out),
     color var(--dur-instant) var(--ease-out);
 }
+.menu-option { display: flex; align-items: stretch; min-width: 0; border-radius: var(--r-sm); }
+.menu-option > .menu-item { flex: 1; min-width: 0; }
+.menu-option:has(.menu-item-action):hover { background: var(--raised-2); }
+.menu-option:has(.menu-item-action)[data-selected] { background: var(--accent-soft); }
+.menu-option:has(.menu-item-action) > .menu-item { background: transparent; }
+.menu-item-action { display: grid; place-items: center; flex: none; width: 30px; margin: 3px; border-radius: var(--r-xs); color: var(--text-3); opacity: 0.45; }
+.menu-option:hover .menu-item-action,
+.menu-item-action:focus-visible,
+.menu-item-action[aria-pressed="true"] { opacity: 1; }
+.menu-item-action:hover { background: var(--raised); }
+.menu-item-action[aria-pressed="true"] { color: var(--warn); }
+.menu-item-action[aria-pressed="true"] svg { fill: currentColor; }
 
 .menu-item:hover,
 .menu-item:focus-visible {
@@ -152,47 +155,6 @@
   opacity: 0.45;
   cursor: default;
   background: transparent;
-}
-
-.menu-footer {
-  border-top: 1px solid var(--line);
-  padding: 10px;
-  margin-top: 5px;
-}
-
-.chat-git-trigger {
-  max-width: 140px;
-}
-
-.chat-git-trigger > svg {
-  flex: none;
-}
-
-.chat-git-trigger .spin {
-  animation: citropy-spin 1s linear infinite;
-}
-
-.chat-git-trigger[data-error],
-.chat-git-details[data-error] > strong {
-  color: var(--bad);
-}
-
-.chat-git-details {
-  display: grid;
-  gap: 6px;
-  font-size: 12px;
-}
-
-.chat-git-details small {
-  color: var(--text-3);
-}
-
-.chat-git-message {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 160px;
-  overflow: auto;
-  user-select: text;
 }
 
 .menu-item[data-danger] {
@@ -223,14 +185,6 @@
   width: 13px;
   height: 13px;
 }
-.composer-provider {
-  color: var(--text-3);
-  font-size: 10px;
-  border-left: 1px solid var(--line-strong);
-  padding-left: 7px;
-  margin-left: 1px;
-}
-
 .menu-copy {
   display: grid;
   flex: 1;
@@ -296,6 +250,15 @@
   box-shadow: var(--shadow-md);
   font-size: 12px;
 }
+.context-details::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  height: 10px;
+}
+.context-details .context-totals-label { margin: 0 0 10px; font-size: 10px; }
 
 .context-heading {
   display: flex;

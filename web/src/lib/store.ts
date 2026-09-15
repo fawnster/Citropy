@@ -1,8 +1,9 @@
+import { environmentStorage } from "./environment.ts";
 import { resolveResponse } from "./requests.ts";
 import type { ComputerState } from "../../../shared/computer.ts";
 import "./migrate-preferences.ts";
 import { create } from "zustand";
-import { defaultAssistance, type AssistanceSettings } from "../../../shared/assistance.ts";
+import { defaultAssistance, type AssistanceSettings, type WritingModel } from "../../../shared/assistance.ts";
 import type { Language } from "./translations.ts";
 import type { GitHubUser } from "../../../shared/github.ts";
 import type {
@@ -17,6 +18,7 @@ import type {
   Part,
   PermissionRequest,
   Project,
+  ProjectSettings,
   ProviderInfo,
   ServerEvent,
   ThreadMeta,
@@ -24,6 +26,7 @@ import type {
   AppNotification,
   NotificationPreferences,
   NotificationTarget,
+  ShellProcess,
 } from "../../../shared/protocol.ts";
 
 export interface MessageShell {
@@ -56,9 +59,14 @@ export type Theme = "dark" | "light";
 export type PanelId = "sidebar" | "inspector" | "git" | "github";
 
 export interface AppState {
+  shells: Record<string, ShellProcess>;
+  projectDefaults: Omit<ProjectSettings, "actions">;
   assistance: AssistanceSettings;
   activeView: "chat" | "git" | "github" | "settings" | "usage";
   newThreadProvider: import("../../../shared/protocol.ts").ProviderId | null;
+  creatingThread: boolean;
+  threadDefaults: Pick<ThreadMeta, "provider" | "model" | "effort" | "contextWindow" | "fastMode"> | null;
+  favoriteModels: WritingModel[];
   notifications: AppNotification[];
   notificationPreferences: NotificationPreferences;
   confirmation: Confirmation | null;
@@ -99,6 +107,7 @@ export interface AppState {
   toolConnections: Record<string, ToolConnection>;
   tools: ToolDefinition[];
   inspectorOpen: boolean;
+  gitPanelOpen: boolean;
   sidebarOpen: boolean;
   theme: Theme;
   language: Language;
@@ -111,12 +120,12 @@ export interface AppState {
 
 function readPref<T extends string>(key: string, fallback: T): T {
   if (typeof localStorage === "undefined") return fallback;
-  return (localStorage.getItem(key) as T | null) ?? fallback;
+  return (environmentStorage.getItem(key) as T | null) ?? fallback;
 }
 
 function readFlag(key: string, fallback: boolean): boolean {
   if (typeof localStorage === "undefined") return fallback;
-  const value = localStorage.getItem(key);
+  const value = environmentStorage.getItem(key);
   return value === null ? fallback : value === "1";
 }
 
@@ -151,11 +160,37 @@ function readOffline(): Record<string, QueuedMessage[]> {
   }
 }
 
+function readThreadDefaults(): AppState["threadDefaults"] {
+  try {
+    const value = JSON.parse(readPref("citropy.threadDefaults", "null"));
+    return value && ["claude", "codex", "opencode"].includes(value.provider) &&
+      (value.model === undefined || typeof value.model === "string") &&
+      (value.effort === undefined || typeof value.effort === "string") ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function readFavoriteModels(): WritingModel[] {
+  try {
+    const value = JSON.parse(readPref("citropy.favoriteModels", "[]"));
+    return Array.isArray(value) ? value.filter((entry) => entry && ["claude", "codex", "opencode"].includes(entry.provider) && typeof entry.model === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 export const useApp = create<AppState>(() => ({
+  shells: {},
   newThreadProvider: null,
+  creatingThread: false,
+  threadDefaults: readThreadDefaults(),
+  favoriteModels: readFavoriteModels(),
   notifications: [],
   assistance: { ...defaultAssistance },
+  projectDefaults: {},
   activeView: "chat",
+  gitPanelOpen: readFlag("citropy.gitPanel", false),
   notificationPreferences: { toasts: true, desktop: true, sound: false },
   confirmation: null,
   searchResult: null,
@@ -180,8 +215,8 @@ export const useApp = create<AppState>(() => ({
   git: {},
   permissions: [],
   toasts: [],
-  activeProjectId: typeof localStorage === "undefined" ? null : localStorage.getItem("citropy.project"),
-  activeThreadId: typeof localStorage === "undefined" ? null : localStorage.getItem("citropy.thread"),
+  activeProjectId: typeof localStorage === "undefined" ? null : environmentStorage.getItem("citropy.project"),
+  activeThreadId: typeof localStorage === "undefined" ? null : environmentStorage.getItem("citropy.thread"),
   followRequest: 0,
   readingThreadId: null,
   panels: [],
@@ -215,19 +250,72 @@ export const useApp = create<AppState>(() => ({
       : 100,
 }));
 
+export function resetEnvironment(projects: Project[], home: string): void {
+  useApp.getState().confirmation?.resolve(false);
+  useApp.setState({
+    shells: {},
+    projectDefaults: {},
+    assistance: { ...defaultAssistance },
+    newThreadProvider: null,
+    creatingThread: false,
+    notifications: [],
+    notificationPreferences: { toasts: true, desktop: true, sound: false },
+    confirmation: null,
+    searchResult: null,
+    searchMessageId: null,
+    connected: false,
+    githubAccount: null,
+    offline: readOffline(),
+    choosingWorkspace: false,
+    home,
+    projects,
+    providers: [],
+    threads: {},
+    threadOrder: [],
+    messages: {},
+    parts: {},
+    reveals: {},
+    order: {},
+    loaded: {},
+    historyBytes: {},
+    disclosures: {},
+    git: {},
+    permissions: [],
+    toasts: [],
+    activeProjectId: environmentStorage.getItem("citropy.project"),
+    activeThreadId: environmentStorage.getItem("citropy.thread"),
+    followRequest: 0,
+    readingThreadId: null,
+    panels: [],
+    activePanels: {},
+    browsers: {},
+    computer: { enabled: false, status: "idle", control: false, displays: [], activity: [] },
+    toolConnections: {},
+    tools: [],
+  });
+}
+
+export function toggleFavoriteModel(model: WritingModel): void {
+  const current = useApp.getState().favoriteModels;
+  const exists = current.some((entry) => entry.provider === model.provider && entry.model === model.model);
+  const favoriteModels = exists ? current.filter((entry) => entry.provider !== model.provider || entry.model !== model.model) : [...current, model];
+  useApp.setState({ favoriteModels });
+  environmentStorage.setItem("citropy.favoriteModels", JSON.stringify(favoriteModels));
+}
+
 export function setPanelWidth(panel: PanelId, width?: number): void {
   if (width !== undefined && (!Number.isFinite(width) || width <= 0)) return;
   const panelWidths = { ...useApp.getState().panelWidths };
   if (width === undefined) delete panelWidths[panel];
   else panelWidths[panel] = Math.round(width);
   useApp.setState({ panelWidths });
-  localStorage.setItem("citropy.panelWidths", JSON.stringify(panelWidths));
+  environmentStorage.setItem("citropy.panelWidths", JSON.stringify(panelWidths));
 }
 
 export function setLanguage(language: Language): void {
   if (language !== "en" && language !== "es") return;
   useApp.setState({ language });
-  localStorage.setItem("citropy.language", language);
+  environmentStorage.setItem("citropy.language", language);
 }
 
 function normalize(
@@ -353,6 +441,18 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
     return;
   }
   switch (event.t) {
+    case "shell.upsert":
+      state.shells = { ...state.shells, [event.shell.id]: event.shell };
+      return;
+    case "shell.remove": {
+      const { [event.id]: removed, ...remaining } = state.shells;
+      void removed;
+      state.shells = remaining;
+      return;
+    }
+    case "project.defaults":
+      state.projectDefaults = event.settings;
+      return;
     case "assistance.settings":
       state.assistance = event.settings;
       return;
@@ -443,8 +543,8 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
       if (event.projectId) {
         state.activeProjectId = event.projectId;
         state.activeThreadId = null;
-        localStorage.setItem("citropy.project", event.projectId);
-        localStorage.removeItem("citropy.thread");
+        environmentStorage.setItem("citropy.project", event.projectId);
+        environmentStorage.removeItem("citropy.thread");
       }
       if (event.error)
         state.toasts = [
@@ -473,6 +573,8 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
       state.searchResult = event;
       return;
     case "hello": {
+      state.shells = Object.fromEntries((event.snapshot.shells ?? []).map(shell => [shell.id, shell]));
+      state.projectDefaults = event.snapshot.projectDefaults ?? {};
       state.assistance = event.snapshot.assistance ?? { ...defaultAssistance };
       state.computer = event.snapshot.computer ?? { enabled: false, status: "idle", control: false, displays: [], activity: [] };
       state.notifications = event.snapshot.notifications ?? [];
@@ -708,8 +810,8 @@ export function selectThread(id: string | null): void {
     trimHistories(next);
     return next;
   });
-  if (id) localStorage.setItem("citropy.thread", id);
-  else localStorage.removeItem("citropy.thread");
+  if (id) environmentStorage.setItem("citropy.thread", id);
+  else environmentStorage.removeItem("citropy.thread");
 }
 
 export function selectProject(id: string): void {
@@ -718,13 +820,13 @@ export function selectProject(id: string): void {
     trimHistories(next);
     return next;
   });
-  localStorage.removeItem("citropy.thread");
-  localStorage.setItem("citropy.project", id);
+  environmentStorage.removeItem("citropy.thread");
+  environmentStorage.setItem("citropy.project", id);
 }
 
 export function setTheme(theme: Theme): void {
   useApp.setState({ theme });
-  localStorage.setItem("citropy.theme", theme);
+  environmentStorage.setItem("citropy.theme", theme);
   document.documentElement.dataset.theme = theme;
 }
 
@@ -735,19 +837,19 @@ export function selectPanel(id: string): void {
     activePanels: { ...state.activePanels, [panel.projectId]: id },
     inspectorOpen: true,
   }));
-  localStorage.setItem("citropy.inspector", "1");
+  environmentStorage.setItem("citropy.inspector", "1");
 }
 
 export function toggleInspector(): void {
   const next = !useApp.getState().inspectorOpen;
   useApp.setState({ inspectorOpen: next });
-  localStorage.setItem("citropy.inspector", next ? "1" : "0");
+  environmentStorage.setItem("citropy.inspector", next ? "1" : "0");
 }
 
 export function toggleSidebar(): void {
   const next = !useApp.getState().sidebarOpen;
   useApp.setState({ sidebarOpen: next });
-  localStorage.setItem("citropy.sidebar", next ? "1" : "0");
+  environmentStorage.setItem("citropy.sidebar", next ? "1" : "0");
 }
 
 export function dismissToast(id: string): void {
@@ -775,7 +877,7 @@ export function setUiScale(value: number): void {
   const uiScale = Math.max(90, Math.min(150, Math.round(value)));
   if (!Number.isFinite(uiScale)) return;
   useApp.setState({ uiScale });
-  localStorage.setItem("citropy.uiScale", String(uiScale));
+  environmentStorage.setItem("citropy.uiScale", String(uiScale));
   document.documentElement.style.setProperty(
     "--ui-scale",
     String(uiScale / 100),
@@ -784,24 +886,24 @@ export function setUiScale(value: number): void {
 
 export function setTextStreaming(value: boolean): void {
   useApp.setState({ textStreaming: value });
-  localStorage.setItem("citropy.textStreaming", value ? "1" : "0");
+  environmentStorage.setItem("citropy.textStreaming", value ? "1" : "0");
 }
 
 export function setShowGitHubIdentity(value: boolean): void {
   useApp.setState({ showGitHubIdentity: value });
-  localStorage.setItem("citropy.showGitHubIdentity", value ? "1" : "0");
+  environmentStorage.setItem("citropy.showGitHubIdentity", value ? "1" : "0");
 }
 
 export function setTypingAnimation(value: boolean): void {
   useApp.setState({ typingAnimation: value });
-  localStorage.setItem("citropy.typingAnimation", value ? "1" : "0");
+  environmentStorage.setItem("citropy.typingAnimation", value ? "1" : "0");
 }
 
 export function setTypingSpeed(value: number): void {
   if (!Number.isFinite(value)) return;
   const typingSpeed = Math.max(20, Math.min(300, Math.round(value)));
   useApp.setState({ typingSpeed });
-  localStorage.setItem("citropy.typingSpeed", String(typingSpeed));
+  environmentStorage.setItem("citropy.typingSpeed", String(typingSpeed));
 }
 
 export function markTextPresented(id: string): void {

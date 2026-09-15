@@ -1,7 +1,8 @@
 import { Attachments } from "./Attachments.tsx";
-import { memo } from "react";
+import { memo, type ReactNode } from "react";
 import { PartView } from "./PartView.tsx";
 import { WorkGroup } from "./WorkGroup.tsx";
+import { WorkDetails } from "./WorkDetails.tsx";
 import type { TimelineRow } from "../lib/timeline.ts";
 import { useApp } from "../lib/store.ts";
 import { UserRound } from "lucide-react";
@@ -15,8 +16,10 @@ import {
   providerLabels,
 } from "../lib/format.ts";
 
-interface Props extends Omit<TimelineRow, "key"> {
+interface Props extends Omit<TimelineRow, "key" | "messageId"> {
+  messageId?: string;
   streaming: boolean;
+  children?: ReactNode;
 }
 
 export const MessageBlock = memo(function MessageBlock({
@@ -25,9 +28,12 @@ export const MessageBlock = memo(function MessageBlock({
   row,
   first,
   last,
+  separator,
+  children,
 }: Props) {
   const t = useI18n();
-  const shell = useApp((state) => state.messages[messageId]);
+  const shell = useApp((state) => messageId ? state.messages[messageId] : undefined);
+  const partKind = useApp((state) => row?.kind === "part" ? state.parts[row.id]?.kind : undefined);
   const provider = useApp((state) =>
     state.activeThreadId
       ? state.threads[state.activeThreadId]?.provider
@@ -42,14 +48,14 @@ export const MessageBlock = memo(function MessageBlock({
 
   const thread = useApp((state) => state.threads[state.activeThreadId ?? ""]);
   const account = useApp((state) =>
-    state.showGitHubIdentity && state.messages[messageId]?.role === "user"
+    state.showGitHubIdentity && messageId && state.messages[messageId]?.role === "user"
       ? state.githubAccount
       : null,
   );
 
-  if (!shell) return null;
+  if (!shell && (messageId !== undefined || !thread)) return null;
 
-  if (shell.role === "user") {
+  if (shell?.role === "user") {
     return (
       <article id={`message-${messageId}`} className="turn turn-user">
         <div
@@ -92,16 +98,19 @@ export const MessageBlock = memo(function MessageBlock({
   }
 
   const catalog = providers.find((entry) => entry.id === provider);
-  const modelId = shell.model ?? threadModel;
+  const modelId = shell?.model ?? threadModel;
   const modelName = modelLabel(catalog?.models ?? [], modelId);
   const model = selectedModel(catalog?.models ?? [], modelId);
+  const activity = row?.kind === "group" || row?.kind === "activity" || Boolean(partKind && partKind !== "text");
 
   return (
     <article
-      id={first ? `message-${messageId}` : undefined}
+      id={first && messageId ? `message-${messageId}` : undefined}
       className="turn turn-agent"
       data-continuation={!first || undefined}
       data-last={last}
+      data-activity={activity || undefined}
+      data-working={Boolean(children) || undefined}
     >
       {first && (
         <div className="message-avatar agent-avatar" aria-label={modelName}>
@@ -120,18 +129,22 @@ export const MessageBlock = memo(function MessageBlock({
                 {catalog?.label ?? providerLabels[provider]}
               </span>
             )}
-            <time>{clock(shell.ts)}</time>
+            <time>{clock(shell?.ts ?? thread?.runStartedAt ?? thread?.updatedAt ?? 0)}</time>
           </div>
         )}
+        {separator && <hr className="work-separator" />}
         {row && (
-          <div className="message-bubble agent-card">
-            {row.kind === "group" ? (
+          <div className={activity ? "agent-activity" : "message-bubble agent-card"}>
+            {row.kind === "activity" ? (
+              <WorkDetails id={row.id} ids={row.ids} open={row.open} />
+            ) : row.kind === "group" ? (
               <WorkGroup key={row.ids[0]} ids={row.ids} />
             ) : (
               <PartView key={row.id} partId={row.id} live={streaming} />
             )}
           </div>
         )}
+        {children}
       </div>
     </article>
   );

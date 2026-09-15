@@ -1,6 +1,7 @@
 import { useI18n } from "../lib/i18n.ts";
 import { useRef, useState } from "react";
-import { motion, useReducedMotion } from "motion/react";
+import { motion } from "motion/react";
+import { useReducedMotion } from "../lib/use-reduced-motion.ts";
 import { GitBranch, Github, Settings, BarChart3 } from "lucide-react";
 
 import { AppUpdateControl } from "./AppUpdateControl.tsx";

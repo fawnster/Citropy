@@ -18,25 +18,35 @@ import "./styles/git.css";
 import "./styles/github.css";
 import "./styles/features.css";
 import "./styles/computer.css";
-import { App } from "./App.tsx";
-import { connect } from "./lib/socket.ts";
-import { useApp } from "./lib/store.ts";
+import "./styles/environments.css";
+import { initializeEnvironment } from "./lib/environment.ts";
 
-if (!window.citropyDesktop && window.loomDesktop)
-  window.citropyDesktop = window.loomDesktop;
+async function start() {
+  await initializeEnvironment();
+  const [{ App }, { connect }, { useApp }] = await Promise.all([import("./App.tsx"), import("./lib/socket.ts"), import("./lib/store.ts")]);
 
-document.documentElement.dataset.theme = useApp.getState().theme;
-document.documentElement.style.setProperty(
-  "--ui-scale",
-  String(useApp.getState().uiScale / 100),
-);
-connect();
+  if (!window.citropyDesktop && window.loomDesktop)
+    window.citropyDesktop = window.loomDesktop;
 
-const root = document.getElementById("root");
-if (!root) throw new Error("missing #root");
+  document.documentElement.dataset.theme = useApp.getState().theme;
+  document.documentElement.style.setProperty(
+    "--ui-scale",
+    String(useApp.getState().uiScale / 100),
+  );
+  connect();
 
-createRoot(root).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+  const root = document.getElementById("root");
+  if (!root) throw new Error("missing #root");
+
+  createRoot(root).render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+
+}
+
+void start().catch(error => {
+  const root = document.getElementById("root");
+  if (root) root.textContent = error.message;
+});

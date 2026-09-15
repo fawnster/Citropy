@@ -1,5 +1,5 @@
+import { environmentId, environmentSignal, environmentStorage, serverUrl } from "../lib/environment.ts";
 import { ComposerInput } from "./ComposerInput.tsx";
-import { GitActions } from "./GitActions.tsx";
 import { gitActionBusy } from "../../../shared/assistance.ts";
 import { Attachments } from "./Attachments.tsx";
 import { QueueList } from "./QueueList.tsx";
@@ -35,7 +35,6 @@ import {
 } from "../../../shared/model-options.ts";
 import { ContextUsage } from "./ContextUsage.tsx";
 import { send } from "../lib/socket.ts";
-import { ProviderIcon } from "./ProviderIcon.tsx";
 import { Menu } from "./Menu.tsx";
 import {
   configureThread,
@@ -45,12 +44,11 @@ import {
 } from "../lib/actions.ts";
 import { selectThread, selectPanel, useApp } from "../lib/store.ts";
 import {
-  modelSource,
-  modelLabel,
   effortLabel as formatEffort,
 } from "../lib/format.ts";
 import type { PermissionMode } from "../../../shared/protocol.ts";
 import { useI18n } from "../lib/i18n.ts";
+import { ModelPicker } from "./ModelPicker.tsx";
 
 const MODES: Array<{
   id: PermissionMode;
@@ -95,19 +93,22 @@ export function Composer({
   onSkills?: () => void;
 }) {
   const t = useI18n();
+  const [scope] = useState(environmentId);
+  const [scopeSignal] = useState(environmentSignal);
   const threadId = useApp((state) => state.activeThreadId);
   const thread = useApp((state) =>
     threadId ? state.threads[threadId] : undefined,
   );
   const connected = useApp((state) => state.connected);
   const providers = useApp((state) => state.providers);
+  const hasMessages = useApp((state) => Boolean(threadId && state.order[threadId]?.length));
   const project = useApp((state) =>
     state.projects.find((entry) => entry.id === thread?.projectId),
   );
   const [draft] = useState<ComposerDraft>(() => {
     try {
       const saved = JSON.parse(
-        localStorage.getItem(`citropy.draft.${threadId}`) || "{}",
+        environmentStorage.getItem(`citropy.draft.${threadId}`, scope) || "{}",
       );
       return {
         text: typeof saved.text === "string" ? saved.text : "",
@@ -142,11 +143,12 @@ export function Composer({
   }, []);
   useEffect(() => {
     if (threadId)
-      localStorage.setItem(
+      environmentStorage.setItem(
         `citropy.draft.${threadId}`,
         JSON.stringify({ text: value, attachments }),
+        scope,
       );
-  }, [threadId, value, attachments]);
+  }, [threadId, value, attachments, scope]);
   const upload = async (files: File[]) => {
     if (!threadId || uploading) return;
     if (attachments.length + files.length > 8) {
@@ -159,10 +161,11 @@ export function Composer({
           throw new Error(t("{name} exceeds the 50 MB file limit.", { name: file.name }));
         setUploading(file.name);
         const response = await fetch(
-          `/api/attachments?${new URLSearchParams({ threadId, name: file.name })}`,
-          { method: "POST", body: file, signal: uploadAbort.current.signal },
+          serverUrl(`/api/attachments?${new URLSearchParams({ threadId, name: file.name })}`),
+          { method: "POST", body: file, signal: AbortSignal.any([uploadAbort.current.signal, scopeSignal]) },
         );
         const result = await response.json();
+        scopeSignal.throwIfAborted();
         if (!response.ok) throw new Error(result.error || t("Upload failed."));
         setAttachments((previous) => [...previous, result]);
       }
@@ -428,43 +431,14 @@ export function Composer({
           commands={commands}
         />
         <div className="composer-bar">
-          <Menu
-            header={
-              provider?.modelsError ? t("Models · refresh unavailable") : t("Model")
-            }
-            width={320}
-            searchable
-            items={(provider?.models ?? []).map((entry) => ({
-              id: entry.id,
-              label: entry.label,
-              icon: <ProviderIcon provider={thread.provider} />,
-              hint: modelSource(provider, entry),
-              selected: entry.id === model?.id,
-              onSelect: () =>
-                configureThread(thread.id, { model: entry.id, effort: null }),
-            }))}
-            trigger={({ toggle, id, open }) => (
-              <button
-                ref={modelButton}
-                id={id}
-                aria-haspopup="menu"
-                aria-expanded={open}
-                className="composer-select composer-model"
-                type="button"
-                disabled={running}
-                onClick={() => {
-                  send({ t: "providers.refresh" });
-                  toggle();
-                }}
-              >
-                <ProviderIcon provider={thread.provider} />
-                <span className="truncate">
-                  {modelLabel(provider?.models ?? [], thread.model)}
-                </span>
-                <span className="composer-provider">{provider?.label}</span>
-                <ChevronDown size={11} className="muted" />
-              </button>
-            )}
+          <ModelPicker
+            value={{ provider: thread.provider, model: thread.model ?? model?.id ?? "default" }}
+            label={t("Model")}
+            buttonRef={modelButton}
+            className="composer-select composer-model"
+            disabled={running || !connected || sending}
+            lockedProvider={hasMessages || thread.externalId || thread.usage.turns || thread.queue?.length ? thread.provider : undefined}
+            onChange={(choice) => { if (choice) configureThread(thread.id, { ...choice, effort: null }); }}
           />
 
           {Boolean(
@@ -588,7 +562,6 @@ export function Composer({
           />
 
           <div className="composer-actions">
-            <GitActions key={thread.id} thread={thread} />
             <ContextUsage onCompact={compact} />
             <button
               className="icon-btn"

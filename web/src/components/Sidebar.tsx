@@ -9,9 +9,11 @@ import {
   MessagesSquare,
 } from "lucide-react";
 import { ConversationMenu } from "./ConversationMenu.tsx";
+import { Collapsible } from "./Collapsible.tsx";
 import { api, reportError } from "../lib/api.ts";
 import { send } from "../lib/socket.ts";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import {
   MessageSquarePlus,
   Trash2,
@@ -63,6 +65,11 @@ export function Sidebar({
   const [snoozedOpen, setSnoozedOpen] = useState(false);
   const [archivedOpen, setArchivedOpen] = useState(false);
   const [dragging, setDragging] = useState<string>();
+  const [dropTarget, setDropTarget] = useState<{ id: string; edge: "before" | "after" }>();
+  const dragCleanup = useRef<() => void>(() => {});
+  const dragHeight = useRef(0);
+  const suppressClick = useRef(false);
+  const uiScale = useApp((state) => state.uiScale);
   let activeRoot = activeThreadId ? threadMap[activeThreadId] : undefined;
   while (activeRoot?.parentThreadId)
     activeRoot = threadMap[activeRoot.parentThreadId];
@@ -79,6 +86,7 @@ export function Sidebar({
     if (activeCurrent) setCurrentOpen(true);
   }, [activeThreadId, activeCurrent]);
   const connected = useApp((state) => state.connected);
+  const creatingThread = useApp((state) => state.creatingThread);
   const searchResult = useApp((state) => state.searchResult);
   const [allProjects, setAllProjects] = useState(false);
   const [query, setQuery] = useState("");
@@ -109,40 +117,216 @@ export function Sidebar({
     [order, threadMap, activeProjectId, query, matches],
   );
 
-  const roots = threads.filter(
-    (thread) => !thread.parentThreadId || Boolean(query),
-  );
-  const sortThreads = (a: ThreadMeta, b: ThreadMeta) =>
-    (a.position ?? Number.MAX_SAFE_INTEGER) -
-      (b.position ?? Number.MAX_SAFE_INTEGER) || b.updatedAt - a.updatedAt;
-  const archived = roots.filter((thread) => thread.archived).sort(sortThreads);
-  const snoozed = roots
-    .filter((thread) => !thread.archived && thread.snoozedUntil)
-    .sort(sortThreads);
-  const awake = roots.filter(
-    (thread) => !thread.archived && !thread.snoozedUntil,
-  );
-  const finished = awake.filter((thread) => thread.finished).sort(sortThreads);
-  const pinned = awake.filter((thread) => !thread.finished && thread.pinned).sort(sortThreads);
-  const current = awake.filter((thread) => !thread.finished && !thread.pinned).sort(sortThreads);
-  const reorder = async (source: string, target: string) => {
+  const { archived, snoozed, finished, pinned, current } = useMemo(() => {
+    const roots = threads.filter((thread) => !thread.parentThreadId || Boolean(query));
+    const sortThreads = (a: ThreadMeta, b: ThreadMeta) =>
+      (a.position ?? Number.MAX_SAFE_INTEGER) - (b.position ?? Number.MAX_SAFE_INTEGER) || b.updatedAt - a.updatedAt;
+    const archived = roots.filter((thread) => thread.archived).sort(sortThreads);
+    const snoozed = roots.filter((thread) => !thread.archived && thread.snoozedUntil).sort(sortThreads);
+    const awake = roots.filter((thread) => !thread.archived && !thread.snoozedUntil);
+    return {
+      archived,
+      snoozed,
+      finished: awake.filter((thread) => thread.finished).sort(sortThreads),
+      pinned: awake.filter((thread) => !thread.finished && thread.pinned).sort(sortThreads),
+      current: awake.filter((thread) => !thread.finished && !thread.pinned).sort(sortThreads),
+    };
+  }, [threads, query]);
+  const groups = useMemo(() => [
+    { id: "pinned", label: "Pinned", icon: Pin, threads: pinned, open: pinnedOpen, toggle: () => setPinnedOpen((open) => !open) },
+    { id: "active", label: "Active", icon: MessagesSquare, threads: current, open: currentOpen, toggle: () => setCurrentOpen((open) => !open) },
+    { id: "snoozed", label: "Snoozed", icon: Clock, threads: snoozed, open: snoozedOpen, toggle: () => setSnoozedOpen((open) => !open) },
+    { id: "archived", label: "Archived", icon: Archive, threads: archived, open: archivedOpen, toggle: () => setArchivedOpen((open) => !open) },
+    { id: "finished", label: "Finished", icon: CircleCheck, threads: finished, open: finishedOpen, toggle: () => setFinishedOpen((open) => !open) },
+  ].filter((group) => group.threads.length > 0), [pinned, current, snoozed, archived, finished, pinnedOpen, currentOpen, snoozedOpen, archivedOpen, finishedOpen]);
+  const rows = useMemo(() => groups.flatMap((group) => [
+    { key: group.id, group, thread: undefined as ThreadMeta | undefined },
+    ...(group.open || query ? group.threads.map((thread) => ({ key: thread.id, group, thread })) : []),
+  ]), [groups, query]);
+  const rowOrder = rows.map(row => row.key).join("\0");
+  useEffect(() => () => dragCleanup.current(), [activeProjectId, query, connected, uiScale, rowOrder]);
+  const viewport = useRef<HTMLDivElement>(null);
+  const [focusedRow, setFocusedRow] = useState<string>();
+  const virtualized = rows.length > 40;
+  const focusedIndex = rows.findIndex((row) => row.key === focusedRow);
+  const draggingIndex = rows.findIndex((row) => row.key === dragging);
+  const getItemKey = useCallback((index: number) => rows[index]!.key, [rows]);
+  const list = useVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count: rows.length,
+    enabled: virtualized,
+    getScrollElement: () => viewport.current,
+    getItemKey,
+    estimateSize: (index) => rows[index]?.thread ? 96 : 40,
+    measureElement: (element) => element.offsetHeight,
+    overscan: 3,
+    rangeExtractor: useCallback((range: Range) => [...new Set([
+      ...defaultRangeExtractor(range),
+      ...[focusedIndex, draggingIndex].filter((index) => index >= 0),
+    ])].sort((a, b) => a - b), [focusedIndex, draggingIndex]),
+  });
+  useEffect(() => {
+    if (!virtualized) return;
+    const index = rows.findIndex((row) => row.thread?.id === activeRoot?.id);
+    if (index >= 0) list.scrollToIndex(index, { align: "auto" });
+  }, [activeThreadId, activeProjectId, query, virtualized]);
+  const virtualRows = list.getVirtualItems();
+  const renderHeading = (group: (typeof groups)[number]) => <button
+    className="finished-toggle"
+    type="button"
+    aria-expanded={group.open || Boolean(query)}
+    onClick={group.toggle}
+  >
+    <ChevronRight size={12} className="category-chevron" />
+    <group.icon size={14} className={`category-icon${group.id === "finished" ? " category-finished" : ""}`} />
+    <span>{t(group.label, undefined, "conversations")}</span><span>{group.threads.length}</span>
+  </button>;
+  const reorder = async (source: string, target: string, edge?: "before" | "after") => {
     if (source === target || query || !activeProjectId) return;
-    const ordered = [...pinned, ...current, ...finished, ...snoozed, ...archived].map(
-      (thread) => thread.id,
-    );
+    if (!groups.some((group) => group.threads.some((thread) => thread.id === source) && group.threads.some((thread) => thread.id === target))) return;
+    const ordered = groups.flatMap((group) => group.threads.map((thread) => thread.id));
     const from = ordered.indexOf(source),
       to = ordered.indexOf(target);
     if (from < 0 || to < 0) return;
     ordered.splice(from, 1);
-    ordered.splice(to, 0, source);
+    ordered.splice(ordered.indexOf(target) + ((edge ?? (from < to ? "after" : "before")) === "after" ? 1 : 0), 0, source);
+    const previous = useApp.getState().threads;
+    useApp.setState((state) => {
+      const threads = { ...state.threads };
+      ordered.forEach((id, position) => { threads[id] = { ...threads[id]!, position }; });
+      return { threads };
+    });
     try {
       await api(`threads/reorder?projectId=${activeProjectId}`, {
         method: "POST",
         body: JSON.stringify({ ids: ordered }),
       });
     } catch (error) {
+      useApp.setState((state) => {
+        if (!ordered.every((id, position) => state.threads[id]?.position === position)) return state;
+        const threads = { ...state.threads };
+        ordered.forEach((id) => { threads[id] = { ...threads[id]!, position: previous[id]?.position }; });
+        return { threads };
+      });
       reportError(error);
     }
+  };
+  const startDrag = (event: ReactPointerEvent<HTMLDivElement>, thread: ThreadMeta) => {
+    dragCleanup.current();
+    suppressClick.current = false;
+    const control = (event.target as HTMLElement).closest("button, a, input, textarea");
+    if (event.button !== 0 || !event.isPrimary || event.pointerType === "touch" || query || !connected ||
+      (control && !control.classList.contains("thread-row"))) return;
+    const element = event.currentTarget;
+    const scroll = viewport.current;
+    const group = groups.find((entry) => entry.threads.some((entry) => entry.id === thread.id));
+    if (!scroll || !group) return;
+    const indices = new Map(group.threads.map((entry, index) => [entry.id, index]));
+    const sourceIndex = indices.get(thread.id)!;
+    const pointerId = event.pointerId;
+    const startX = event.clientX, startY = event.clientY, startScroll = scroll.scrollTop;
+    const scale = uiScale / 100;
+    dragHeight.current = element.parentElement!.offsetHeight;
+    let x = startX, y = startY, active = false, frame = 0, lastTime = performance.now();
+    let drop: typeof dropTarget;
+    const update = (now: number) => {
+      frame = 0;
+      const bounds = scroll.getBoundingClientRect();
+      const inside = x >= bounds.left && x < bounds.right && y >= bounds.top && y < bounds.bottom;
+      const distance = y < bounds.top + 40 ? y - bounds.top - 40 : y > bounds.bottom - 40 ? y - bounds.bottom + 40 : 0;
+      const entries = Array.from(scroll.querySelectorAll<HTMLElement>(".thread-entry")).flatMap(node => {
+        const id = node.dataset.threadId!;
+        const index = indices.get(id);
+        return index === undefined ? [] : [{ id, index, rect: node.parentElement!.getBoundingClientRect() }];
+      });
+      const source = entries.find(entry => entry.id === thread.id);
+      if (!source || !element.isConnected) { finish(false); return; }
+      const first = entries.find(entry => entry.index === 0);
+      const last = entries.find(entry => entry.index === group.threads.length - 1);
+      const before = scroll.scrollTop;
+      if (inside && distance) {
+        const step = Math.max(-16, Math.min(16, distance * 0.4)) * Math.min(32, now - lastTime) / 16;
+        const minimum = first ? Math.min(0, (first.rect.top - bounds.top) / scale) : -Infinity;
+        const maximum = last ? Math.max(0, (last.rect.bottom - bounds.bottom) / scale) : Infinity;
+        scroll.scrollTop += Math.max(minimum, Math.min(maximum, step));
+      }
+      lastTime = now;
+      const scrolled = (scroll.scrollTop - before) * scale;
+      let next: typeof dropTarget;
+      if (inside) {
+        for (const { id, index, rect } of entries) {
+          const top = rect.top - scrolled, bottom = rect.bottom - scrolled;
+          if ((y < top && index !== 0) || (y >= bottom && index !== group.threads.length - 1)) continue;
+          if (id !== thread.id) {
+            const edge = y < top + rect.height / 2 ? "before" : "after";
+            const destination = index + (edge === "after" ? 1 : 0) - (sourceIndex < index ? 1 : 0);
+            if (destination !== sourceIndex) next = { id, edge };
+          }
+          break;
+        }
+      }
+      const sourceTop = source.rect.top - scrolled;
+      const minimum = Math.max(bounds.top, first ? first.rect.top - scrolled : -Infinity);
+      const maximum = Math.max(minimum, Math.min(bounds.bottom, last ? last.rect.bottom - scrolled : Infinity) - source.rect.height);
+      const top = sourceTop + y - startY + (scroll.scrollTop - startScroll) * scale;
+      const clamped = Math.max(minimum, Math.min(maximum, top));
+      element.style.setProperty("--thread-drag-y", `${(clamped - sourceTop) / scale}px`);
+      if (drop?.id !== next?.id || drop?.edge !== next?.edge) {
+        drop = next;
+        setDropTarget(next);
+      }
+      if (scroll.scrollTop !== before) frame = requestAnimationFrame(update);
+    };
+    const finish = (commit: boolean) => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("pointermove", move);
+      document.removeEventListener("pointerup", up);
+      document.removeEventListener("pointercancel", cancel);
+      document.removeEventListener("keydown", key);
+      window.removeEventListener("blur", cancel);
+      if (element.hasPointerCapture(pointerId)) element.releasePointerCapture(pointerId);
+      element.style.removeProperty("--thread-drag-y");
+      dragCleanup.current = () => {};
+      if (active) {
+        active = false;
+        suppressClick.current = true;
+        if (commit && drop) void reorder(thread.id, drop.id, drop.edge);
+        setDragging(undefined);
+        setDropTarget(undefined);
+      }
+    };
+    const move = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId) return;
+      x = event.clientX;
+      y = event.clientY;
+      if (!active) {
+        if (Math.hypot(x - startX, y - startY) < 6) return;
+        active = true;
+        element.setPointerCapture(pointerId);
+        setDragging(thread.id);
+      }
+      event.preventDefault();
+      if (!frame) frame = requestAnimationFrame(update);
+    };
+    const up = (event: PointerEvent) => {
+      if (event.pointerId !== pointerId) return;
+      if (active) {
+        x = event.clientX;
+        y = event.clientY;
+        cancelAnimationFrame(frame);
+        update(performance.now());
+      }
+      finish(true);
+    };
+    const cancel = () => finish(false);
+    const key = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); finish(false); }
+    };
+    dragCleanup.current = cancel;
+    document.addEventListener("pointermove", move);
+    document.addEventListener("pointerup", up);
+    document.addEventListener("pointercancel", cancel);
+    document.addEventListener("keydown", key);
+    window.addEventListener("blur", cancel);
   };
   const childrenByParent = useMemo(() => {
     const groups = new Map<string, ThreadMeta[]>();
@@ -182,6 +366,20 @@ export function Sidebar({
     }
     return paths;
   }, [threadMap]);
+  const dragShifts = useMemo(() => {
+    const shifts = new Map<string, number>();
+    if (!dragging || !dropTarget) return shifts;
+    const group = groups.find((entry) => entry.threads.some((thread) => thread.id === dragging));
+    if (!group) return shifts;
+    const from = group.threads.findIndex((thread) => thread.id === dragging);
+    const target = group.threads.findIndex((thread) => thread.id === dropTarget.id);
+    if (target < 0) return shifts;
+    const to = target + (dropTarget.edge === "after" ? 1 : 0) - (from < target ? 1 : 0);
+    for (let index = Math.min(from, to); index <= Math.max(from, to); index++) {
+      if (index !== from) shifts.set(group.threads[index]!.id, from < to ? -dragHeight.current : dragHeight.current);
+    }
+    return shifts;
+  }, [dragging, dropTarget, groups]);
   const renderThread = (thread: (typeof threads)[number]) => {
     const provider = providers.find((entry) => entry.id === thread.provider);
     const name = modelLabel(provider?.models ?? [], thread.model);
@@ -190,21 +388,19 @@ export function Sidebar({
       <div
         className="thread-entry"
         key={thread.id}
-        draggable={!query}
+        data-thread-id={thread.id}
+        data-category-end={groups.some((group) => group.threads.at(-1)?.id === thread.id)}
         data-dragging={dragging === thread.id}
-        onDragStart={(event) => {
-          setDragging(thread.id);
-          event.dataTransfer.setData("text/citropy-thread", thread.id);
-          event.dataTransfer.effectAllowed = "move";
-        }}
-        onDragEnd={() => setDragging(undefined)}
-        onDragOver={(event) => {
-          if (dragging) event.preventDefault();
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          if (dragging) void reorder(dragging, thread.id);
-          setDragging(undefined);
+        style={{ "--thread-shift": `${dragShifts.get(thread.id) ?? 0}px` } as CSSProperties}
+        onPointerDown={(event) => startDrag(event, thread)}
+        onDragStart={(event) => event.preventDefault()}
+        onClickCapture={(event) => {
+          if (suppressClick.current) {
+            suppressClick.current = false;
+            if (event.detail === 0) return;
+            event.preventDefault();
+            event.stopPropagation();
+          }
         }}
       >
         <div className="thread-card" data-active={thread.id === activeThreadId}>
@@ -213,6 +409,7 @@ export function Sidebar({
             className="thread-row"
             data-active={thread.id === activeThreadId}
             title={thread.title}
+            aria-current={thread.id === activeThreadId ? "page" : undefined}
             onClick={() => {
               onConversation();
               if (thread.projectId !== activeProjectId)
@@ -227,49 +424,27 @@ export function Sidebar({
             }}
           >
             <span className="thread-row-body">
-              <span
-                className="thread-provider"
-                title={`${providerName} · ${name}`}
-              >
+              <span className="thread-row-heading">
                 <ProviderIcon provider={thread.provider} />
-                <span>{providerName}</span>
-                <span aria-hidden="true">·</span>
-                <span className="truncate">{name}</span>
+                <span className="thread-row-title">{thread.title}</span>
               </span>
-              <span className="thread-row-title truncate">{thread.title}</span>
+              <span className="thread-row-summary">
+                <span className="thread-provider truncate" title={`${providerName} · ${name}`}>{name}</span>
+                {thread.workspaceBranch && <span className="thread-row-branch" title={thread.workspaceBranch}><GitBranch size={11} /><span className="truncate">{thread.workspaceBranch}</span></span>}
+              </span>
               {query.trim() && allProjects && (
                 <span className="thread-row-meta">
                   <Folder size={12} />
                   {projects.find((entry) => entry.id === thread.projectId)?.name}
                 </span>
               )}
-              {(thread.pinned ||
-                thread.changedFiles ||
-                thread.status !== "idle") && (
-                <span className="thread-row-meta">
-                  {thread.pinned && <Pin size={12} aria-label={t("Pinned")} />}
-                  {Boolean(thread.changedFiles) && (
-                    <span>
-                      {thread.changedFiles}{" "}
-                      {thread.changedFiles === 1 ? t("file") : t("files")}
-                    </span>
-                  )}
-                  {thread.status !== "idle" && (
-                    <span className="thread-status" title={thread.status}>
-                      <ThreadPulse status={thread.status} />
-                      {thread.status === "error"
-                        ? t("Failed")
-                        : thread.status === "awaiting"
-                          ? t("Approval")
-                          : t(thread.status)}
-                    </span>
-                  )}
-                </span>
-              )}
-              {thread.workspaceBranch && (
-                <span className="thread-row-meta">
-                  <GitBranch size={12} />
-                  {thread.workspaceBranch}
+              {(thread.changedFiles || thread.status !== "idle") && (
+                <span className="thread-row-details">
+                  {Boolean(thread.changedFiles) && <span>{thread.changedFiles} {thread.changedFiles === 1 ? t("file") : t("files")}</span>}
+                  {thread.status !== "idle" && <span className="thread-status" title={thread.status}>
+                    <ThreadPulse status={thread.status} />
+                    {thread.status === "error" ? t("Failed") : thread.status === "awaiting" ? t("Approval") : t(thread.status)}
+                  </span>}
                 </span>
               )}
               {thread.snoozedUntil && (
@@ -293,73 +468,71 @@ export function Sidebar({
                 </span>
               )}
             </span>
+            <span className="thread-row-footer">
+              <time
+                dateTime={new Date(thread.updatedAt).toISOString()}
+                title={new Date(thread.updatedAt).toLocaleString(currentLocale())}
+              >
+                {new Date(thread.updatedAt).toLocaleDateString(currentLocale(), {
+                  month: "short",
+                  day: "numeric",
+                })}{" "}
+                ·{" "}
+                {new Date(thread.updatedAt).toLocaleTimeString(currentLocale(), {
+                  hour: "2-digit",
+                  minute: "2-digit",
+                })}
+              </time>
+            </span>
           </button>
-          <div className="thread-row-footer">
-            <time
-              dateTime={new Date(thread.updatedAt).toISOString()}
-              title={new Date(thread.updatedAt).toLocaleString(currentLocale())}
+          <div className="thread-row-actions">
+            <ConversationMenu
+              thread={thread}
+              onMove={(direction) => {
+                const group = thread.archived
+                  ? archived
+                  : thread.snoozedUntil
+                    ? snoozed
+                    : thread.finished
+                      ? finished
+                      : thread.pinned ? pinned : current;
+                const next =
+                  group[
+                    group.findIndex((entry) => entry.id === thread.id) + direction
+                  ];
+                if (next) void reorder(thread.id, next.id);
+              }}
+            />
+            <button
+              className="thread-row-finish"
+              type="button"
+              title={
+                thread.running || thread.status === "awaiting"
+                  ? t("Stop this conversation before finishing")
+                  : `${thread.finished ? t("Reopen") : t("Finish")} ${thread.title}`
+              }
+              aria-label={`${thread.finished ? t("Reopen") : t("Finish")} ${thread.title}`}
+              disabled={
+                !connected ||
+                thread.running ||
+                thread.status === "awaiting" ||
+                (childrenByParent.get(thread.id) ?? []).some((child) => child.running)
+              }
+              onClick={() => {
+                finishThread(thread.id, !thread.finished);
+                if (!thread.finished) setFinishedOpen(true);
+              }}
             >
-              {new Date(thread.updatedAt).toLocaleDateString(currentLocale(), {
-                month: "short",
-                day: "numeric",
-              })}{" "}
-              ·{" "}
-              {new Date(thread.updatedAt).toLocaleTimeString(currentLocale(), {
-                hour: "2-digit",
-                minute: "2-digit",
-              })}
-            </time>
-            <div className="thread-row-actions">
-              <ConversationMenu
-                thread={thread}
-                onMove={(direction) => {
-                  const group = thread.archived
-                    ? archived
-                    : thread.snoozedUntil
-                      ? snoozed
-                      : thread.finished
-                        ? finished
-                        : thread.pinned ? pinned : current;
-                  const next =
-                    group[
-                      group.findIndex((entry) => entry.id === thread.id) + direction
-                    ];
-                  if (next) void reorder(thread.id, next.id);
-                }}
-              />
-              <button
-                className="thread-row-finish"
-                type="button"
-                title={
-                  thread.running || thread.status === "awaiting"
-                    ? t("Stop this conversation before finishing")
-                    : `${thread.finished ? t("Reopen") : t("Finish")} ${thread.title}`
-                }
-                aria-label={`${thread.finished ? t("Reopen") : t("Finish")} ${thread.title}`}
-                disabled={
-                  !connected ||
-                  thread.running ||
-                  thread.status === "awaiting" ||
-                  Object.values(threadMap).some(
-                    (child) => child.parentThreadId === thread.id && child.running,
-                  )
-                }
-                onClick={() => {
-                  finishThread(thread.id, !thread.finished);
-                  if (!thread.finished) setFinishedOpen(true);
-                }}
-              >
-                {thread.finished ? <RotateCcw size={14} /> : <Check size={15} />}
-              </button>
-              <button
-                className="thread-row-kill"
-                type="button"
-                title={`${t("Delete")} ${thread.title}`}
-                onClick={() => removeThread(thread.id)}
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
+              {thread.finished ? <RotateCcw size={14} /> : <Check size={15} />}
+            </button>
+            <button
+              className="thread-row-kill"
+              type="button"
+              title={`${t("Delete")} ${thread.title}`}
+              onClick={() => removeThread(thread.id)}
+            >
+              <Trash2 size={13} />
+            </button>
           </div>
         </div>
         {thread.pullRequest && (
@@ -408,7 +581,7 @@ export function Sidebar({
           title={t("New thread")}
           type="button"
           onClick={() => { onConversation(); createThread(); }}
-          disabled={!activeProjectId || !providers.some((provider) => provider.available && provider.enabled)}
+          disabled={!connected || creatingThread || !activeProjectId || !providers.some((provider) => provider.available && provider.enabled)}
         >
           <MessageSquarePlus size={18} />
         </button>
@@ -423,75 +596,25 @@ export function Sidebar({
           {t("All workspaces")}
         </label>
       )}
-      <div className="rail-list scroll">
-        {pinned.length > 0 && (
-          <section className="thread-category" data-category="pinned">
-            <button className="finished-toggle" type="button" aria-expanded={pinnedOpen || Boolean(query)} onClick={() => setPinnedOpen((open) => !open)}>
-              <ChevronRight size={12} className="category-chevron" />
-              <Pin size={14} className="category-icon" />
-              <span>{t("Pinned")}</span><span>{pinned.length}</span>
-            </button>
-            {(pinnedOpen || query) && pinned.map(renderThread)}
-          </section>
-        )}
-        {current.length > 0 && (
-          <section className="thread-category" data-category="active">
-            <button className="finished-toggle" type="button" aria-expanded={currentOpen || Boolean(query)} onClick={() => setCurrentOpen((open) => !open)}>
-              <ChevronRight size={12} className="category-chevron" />
-              <MessagesSquare size={14} className="category-icon" />
-              <span>{t("Active", undefined, "conversations")}</span><span>{current.length}</span>
-            </button>
-            {(currentOpen || query) && current.map(renderThread)}
-          </section>
-        )}
-        {snoozed.length > 0 && (
-          <section className="thread-category" data-category="snoozed">
-            <button
-              className="finished-toggle"
-              type="button"
-              aria-expanded={snoozedOpen || Boolean(query)}
-              onClick={() => setSnoozedOpen((open) => !open)}
-            >
-              <ChevronRight size={12} className="category-chevron" />
-              <Clock size={14} className="category-icon" />
-              <span>{t("Snoozed")}</span>
-              <span>{snoozed.length}</span>
-            </button>
-            {(snoozedOpen || query) && snoozed.map(renderThread)}
-          </section>
-        )}
-        {archived.length > 0 && (
-          <section className="thread-category" data-category="archived">
-            <button
-              className="finished-toggle"
-              type="button"
-              aria-expanded={archivedOpen || Boolean(query)}
-              onClick={() => setArchivedOpen((open) => !open)}
-            >
-              <ChevronRight size={12} className="category-chevron" />
-              <Archive size={14} className="category-icon" />
-              <span>{t("Archived", undefined, "conversations")}</span>
-              <span>{archived.length}</span>
-            </button>
-            {(archivedOpen || query) && archived.map(renderThread)}
-          </section>
-        )}
-        {finished.length > 0 && (
-          <section className="thread-category" data-category="finished">
-            <button
-              className="finished-toggle"
-              type="button"
-              aria-expanded={finishedOpen || Boolean(query)}
-              onClick={() => setFinishedOpen((open) => !open)}
-            >
-              <ChevronRight size={12} className="category-chevron" />
-              <CircleCheck size={14} className="category-icon category-finished" />
-              <span>{t("Finished")}</span>
-              <span>{finished.length}</span>
-            </button>
-            {(finishedOpen || Boolean(query)) && finished.map(renderThread)}
-          </section>
-        )}
+      <div className="rail-list scroll" ref={viewport}
+        onFocusCapture={(event) => {
+          const index = event.target.closest<HTMLElement>("[data-index]")?.dataset.index;
+          if (index !== undefined) setFocusedRow(rows[Number(index)]?.key);
+        }}
+        onBlurCapture={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget)) setFocusedRow(undefined);
+        }}
+      >
+        <div className="thread-list" data-virtualized={virtualized} data-dragging={Boolean(dragging)} style={virtualized ? { height: list.getTotalSize(), position: "relative" } : undefined}>
+          {groups.map((group) => <section className="thread-category" data-category={group.id} key={group.id} style={virtualized ? { display: "contents" } : undefined}>
+            {virtualized ? virtualRows.filter((item) => rows[item.index]?.group.id === group.id).map((item) => {
+              const row = rows[item.index]!;
+              return <div key={item.key} data-index={item.index} ref={list.measureElement} className="thread-list-item" style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start}px)` }}>
+                {row.thread ? renderThread(row.thread) : renderHeading(group)}
+              </div>;
+            }) : <>{renderHeading(group)}<Collapsible open={group.open || Boolean(query)} className="thread-category-content">{(group.open || query) && group.threads.map((thread) => <div className="thread-list-item" key={thread.id}>{renderThread(thread)}</div>)}</Collapsible></>}
+          </section>)}
+        </div>
         {threads.length === 0 && (
           <div className="rail-empty">
             {query

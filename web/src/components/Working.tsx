@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import type { ThreadStatus } from "../../../shared/protocol.ts";
 import { duration } from "../lib/format.ts";
 import { useI18n } from "../lib/i18n.ts";
+import { useReducedMotion } from "../lib/use-reduced-motion.ts";
 
 interface Props {
   status: ThreadStatus | undefined;
@@ -19,21 +20,34 @@ const LABEL: Partial<Record<ThreadStatus, string>> = {
 
 export function Working({ status, tool, compacting, startedAt }: Props) {
   const t = useI18n();
+  const reducedMotion = useReducedMotion();
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 100);
-    return () => clearInterval(timer);
-  }, []);
+    let timer = 0;
+    const update = () => {
+      clearTimeout(timer);
+      if (document.hidden) return;
+      const now = Date.now();
+      setNow(now);
+      timer = window.setTimeout(update, now - startedAt < 10_000 ? 100 : 1000);
+    };
+    update();
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", update);
+    };
+  }, [startedAt]);
 
   const text = compacting ? t("Compacting context") : tool ? `${t("Running")} ${tool}` : t((status && LABEL[status]) || "Working");
 
   return (
     <motion.div
       className="working"
-      initial={{ opacity: 0, y: 4 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: reducedMotion ? 0 : 0.24, ease: [0.16, 1, 0.3, 1] }}
     >
       <span className="working-weave" aria-hidden="true">
         <i />

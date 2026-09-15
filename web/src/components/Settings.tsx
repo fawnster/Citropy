@@ -1,3 +1,5 @@
+import { EnvironmentSettings } from "./EnvironmentSettings.tsx";
+import { isRemote, useEnvironments } from "../lib/environment.ts";
 import { Fragment, useEffect, useState, type ReactNode } from "react";
 import {
   Check,
@@ -45,6 +47,7 @@ import { useI18n } from "../lib/i18n.ts";
 import type { DesktopWindowState } from "../desktop.d.ts";
 
 const sections = [
+  { name: "Environments", group: "Workspace", icon: Monitor, description: "Choose this computer or an SSH host for your workspaces." },
   {
     name: "General",
     group: "Workspace",
@@ -61,7 +64,7 @@ const sections = [
     name: "Projects",
     group: "Workspace",
     icon: FolderCog,
-    description: "Set project defaults, worktrees, and terminal actions.",
+    description: "Manage global defaults and folder overrides.",
   },
   {
     name: "Providers",
@@ -127,6 +130,7 @@ export function Settings({
   initialSection?: string;
 }) {
   const t = useI18n();
+  const { activeId: environment } = useEnvironments();
   const language = useApp((state) => state.language);
   const [section, setSection] = useState(initialSection);
   useEffect(() => setSection(initialSection), [initialSection]);
@@ -188,12 +192,11 @@ export function Settings({
 
   return (
     <section className="section-view" aria-label={t("Settings")}>
-      {sidebarOpen && (
-        <SectionSidebar title={t("Settings")} onBack={onBack} navigation={navigation}>
+      <SectionSidebar open={sidebarOpen} title={t("Settings")} onBack={onBack} navigation={navigation}>
           {["Workspace", "Providers & tools", "Application"].map((group) => (
             <Fragment key={group}>
               <h2 className="section-nav-label">{t(group)}</h2>
-              {sections.filter((entry) => entry.group === group).map(({ name, icon: Icon }) => (
+              {sections.filter((entry) => entry.group === group && (!isRemote() || !["Browser", "Computer use"].includes(entry.name))).map(({ name, icon: Icon }) => (
                 <button
                   className="section-link"
                   data-settings-section={name.toLowerCase()}
@@ -211,10 +214,9 @@ export function Settings({
               ))}
             </Fragment>
           ))}
-        </SectionSidebar>
-      )}
+      </SectionSidebar>
       <div className="settings scroll">
-        <div className="settings-inner">
+        <div className="settings-inner" key={environment}>
           <header className="settings-heading">
             <div>
               <h1
@@ -237,6 +239,7 @@ export function Settings({
               </button>
             )}
           </header>
+          {section === "Environments" && <EnvironmentSettings />}
           {section === "Projects" && <ProjectSettings onRun={onBack} />}
           {section === "Skills" && <SkillsSettings />}
           {section === "AI assistance" && <AssistanceSettings />}

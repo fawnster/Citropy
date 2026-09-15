@@ -1,3 +1,4 @@
+import { authorizeRemote, remoteId, workspaceDirectory } from "./remote.ts";
 import { assertApplicationReady, lockForAppUpdate, unlockAppUpdate } from "./update-lock.ts";
 import { assistanceBusy } from "./assistance.ts";
 import { providerUpdating, providerMaintenance } from "./providers/maintenance.ts";
@@ -9,6 +10,7 @@ import { handleGitHub } from "./github.ts";
 import { searchConversations } from "./conversation-search.ts";
 import { createServer, type IncomingMessage } from "node:http";
 import { spawn } from "node:child_process";
+import { shellList } from "./shells.ts";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -123,6 +125,8 @@ bus.subscribe((event) => {
 
 function snapshot(): Snapshot {
   return {
+    shells: shellList(),
+    projectDefaults: store.projectDefaults,
     assistance: store.assistance,
     computer: computerState(),
     notifications: store.notifications,
@@ -235,7 +239,8 @@ async function handle(event: ClientEvent, send: (event: ServerEvent) => void): P
     }
     case "project.choose": {
       try {
-        const path = await chooseFolder();
+        if (remoteId && !event.path) throw new Error("Choose a folder on the SSH host.");
+        const path = event.path ? await workspaceDirectory(event.path) : await chooseFolder();
         if (!path) return send({ t: "project.chosen", projectId: null });
         const project = store.openProject(path);
         send({ t: "project.chosen", projectId: project.id });
@@ -340,11 +345,18 @@ async function handle(event: ClientEvent, send: (event: ServerEvent) => void): P
     }
     case "thread.config": {
       const thread = store.threads.get(event.id);
-      if (!thread) return;
+      if (!thread) throw new Error("Conversation not found");
+      const changedProvider = event.provider !== undefined && event.provider !== thread.provider;
+      const provider = providerInfo.find((entry) => entry.id === (event.provider ?? thread.provider));
+      if (changedProvider) {
+        if (!provider?.available || !provider.enabled)
+          throw new Error("Select an enabled, installed provider.");
+        if (thread.messages.length || thread.externalId || thread.parentThreadId || thread.running || thread.queue?.length || thread.compacting || [...store.threads.values()].some((entry) => entry.parentThreadId === thread.id))
+          throw new Error("Start a new thread to use a different provider after sending a message.");
+      }
       const models =
-        providerInfo.find((provider) => provider.id === thread.provider)
-          ?.models ?? [];
-      const model = selectedModel(models, event.model ?? thread.model);
+        provider?.models ?? [];
+      const model = selectedModel(models, event.model ?? (changedProvider ? undefined : thread.model));
       if (event.model && !model)
         throw new Error(
           "This model is no longer available. Refresh the model list.",
@@ -365,9 +377,9 @@ async function handle(event: ClientEvent, send: (event: ServerEvent) => void): P
       )
         throw new Error("Fast mode is not supported by the selected model");
       const changedModel =
-        event.model !== undefined && event.model !== thread.model;
+        changedProvider || (event.model !== undefined && event.model !== thread.model);
       const settings = modelSettings(models, {
-        model: event.model ?? thread.model,
+        model: event.model ?? (changedProvider ? model?.id : thread.model),
         effort:
           event.effort === null || changedModel
             ? (event.effort ?? undefined)
@@ -378,6 +390,7 @@ async function handle(event: ClientEvent, send: (event: ServerEvent) => void): P
         fastMode: event.fastMode ?? (changedModel ? false : thread.fastMode),
       });
       const restart =
+        changedProvider ||
         Object.entries(settings).some(
           ([key, value]) => thread[key as keyof typeof settings] !== value,
         ) ||
@@ -387,12 +400,15 @@ async function handle(event: ClientEvent, send: (event: ServerEvent) => void): P
         throw new Error(
           "Wait for this turn to finish before changing its settings.",
         );
-      if (restart) disposeRuntime(event.id);
+      if (restart) disposeRuntime(event.id, true);
       store.patchThread(event.id, {
+        provider: event.provider ?? thread.provider,
         ...settings,
+        ...(changedModel || settings.contextWindow !== thread.contextWindow ? { usage: { ...thread.usage, contextMax: 0 } } : {}),
         permissionMode: event.permissionMode ?? thread.permissionMode,
         title: event.title ?? thread.title,
       });
+      if (event.requestId) send({ t: "thread.accepted", requestId: event.requestId });
       return;
     }
     case "permission.answer":
@@ -531,6 +547,14 @@ async function handle(event: ClientEvent, send: (event: ServerEvent) => void): P
 
 const server = createServer(async (req, res) => {
   const url = req.url ?? "/";
+  if (!url.startsWith("/mcp/") && !authorizeRemote(req)) { res.writeHead(401).end(); return; }
+  if (remoteId && url === "/api/remote/shutdown" && req.method === "POST") {
+    const busy = (["claude", "codex", "opencode"] as const).some(id => providerBusy(id) || providerUpdating(id)) || assistanceBusy() || activeCommands || activeRequests.size || terminals.hasActiveTerminals() || pendingRequests().length;
+    if (busy) { res.writeHead(409).end("Finish remote tasks and close terminals before updating this environment."); return; }
+    res.writeHead(204).end();
+    void shutdown();
+    return;
+  }
   if (["/api/updates/prepare", "/api/updates/cancel"].includes(url) && req.method === "POST") {
     if (!authorizeDesktop(String(req.headers["x-citropy-desktop-token"] || ""))) { res.writeHead(403).end(); return; }
     if (url.endsWith("/cancel")) { unlockAppUpdate(); res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ready: false })); return; }
@@ -572,6 +596,7 @@ const server = createServer(async (req, res) => {
       JSON.stringify({
         ok: true,
         app: "citropy",
+        ...(remoteId ? { environmentId: remoteId, build: process.env.CITROPY_REMOTE_BUILD, protocol: 1 } : {}),
         development: dev,
         providers: providerInfo,
       }),
@@ -623,6 +648,7 @@ const wss = new WebSocketServer({
   path: "/socket",
   maxPayload: 2 * 1024 * 1024,
   verifyClient: ({ origin: requestOrigin, req }: { origin: string; req: IncomingMessage }) => {
+    if (!authorizeRemote(req)) return false;
     const desktopToken = new URL(req.url ?? "/socket", origin).searchParams.get("desktop");
     if (desktopToken !== null) return authorizeDesktop(desktopToken) && !requestOrigin;
     if (!requestOrigin) return true;

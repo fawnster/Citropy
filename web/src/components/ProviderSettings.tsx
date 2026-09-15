@@ -1,3 +1,4 @@
+import { AnimatePresence } from "motion/react";
 import { useEffect, useState } from "react";
 import {
   ArrowUpToLine,
@@ -98,7 +99,7 @@ export function ProviderSettings() {
             className={checking ? "git-spinner" : undefined}
           />{" "}{t("Check for updates")}{" "}</button>
       </div>
-      <div className="settings-group provider-settings-group">
+      <div className="provider-settings-group">
         {providers.map((provider) => {
           const state = maintenance.find(
             (entry) => entry.provider === provider.id,
@@ -111,7 +112,7 @@ export function ProviderSettings() {
           const isUpdating = state?.status === "updating";
           return (
             <section
-              className="provider-card"
+              className="settings-group provider-card"
               key={provider.id}
               aria-label={provider.label}
             >
@@ -278,12 +279,12 @@ export function ProviderSettings() {
       <p className="settings-connection" role="status">
         {connected ? t("Connected to Citropy") : t("Disconnected from Citropy")}
       </p>
-      {editor && (
+      <AnimatePresence>{editor && (
         <ProviderInstructions
           provider={editor}
           onClose={() => setEditor(undefined)}
         />
-      )}
+      )}</AnimatePresence>
     </>
   );
 }

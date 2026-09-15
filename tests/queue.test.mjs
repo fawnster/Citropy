@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 import { syncBuiltinESMExports } from "node:module";
+import { randomUUID } from "node:crypto";
 
 async function waitFor(check) {
   for (let i = 0; i < 200; i++) {
@@ -33,10 +34,11 @@ test("follow-ups wait in a visible queue and each provider can take one mid-run"
       return {
         send(text) {
           session.sent.push(text);
+          return session.onSend?.();
         },
         ...(steering ? { async steer(text) { session.steered.push(text); } } : {}),
-        interrupt() {},
-        dispose() {},
+        interrupt() { return session.onInterrupt?.(); },
+        dispose() { session.disposed = true; },
       };
     };
   }
@@ -57,6 +59,154 @@ test("follow-ups wait in a visible queue and each provider can take one mid-run"
   };
   const texts = (thread) => (thread.queue ?? []).map((item) => item.text);
   const userTexts = (thread) => thread.messages.filter((message) => message.role === "user").map((message) => message.parts[0].text);
+  const attachment = (thread) => {
+    const id = randomUUID();
+    const folder = join(directory, ".citropy", "attachments", thread.id, id);
+    fs.mkdirSync(join(folder, "content"), { recursive: true });
+    const file = { id, path: join(folder, "content", "notes.txt"), label: "notes.txt", size: 5, mime: "text/plain" };
+    fs.writeFileSync(file.path, "notes");
+    fs.writeFileSync(join(folder, "metadata.json"), JSON.stringify(file));
+    return file;
+  };
+
+  await t.test("stopping while preparing a message prevents it from reaching the provider", async () => {
+    const thread = store.createThread({ projectId: project.id, provider: "claude", title: "Cancel", permissionMode: "manual" });
+    const runtime = runtimeFor(thread.id);
+    const previousSessions = sessions.length;
+    const sending = runtime.send("Do not dispatch this");
+    runtime.stop();
+    await assert.rejects(sending, /stopped|cancel/i);
+    assert.equal(sessions.length, previousSessions);
+    assert.deepEqual(userTexts(thread), []);
+    assert.equal(thread.status, "stopped");
+    await runtime.send("Fresh request");
+    assert.deepEqual(sessions.at(-1).sent, ["Fresh request"]);
+  });
+
+  await t.test("an interrupt acknowledgement preserves stopped status and the queue", async () => {
+    const { thread, runtime, session } = await start();
+    await runtime.send("Held");
+    runtime.stop();
+    session.options.emit({ type: "turn.end", error: "Interrupted" });
+    assert.equal(thread.status, "stopped");
+    assert.equal(thread.error, undefined);
+    assert.deepEqual(texts(thread), ["Held"]);
+  });
+
+  await t.test("continuing immediately waits for the old turn and its stop acknowledgement", async () => {
+    for (const provider of ["claude", "codex", "opencode"]) {
+      const { thread, runtime, session } = await start(provider);
+      const acknowledgement = Promise.withResolvers();
+      if (provider === "opencode") session.onInterrupt = () => acknowledgement.promise;
+      runtime.stop();
+      const continuing = runtime.send("Continue");
+      await settle();
+      assert.deepEqual(session.sent, ["First"]);
+      session.options.emit({ type: "turn.end", error: "fetch failed" });
+      if (provider === "opencode") {
+        await settle();
+        assert.deepEqual(session.sent, ["First"]);
+        acknowledgement.resolve();
+      }
+      await continuing;
+      assert.deepEqual(session.sent, ["First", "Continue"]);
+      assert.equal(thread.error, undefined);
+      assert.equal(thread.running, true);
+      session.options.emit({ type: "turn.end" });
+    }
+  });
+
+  await t.test("attachment validation finishing after the reply does not strand a follow-up", async () => {
+    const { thread, runtime, session } = await start();
+    const sending = runtime.send("Second", [attachment(thread)]);
+    session.options.emit({ type: "turn.end" });
+    await sending;
+    await waitFor(() => session.sent.length === 2);
+    assert.deepEqual(session.sent, ["First", "Second"]);
+    assert.deepEqual(texts(thread), []);
+    assert.equal(thread.running, true);
+  });
+
+  await t.test("an unresponsive stop restarts the session and ignores its late events", async t => {
+    const { thread, runtime, session } = await start("opencode");
+    session.options.emit({ type: "session", externalId: "resume-this-session" });
+    t.mock.timers.enable({ apis: ["setTimeout"] });
+    runtime.stop();
+    t.mock.timers.tick(5000);
+    assert.equal(session.disposed, true);
+    t.mock.timers.reset();
+    await runtime.send("Continue");
+    const replacement = sessions.at(-1);
+    assert.notEqual(replacement, session);
+    assert.equal(replacement.options.externalId, "resume-this-session");
+    session.options.emit({ type: "turn.end", error: "fetch failed" });
+    session.options.emit({ type: "exit", code: 1 });
+    assert.equal(thread.running, true);
+    assert.equal(thread.error, undefined);
+    replacement.options.emit({ type: "turn.end" });
+  });
+
+  await t.test("stopping again cancels a continuation waiting for the previous stop", async () => {
+    const { thread, runtime, session } = await start();
+    runtime.stop();
+    const continuing = runtime.send("Cancel this continuation");
+    const rejected = assert.rejects(continuing, /stopped|cancel/i);
+    await settle();
+    runtime.stop();
+    session.options.emit({ type: "turn.end" });
+    await rejected;
+    assert.deepEqual(session.sent, ["First"]);
+    assert.equal(thread.status, "stopped");
+  });
+
+  await t.test("concurrent follow-ups keep arrival order when the first includes attachments", async () => {
+    const { thread, runtime } = await start();
+    await Promise.all([runtime.send("Second", [attachment(thread)]), runtime.send("Third")]);
+    assert.deepEqual(texts(thread), ["Second", "Third"]);
+  });
+
+  await t.test("stopping during queue preparation keeps the unsent follow-up", async () => {
+    const { thread, runtime, session } = await start();
+    await runtime.send("Held");
+    session.options.emit({ type: "turn.end" });
+    runtime.stop();
+    await settle();
+    assert.deepEqual(session.sent, ["First"]);
+    assert.deepEqual(texts(thread), ["Held"]);
+    assert.equal(thread.status, "stopped");
+  });
+
+  await t.test("a reply ending before send acknowledgement still advances the queue", async () => {
+    const { thread, runtime, session } = await start();
+    session.options.emit({ type: "turn.end" });
+    let acknowledge;
+    const acknowledgement = new Promise(resolve => { acknowledge = resolve; });
+    session.onSend = () => acknowledgement;
+    const sending = runtime.send("Second");
+    await waitFor(() => session.sent.length === 2);
+    await runtime.send("Third");
+    session.options.emit({ type: "turn.end" });
+    session.onSend = undefined;
+    acknowledge();
+    await sending;
+    await waitFor(() => session.sent.length === 3);
+    assert.deepEqual(session.sent, ["First", "Second", "Third"]);
+    assert.deepEqual(texts(thread), []);
+  });
+
+  await t.test("a late send failure cannot turn an interrupted task into an error", async () => {
+    const { thread, runtime, session } = await start();
+    session.options.emit({ type: "turn.end" });
+    let reject;
+    session.onSend = () => new Promise((_, fail) => { reject = fail; });
+    const sending = runtime.send("Interrupt while sending");
+    await waitFor(() => reject);
+    runtime.stop();
+    reject(new Error("Request interrupted"));
+    await assert.rejects(sending, /Request interrupted/);
+    assert.equal(thread.status, "stopped");
+    assert.equal(thread.error, undefined);
+  });
 
   await t.test("messages sent during a run wait, then send one at a time in order", async () => {
     const { thread, runtime, session } = await start();
@@ -78,6 +228,49 @@ test("follow-ups wait in a visible queue and each provider can take one mid-run"
     assert.deepEqual(texts(thread), []);
     session.options.emit({ type: "turn.end" });
     assert.equal(thread.running, false);
+  });
+
+  await t.test("a rejected attachment does not block later valid follow-ups", async () => {
+    const { thread, runtime, session } = await start();
+    const results = await Promise.allSettled([
+      runtime.send("Invalid", [{ id: randomUUID() }]),
+      runtime.send("Valid"),
+    ]);
+    assert.equal(results[0].status, "rejected");
+    assert.equal(results[1].status, "fulfilled");
+    assert.deepEqual(texts(thread), ["Valid"]);
+    session.options.emit({ type: "turn.end" });
+    await waitFor(() => session.sent.length === 2);
+    assert.deepEqual(session.sent, ["First", "Valid"]);
+  });
+
+  await t.test("disposing during queue validation prevents stale writes", async () => {
+    const { thread, runtime } = await start();
+    const sending = runtime.send("Do not enqueue", [attachment(thread)]);
+    runtime.dispose();
+    await assert.rejects(sending, /closed/);
+    assert.deepEqual(texts(thread), []);
+    assert.equal(thread.status, "stopped");
+  });
+
+  await t.test("bursts of follow-ups drain exactly once in order across providers", async () => {
+    for (const provider of ["claude", "codex", "opencode"]) {
+      const { thread, runtime, session } = await start(provider);
+      const file = attachment(thread);
+      const messages = Array.from({ length: 60 }, (_, index) => `Follow-up ${index}`);
+      await Promise.all(messages.map((text, index) => runtime.send(text, index % 3 === 0 ? [file] : [])));
+      assert.deepEqual(texts(thread), messages);
+      for (let index = 0; index < messages.length; index++) {
+        session.options.emit({ type: "turn.end" });
+        await waitFor(() => session.sent.length === index + 2);
+      }
+      session.options.emit({ type: "turn.end" });
+      assert.deepEqual(session.sent, ["First", ...messages]);
+      assert.deepEqual(userTexts(thread), session.sent);
+      assert.deepEqual(texts(thread), []);
+      assert.equal(thread.running, false);
+      assert.equal(thread.status, "idle");
+    }
   });
 
   await t.test("stopping keeps queued messages until a later reply finishes", async () => {

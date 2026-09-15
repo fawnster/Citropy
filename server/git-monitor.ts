@@ -2,9 +2,11 @@ import { bus } from "./bus.ts";
 import * as git from "./git.ts";
 import { workspacePath } from "./workspaces.ts";
 import { store } from "./store.ts";
+import type { Project } from "../shared/protocol.ts";
 
 const cache = new Map<string, string>();
-const pending = new Map<string, { promise: Promise<void>; repeat: boolean; force: boolean }>();
+type Target = { project: Project; threadId?: string; force: boolean };
+const pending = new Map<string, { promise: Promise<void>; repeat: boolean; targets: Map<string, Target> }>();
 const running = new Set<string>();
 
 bus.subscribe((event) => {
@@ -22,37 +24,39 @@ export function forgetGit(projectId: string): void {
 }
 
 export function refreshGit(projectId: string, force = false, threadId?: string): Promise<void> {
-  const cacheId = threadId ? `${projectId}:${threadId}` : projectId;
-  const active = pending.get(cacheId);
-  if (active) {
-    if (force) {
-      active.repeat = true;
-      active.force = true;
-    }
-    return active.promise;
-  }
   const project = store.projects.get(projectId);
   if (!project || (threadId && !store.threads.has(threadId))) return Promise.resolve();
   const path = workspacePath(projectId, threadId);
-  const request = { promise: Promise.resolve(), repeat: false, force };
+  const cacheId = threadId ? `${projectId}:${threadId}` : projectId;
+  const target = { project, threadId, force };
+  const active = pending.get(path);
+  if (active) {
+    target.force ||= active.targets.get(cacheId)?.force ?? false;
+    active.targets.set(cacheId, target);
+    if (force) active.repeat = true;
+    return active.promise;
+  }
+  const request = { promise: Promise.resolve(), repeat: false, targets: new Map([[cacheId, target]]) };
   request.promise = (async () => {
     do {
       request.repeat = false;
-      if (store.projects.get(projectId) !== project || !(await git.isRepo(path))) return;
+      if (!(await git.isRepo(path))) return;
       const status = await git.status(path);
-      if (store.projects.get(projectId) !== project || (threadId && !store.threads.has(threadId))) return;
       if (request.repeat) continue;
       const key = JSON.stringify(status);
-      if (!request.force && cache.get(cacheId) === key) return;
-      cache.set(cacheId, key);
-      if (path === project.path && (project.branch !== status.branch || !project.isGit)) {
-        project.branch = status.branch;
-        project.isGit = true;
-        bus.emit({ t: "project.upsert", project });
+      for (const [cacheId, { project, threadId, force }] of request.targets) {
+        if (store.projects.get(project.id) !== project || (threadId && !store.threads.has(threadId))) continue;
+        if (workspacePath(project.id, threadId) !== path || (!force && cache.get(cacheId) === key)) continue;
+        cache.set(cacheId, key);
+        if (path === project.path && (project.branch !== status.branch || !project.isGit)) {
+          project.branch = status.branch;
+          project.isGit = true;
+          bus.emit({ t: "project.upsert", project });
+        }
+        bus.emit({ t: "git.status", projectId: project.id, ...(threadId ? { threadId } : {}), status });
       }
-      bus.emit({ t: "git.status", projectId, ...(threadId ? { threadId } : {}), status });
     } while (request.repeat);
-  })().finally(() => pending.delete(cacheId));
-  pending.set(cacheId, request);
+  })().finally(() => pending.delete(path));
+  pending.set(path, request);
   return request.promise;
 }

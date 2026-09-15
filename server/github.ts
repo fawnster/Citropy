@@ -2,6 +2,7 @@ import { execFile, spawn } from "node:child_process";
 import { stat, mkdir, rmdir } from "node:fs/promises";
 import { join } from "node:path";
 import { chooseFolder } from "./folder-picker.ts";
+import { remoteId, workspaceDirectory } from "./remote.ts";
 import { store } from "./store.ts";
 import type {
   GitHubRequest,
@@ -571,7 +572,8 @@ export async function handleGitHub(
     }
     case "clone": {
       const repo = repositoryName(request.repo);
-      const parent = await chooseFolder(
+      if (remoteId && !request.parent) throw new Error("Choose a destination folder on the SSH host.");
+      const parent = request.parent ? await workspaceDirectory(request.parent) : await chooseFolder(
         "Choose where to clone this repository",
       );
       if (!parent) return { project: null };

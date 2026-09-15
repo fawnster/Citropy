@@ -91,6 +91,98 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     return { page, emit, begin, complete, idle, requests, close: async () => { assert.deepEqual(errors, []); await page.close(); } };
   }
 
+  await t.test("running shells stay discoverable across tasks with bounded output and clear stop scope", async () => {
+    const other = { ...thread, id: "server-task", title: "Preview the workspace" };
+    const f = await fixture({ children: [other] });
+    const { page, emit } = f;
+    assert.equal(await page.locator(".shells-trigger").count(), 0);
+    const shell = { id: "dev-server", projectId: "workspace", threadId: "server-task", command: "npm run dev -- --host 127.0.0.1", cwd: "/example", status: "running", background: true, stopMode: "shell", output: "VITE ready in 241 ms\nLocal: http://127.0.0.1:5173/\nGET / 200\n", startedAt: Date.now() };
+    const fallback = { ...shell, id: "tests", threadId: "chat", command: "npm test", background: false, stopMode: "task", output: "Running tests…", startedAt: shell.startedAt - 10 };
+    emit({ t: "shell.upsert", shell }, { t: "shell.upsert", shell: fallback });
+    await page.getByRole("button", { name: "Running shells, 2 active", exact: true }).click();
+    const panel = page.getByRole("dialog", { name: "Running shells", exact: true });
+    await panel.waitFor();
+    await panel.getByRole("button", { name: "Stop shell", exact: true }).waitFor();
+    assert.equal(await panel.getByRole("button", { name: "Stop task", exact: true }).count(), 0);
+    assert.equal(await panel.locator(".shell-output").innerText(), shell.output);
+    await page.screenshot({ path: "/tmp/citropy-shells-desktop.png", animations: "disabled" });
+    await page.setViewportSize({ width: 700, height: 800 });
+    await page.waitForTimeout(200);
+    const bounds = await panel.boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 700 && bounds.y + bounds.height <= 800, JSON.stringify(bounds));
+    await page.screenshot({ path: "/tmp/citropy-shells-narrow.png", animations: "disabled" });
+    await panel.locator(".shell-row").filter({ hasText: "npm test" }).click();
+    await panel.getByRole("button", { name: "Stop task", exact: true }).waitFor();
+    await panel.getByText("Stopping this shell also stops its AI task.", { exact: true }).waitFor();
+    await page.keyboard.press("Escape");
+    await panel.waitFor({ state: "hidden" });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.getByRole("navigation", { name: "Workspace navigation", exact: true }).getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Running shells, 2 active", exact: true }).click();
+    await panel.getByRole("button", { name: "Open task", exact: true }).click();
+    await page.waitForFunction(async () => (await import("/web/src/lib/store.ts")).useApp.getState().activeThreadId === "server-task");
+    await page.getByRole("button", { name: "Running shells, 2 active", exact: true }).click();
+    const requests = [];
+    await page.route("**/api/shells/stop", async route => {
+      const body = route.request().postDataJSON();
+      requests.push(body);
+      if (requests.length === 1) return route.fulfill({ status: 503, json: { error: "Provider is unavailable" } });
+      emit({ t: "shell.upsert", shell: { ...shell, status: "stopped", endedAt: Date.now() } });
+      return route.fulfill({ json: { ok: true } });
+    });
+    await panel.getByRole("button", { name: "Stop shell", exact: true }).click();
+    await panel.getByRole("alert").getByText("Provider is unavailable").waitFor();
+    await panel.getByRole("button", { name: "Stop shell", exact: true }).click();
+    await page.getByRole("button", { name: "Running shells, 1 active", exact: true }).waitFor();
+    assert.deepEqual(requests, [{ id: "dev-server" }, { id: "dev-server" }]);
+    assert.equal(await panel.locator(".shell-command").innerText(), shell.command);
+    assert.equal(await panel.locator(".shell-output").innerText(), shell.output);
+    assert.equal(await panel.locator(".shell-row").filter({ hasText: "npm test" }).count(), 1);
+    const nodeCount = await panel.locator("*").count();
+    for (let i = 0; i < 120; i++) emit({ t: "shell.upsert", shell: { ...fallback, output: `Progress ${i}\n${"Output line\n".repeat(2000)}` } });
+    await page.waitForTimeout(250);
+    assert.equal(await panel.locator("*").count(), nodeCount);
+    emit({ t: "shell.upsert", shell: { ...fallback, status: "finished", endedAt: Date.now() } });
+    await page.getByRole("button", { name: "Running shells, 0 active", exact: true }).waitFor();
+    await panel.getByRole("button", { name: "Close running shells", exact: true }).click();
+    await panel.waitFor({ state: "hidden" });
+    assert.equal(await page.locator(".shells-trigger").count(), 0);
+    await page.waitForFunction(() => window.presentationFrames.size === 0);
+    const terminal = { ...shell, id: "terminal-shell", panelId: "terminal-panel", command: "npm run preview", startedAt: shell.startedAt + 10 };
+    emit({ t: "panel.upsert", panel: { id: "terminal-panel", projectId: "workspace", threadId: "server-task", kind: "terminal", title: "Terminal 1" } }, { t: "shell.upsert", shell: terminal });
+    await page.getByRole("button", { name: "Running shells, 1 active", exact: true }).click();
+    await panel.getByRole("button", { name: "Open terminal", exact: true }).waitFor();
+    emit({ t: "panel.remove", id: "terminal-panel" }, { t: "shell.upsert", shell: { ...terminal, status: "stopped", endedAt: Date.now() } });
+    await panel.getByRole("button", { name: "Open task", exact: true }).waitFor();
+    await panel.getByRole("button", { name: "Close running shells", exact: true }).click();
+    await panel.waitFor({ state: "hidden" });
+    await f.close();
+  });
+
+  await t.test("shell output follows a newly selected process without disturbing older output being read", async () => {
+    const f = await fixture();
+    const { page, emit } = f;
+    const shell = { id: "first", projectId: "workspace", threadId: "chat", command: "first server", cwd: "/example", status: "running", background: true, stopMode: "shell", output: "First output line\n".repeat(300), startedAt: 2 };
+    const second = { ...shell, id: "second", command: "second server", output: "Second output line\n".repeat(300), startedAt: 1 };
+    emit({ t: "shell.upsert", shell }, { t: "shell.upsert", shell: second });
+    await page.getByRole("button", { name: "Running shells, 2 active", exact: true }).click();
+    const panel = page.getByRole("dialog", { name: "Running shells", exact: true });
+    const output = panel.locator(".shell-output");
+    await output.waitFor();
+    await output.evaluate(element => { element.scrollTop = 0; element.dispatchEvent(new Event("scroll")); });
+    emit({ t: "shell.upsert", shell: { ...shell, output: `${shell.output}Latest first output` } });
+    await output.getByText(/Latest first output/).waitFor();
+    assert.equal(await output.evaluate(element => element.scrollTop), 0);
+    await panel.locator(".shell-row").filter({ hasText: "second server" }).click();
+    await page.waitForFunction(() => {
+      const output = document.querySelector(".shell-output");
+      return output && output.scrollHeight - output.scrollTop - output.clientHeight < 2;
+    }, undefined, { timeout: 1000 });
+    await panel.getByRole("button", { name: "Close running shells", exact: true }).click();
+    await panel.waitFor({ state: "hidden" });
+    await f.close();
+  });
+
   await t.test("GitHub identity is optional and every section keeps workspace navigation available", async () => {
     const account = { login: "octocat", name: "The Octocat", avatar_url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='40' height='40'%3E%3Crect width='40' height='40' rx='20' fill='%239890cd'/%3E%3C/svg%3E", html_url: "https://github.com/octocat" };
     const f = await fixture({ githubAccount: account, preferences: { compactNavigation: "1" }, messages: [
@@ -168,6 +260,48 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     await f.close();
   });
 
+  await t.test("tool-only activity stays outside speech bubbles and keeps its expandable details", async () => {
+    const f = await fixture({ messages: [message("work", [tools[0], { ...tools[1], name: "Bash", shape: "command", headline: "git status" }])] });
+    const { page } = f;
+    f.emit({ t: "thread.upsert", thread: { ...thread, running: true, status: "thinking", runStartedAt: Date.now() - 3200 } });
+    const activity = page.locator(".turn-agent").filter({ has: page.locator(".group") });
+    await activity.getByRole("button", { name: "Read 1 file and ran 1 command", exact: true }).waitFor();
+    assert.equal(await activity.locator(".message-bubble").count(), 0);
+    assert.equal(await activity.locator(".group-count").count(), 0);
+    await page.locator(".working-text").getByText("Thinking", { exact: true }).waitFor();
+    for (const width of [1440, 600]) {
+      await page.setViewportSize({ width, height: 900 });
+      if (width === 600) {
+        await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+        await page.locator(".rail").waitFor({ state: "detached" });
+      }
+      await page.waitForFunction(() => getComputedStyle(document.querySelector(".working")).opacity === "1");
+      const body = await activity.locator(".agent-activity").boundingBox();
+      const thinking = await page.locator(".working-text").boundingBox();
+      assert.ok(thinking.y - body.y - body.height <= 18, `Tool activity left ${thinking.y - body.y - body.height}px before thinking.`);
+      assert.equal(await page.locator(".turn-agent .turn-heading").count(), 1);
+      await page.screenshot({ path: `/tmp/citropy-activity-row-${width}.png`, animations: "disabled" });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    }
+    await activity.locator(".group-head").click();
+    await activity.locator(".group-body").waitFor();
+    assert.equal(await activity.locator(".group-body .tool").count(), 2);
+    await page.waitForFunction(() => {
+      const body = document.querySelector(".group-body");
+      const inner = document.querySelector(".group-body-inner");
+      return body && inner && Math.abs(body.getBoundingClientRect().height - inner.getBoundingClientRect().height) < 1;
+    });
+    f.emit({ t: "message.add", threadId: "chat", message: message("empty-after-tools", []) });
+    await page.waitForFunction(async () => Boolean((await import("/web/src/lib/store.ts")).useApp.getState().messages["empty-after-tools"]));
+    assert.equal(await page.locator(".turn-agent .turn-heading").count(), 1);
+    const expanded = await activity.locator(".agent-activity").boundingBox();
+    const thinking = await page.locator(".working-text").boundingBox();
+    assert.ok(thinking.y - expanded.y - expanded.height >= 0);
+    assert.ok(thinking.y - expanded.y - expanded.height <= 18);
+
+    await f.close();
+  });
+
   await t.test("chat bubbles fit short messages, preserve line breaks and resolve runtime model names", async () => {
     const f = await fixture({ messages: [
       { ...message("greeting", [textPart("greeting-text", "Hello!")]), role: "user" },
@@ -191,7 +325,11 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     const lineCount = await page.locator('[data-part-id="multiline-text"] p').evaluate((node) => node.offsetHeight / parseFloat(getComputedStyle(node).lineHeight));
     assert.ok(lineCount > 1.8 && lineCount < 2.2);
     const pieces = page.locator('.turn-agent').filter({ has: page.locator('.agent-card') });
-    assert.equal(await pieces.count(), 4);
+    assert.equal(await pieces.count(), 2);
+    await page.getByRole("button", { name: /^Work details/ }).click();
+    assert.equal(await pieces.count(), 3);
+    assert.equal(await page.locator(".agent-card .group").count(), 0);
+    assert.equal(await page.locator(".agent-activity .group").count(), 1);
     const continuation = await page.locator('.turn-agent[data-continuation="true"]').first().boundingBox();
     const beginning = await page.locator('#message-work').boundingBox();
     assert.ok(Math.abs(beginning.y + beginning.height - continuation.y) < 2);
@@ -202,8 +340,13 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
       const inner = document.querySelector(".group-body-inner");
       return body && inner && Math.abs(body.getBoundingClientRect().height - inner.getBoundingClientRect().height) < 1;
     });
-    for (const width of [1440, 960]) {
+    f.emit({ t: "thread.upsert", thread: { ...thread, model: "claude-sonnet-5", running: true, status: "thinking", runStartedAt: Date.now() - 3200 } });
+    for (const width of [1440, 600]) {
       await page.setViewportSize({ width, height: 1100 });
+      if (width === 600) {
+        await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+        await page.locator(".rail").waitFor({ state: "detached" });
+      }
       await page.screenshot({ path: `/tmp/citropy-chat-bubbles-${width}.png`, animations: "disabled" });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     }
@@ -222,9 +365,7 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     });
     for (let index = 1; index <= 2; index++) {
       await page.getByRole("button", { name: "New thread", exact: true }).click();
-      await page.getByRole("combobox", { name: "Provider", exact: true }).selectOption("claude");
-      await page.getByRole("button", { name: "Create conversation", exact: true }).click();
-      await page.getByRole("dialog").waitFor({ state: "detached" });
+      assert.equal(await page.locator("dialog").count(), 0);
       await page.locator(`.thread-row[title="Empty conversation ${index}"][data-active="true"]`).waitFor();
       assert.equal(await page.locator(".conversation-viewport").count(), 1);
       assert.equal(await page.locator(".canvas-hint").count(), 1);
@@ -268,10 +409,10 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
       const before = await card.boundingBox();
       await card.hover();
       await page.waitForFunction(() => getComputedStyle(document.querySelector('.thread-card[data-active="true"] .thread-row-actions')).opacity === "1");
-      const content = await card.locator(".thread-row").boundingBox();
+      const content = await card.locator(".thread-row-body > :last-child").boundingBox();
       const actions = await card.locator(".thread-row-actions").boundingBox();
       const after = await card.boundingBox();
-      assert.ok(actions.y >= content.y + content.height - 1);
+      assert.ok(actions.y >= content.y + content.height - 1, JSON.stringify({ width, sidebar, scale, content, actions }));
       assert.ok(actions.x >= after.x && actions.x + actions.width <= after.x + after.width);
       assert.ok(Math.abs(before.height - after.height) < 1);
       const buttons = await page.locator(".navigation-actions .rail-action").evaluateAll((nodes) => nodes.map((node) => {
@@ -387,6 +528,9 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
       await bottom();
       assert.ok(await mounted() < 40);
     }
+    await page.getByRole("button", { name: /^Work details/ }).click();
+    await page.getByRole("button", { name: "Latest", exact: true }).click();
+    await bottom();
     await page.locator(".group-head").click();
     await page.locator(".group-body").waitFor();
     const rail = page.getByRole("navigation", { name: "Conversation messages", exact: true });
@@ -657,6 +801,7 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
       history.at(-1).parts.push(...tools, textPart("ending", "The earlier task is complete."));
       const f = await fixture({ messages: history, preferences: { textStreaming: streaming, typingAnimation: "1", typingSpeed: "300" } });
       const { page } = f;
+      await page.getByRole("button", { name: /^Work details/ }).click();
       await page.locator(".group-head").click();
       await page.locator(".group-body").waitFor();
       const composer = page.locator("textarea");
@@ -738,6 +883,7 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     history.at(-1).parts.push(...tools, textPart("ending", "The task is complete."));
     const f = await fixture({ messages: history });
     const { page } = f;
+    await page.getByRole("button", { name: /^Work details/ }).click();
     for (const scale of [90, 120, 150]) {
       await page.evaluate(async (scale) => (await import("/web/src/lib/store.ts")).setUiScale(scale), scale);
       const canvas = page.locator(".canvas");
@@ -842,29 +988,136 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     await f.close();
   });
 
+  await t.test("empty provider replies do not add space while thinking or hide later content", async () => {
+    for (const streaming of ["1", "0"]) {
+      const f = await fixture({ preferences: { sidebar: "0", textStreaming: streaming }, messages: [
+        { ...message("question", [textPart("question-text", "Tell me how much 15*15 is")]), role: "user" },
+      ] });
+      const { page } = f;
+      const now = Date.now();
+      await page.clock.setFixedTime(now);
+      const active = { ...thread, provider: "opencode", model: "muse", running: true, status: "thinking", runStartedAt: now - 5300 };
+      f.emit(
+        { t: "providers.update", providers: [{ id: "opencode", label: "OpenCode", available: true, enabled: true, models: [{ id: "muse", label: "Muse Spark 1.3 Free" }] }] },
+        { t: "thread.upsert", thread: active },
+      );
+      await page.locator(".working-time").getByText("5.3s", { exact: true }).waitFor();
+      await page.waitForFunction(() => getComputedStyle(document.querySelector(".working")).opacity === "1");
+      await page.locator(".turn-agent .turn-heading strong").getByText("Muse Spark 1.3 Free", { exact: true }).waitFor();
+      assert.equal(await page.locator(".turn-agent .turn-heading .turn-provider").textContent(), "OpenCode");
+      assert.equal(await page.locator('.turn-agent .agent-avatar .provider-icon[data-provider="opencode"]').count(), 1);
+      const before = await page.locator(".working").boundingBox();
+      f.emit(
+        { t: "message.add", threadId: "chat", message: message("pending", []) },
+        { t: "part.add", threadId: "chat", messageId: "pending", part: { id: "pending-reason", kind: "reasoning", text: "", complete: false } },
+        { t: "part.add", threadId: "chat", messageId: "pending", part: textPart("pending-text", " \n", false) },
+      );
+      await page.waitForFunction(async () => (await import("/web/src/lib/store.ts")).useApp.getState().parts["pending-text"]?.text === " \n");
+      await page.screenshot({ path: `/tmp/citropy-thinking-pending-${streaming}.png`, animations: "disabled" });
+      const after = await page.locator(".working").boundingBox();
+      assert.ok(Math.abs(after.y - before.y) < 2, `An empty reply moved the thinking indicator by ${after.y - before.y}px.`);
+      assert.equal(await page.locator(".turn-agent").count(), 1);
+      assert.equal(await page.locator(".message-nav-stop").count(), 0);
+      for (const width of [1440, 600]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.clock.setFixedTime(now + 60_000);
+        await page.locator(".working-time").getByText("1m 5s", { exact: true }).waitFor();
+        assert.equal(await page.locator(".working").count(), 1);
+        assert.equal(await page.locator(".turn-agent").count(), 1);
+        await page.screenshot({ path: `/tmp/citropy-thinking-compact-${streaming}-${width}.png`, animations: "disabled" });
+      }
+      if (streaming === "1") {
+        f.emit({ t: "part.append", threadId: "chat", messageId: "pending", partId: "pending-reason", text: "Multiplying 15 by 15." });
+        await page.locator(".turn-agent .reason-text").getByText("Multiplying 15 by 15.", { exact: true }).waitFor();
+        await page.locator("#message-pending .turn-heading").getByText("Muse Spark 1.3 Free", { exact: true }).waitFor();
+        assert.equal(await page.locator(".turn-agent .turn-heading").count(), 1);
+      }
+      f.emit(
+        { t: "part.patch", threadId: "chat", messageId: "pending", partId: "pending-reason", patch: { complete: true } },
+        { t: "part.append", threadId: "chat", messageId: "pending", partId: "pending-text", text: "225." },
+        { t: "part.patch", threadId: "chat", messageId: "pending", partId: "pending-text", patch: { complete: true } },
+        { t: "thread.upsert", thread: { ...active, running: false, status: "idle" } },
+      );
+      await page.locator('[data-part-id="pending-text"]').getByText("225.", { exact: true }).waitFor();
+      await page.locator(".working").waitFor({ state: "detached" });
+      assert.equal(await page.locator("#message-pending .turn-heading").count(), 1);
+      assert.equal(await page.locator(".message-nav-stop").count(), 2);
+      await f.close();
+    }
+  });
+
+  await t.test("a new turn shows its selected model immediately and stopping leaves no empty reply", async () => {
+    const f = await fixture({ preferences: { sidebar: "0" }, messages: [
+      { ...message("question", [textPart("question-text", "First question")]), role: "user" },
+      { ...message("answer", [textPart("answer-text", "First answer")]), model: "sample" },
+    ] });
+    const { page } = f;
+    f.emit(
+      { t: "providers.update", providers: [{ id: "claude", label: "Claude Code", available: true, enabled: true, models: [{ id: "sample", label: "Example model" }, { id: "next", label: "Next model" }] }] },
+      { t: "message.add", threadId: "chat", message: { ...message("follow-up", [textPart("follow-up-text", "Next question")]), role: "user" } },
+      { t: "thread.upsert", thread: { ...thread, model: "next", running: true, status: "queued", runStartedAt: Date.now() } },
+    );
+    await page.locator('.turn[data-working] .turn-heading strong').getByText("Next model", { exact: true }).waitFor();
+    await page.locator(".working-text").getByText("Queued", { exact: true }).waitFor();
+    assert.equal(await page.locator("#message-answer .turn-heading strong").textContent(), "Example model");
+    assert.equal(await page.locator(".turn-agent .turn-heading").count(), 2);
+    assert.equal(await page.locator(".message-nav-stop").count(), 3);
+    f.emit({ t: "thread.upsert", thread: { ...thread, model: "next", running: false, status: "stopped" } });
+    await page.locator(".working").waitFor({ state: "detached" });
+    assert.equal(await page.locator(".turn-agent").count(), 1);
+    assert.equal(await page.locator(".message-nav-stop").count(), 3);
+    await f.close();
+  });
+
   await t.test("the thinking indicator loops without a visual reset and respects reduced motion", async () => {
     const f = await fixture();
-    f.emit({ t: "thread.upsert", thread: { ...thread, running: true, status: "thinking" } });
-    const weave = f.page.locator(".working-weave");
-    await weave.waitFor();
-    const frames = await weave.evaluate((element) => [...element.children].map((line) => {
+    f.emit({ t: "thread.upsert", thread: { ...thread, running: true, status: "thinking", runStartedAt: Date.now() - 3200 } });
+    const signal = f.page.locator(".working-weave");
+    await signal.waitFor();
+    await f.page.screenshot({ path: "/tmp/citropy-thinking-desktop.png" });
+    const center = signal.locator("i").nth(1);
+    assert.equal(await center.evaluate(line => line.getAnimations().length), 0);
+    const frames = await signal.evaluate((element) => [element.firstElementChild, element.lastElementChild].map((line) => {
       const animation = line.getAnimations()[0];
       animation.pause();
       const timing = animation.effect.getTiming();
       const sample = (offset) => {
         animation.currentTime = Number(timing.delay) + Number(timing.duration) + offset;
         const style = getComputedStyle(line);
-        return { opacity: Number(style.opacity), scale: new DOMMatrix(style.transform).a };
+        const box = line.getBoundingClientRect();
+        return { opacity: Number(style.opacity), box: [box.x, box.y, box.width, box.height] };
       };
       return { before: sample(-1), after: sample(1), middle: sample(-Number(timing.duration) / 2), iterations: timing.iterations };
     }));
     for (const frame of frames) {
       assert.ok(Math.abs(frame.before.opacity - frame.after.opacity) < 0.005);
-      assert.ok(Math.abs(frame.before.scale - frame.after.scale) < 0.005);
+      assert.ok(frame.before.box.every((value, index) => Math.abs(value - frame.after.box[index]) < 0.01));
+      assert.ok(frame.middle.box[2] > frame.before.box[2]);
+      assert.equal(frame.before.box[0], frame.middle.box[0]);
+      assert.equal(frame.before.box[1], frame.middle.box[1]);
+      assert.equal(frame.before.box[3], frame.middle.box[3]);
       assert.ok(frame.middle.opacity - frame.before.opacity > 0.5);
     }
+    for (const scale of [90, 120, 150]) {
+      await f.page.evaluate(async scale => (await import("/web/src/lib/store.ts")).setUiScale(scale), scale);
+      const centered = await signal.evaluate(element => {
+        const icon = element.getBoundingClientRect();
+        const line = element.children[1].getBoundingClientRect();
+        return Math.abs(line.top + line.height / 2 - icon.top - icon.height / 2);
+      });
+      assert.ok(centered < 0.05, `Middle bar is off center at ${scale}%: ${centered}px`);
+    }
+    await f.page.evaluate(async () => (await import("/web/src/lib/store.ts")).setUiScale(120));
+    await f.page.evaluate(() => document.documentElement.setAttribute("data-page-hidden", ""));
+    assert.equal(await signal.locator("i").first().evaluate((line) => getComputedStyle(line).animationPlayState), "paused");
+    await f.page.evaluate(() => document.documentElement.removeAttribute("data-page-hidden"));
     await f.page.emulateMedia({ reducedMotion: "reduce" });
-    assert.equal(await weave.locator("i").first().evaluate((line) => getComputedStyle(line).animationIterationCount), "1");
+    assert.equal(await signal.locator("i").first().evaluate((line) => getComputedStyle(line).animationName), "none");
+    await f.page.setViewportSize({ width: 620, height: 760 });
+    await f.page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+    await f.page.screenshot({ path: "/tmp/citropy-thinking-narrow.png" });
+    const bounds = await signal.boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 620);
     await f.close();
   });
 
@@ -906,15 +1159,21 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     const activeColor = await page.locator('[data-category="active"] .category-icon').evaluate((node) => getComputedStyle(node).color);
     assert.notEqual(pinnedColor, activeColor);
     await page.getByRole("button", { name: "Git actions", exact: true }).click();
-    await page.getByRole("menuitem", { name: /^AI commit Commit staged/ }).click();
-    await page.getByRole("button", { name: "Git actions", exact: true }).filter({ hasText: "Writing commit" }).waitFor();
+    await page.getByRole("dialog", { name: "Git actions", exact: true }).waitFor();
+    assert.equal(await page.locator(".composer-actions .git-panel-trigger").count(), 0);
+    await page.getByText("1 staged file", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "AI commit", exact: true }).click();
+    await page.locator(".git-panel-progress").filter({ hasText: "Writing commit" }).waitFor();
     assert.deepEqual(calls, [{ action: "commit", scope: "staged" }]);
     await page.getByRole("textbox", { name: "Message", exact: true }).fill("A follow-up after the commit");
     assert.equal(await page.getByRole("button", { name: "Send", exact: true }).isDisabled(), true);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "AI assistance", exact: true }).click();
-    await page.getByRole("combobox", { name: "Title model", exact: true }).selectOption(JSON.stringify({ provider: "claude", model: "sample" }));
-    await page.getByRole("combobox", { name: "Commit model", exact: true }).selectOption(JSON.stringify({ provider: "claude", model: "sample" }));
+    for (const label of ["Title model", "Commit model"]) {
+      await page.getByRole("button", { name: `${label}: Use the conversation model`, exact: true }).click();
+      await page.getByRole("menuitem", { name: /^Example model/ }).click();
+      await page.getByRole("menu").waitFor({ state: "detached" });
+    }
     await page.getByRole("switch", { name: /^Automatic titles/ }).uncheck();
     assert.equal(settings.automaticTitles, false);
     assert.deepEqual(settings.commitModel, { provider: "claude", model: "sample" });
@@ -930,22 +1189,130 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
     await page.getByRole("button", { name: "Back to chat", exact: true }).click();
-    await page.getByRole("button", { name: "Git actions", exact: true }).filter({ hasText: "Writing commit" }).waitFor();
+    await page.locator(".git-panel-progress").filter({ hasText: "Writing commit" }).waitFor();
     assert.equal(await page.getByRole("textbox", { name: "Message", exact: true }).evaluate((node) => getComputedStyle(node).userSelect), "text");
     assert.equal(await page.locator(".message-bubble").first().evaluate((node) => getComputedStyle(node).userSelect), "text");
     f.emit({ t: "thread.upsert", thread: { ...job, gitAction: { action: "commit", status: "success", message: "Fix workspace selection", commit: "1234567890123456789012345678901234567890" } } });
-    await page.getByRole("button", { name: "Git actions", exact: true }).filter({ hasText: "Committed" }).waitFor();
+    f.emit({ t: "git.status", projectId: "workspace", threadId: "chat", status: { branch: "main", ahead: 1, behind: 0, clean: true, files: [] } });
+    await page.getByText("Last commit", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Git actions", exact: true }).innerText(), "Git");
+    assert.equal(await page.getByRole("button", { name: "AI commit", exact: true }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "Push", exact: true }).isEnabled(), true);
     assert.equal(await page.getByRole("button", { name: "Send", exact: true }).isEnabled(), true);
+    await page.getByText("Last commit", { exact: true }).click();
     for (const width of [1440, 600]) {
       await page.setViewportSize({ width, height: 900 });
       if (width === 600) await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
-      await page.getByRole("button", { name: "Git actions", exact: true }).click();
       await page.getByText("Fix workspace selection", { exact: true }).waitFor();
-      const menu = await page.getByRole("menu").boundingBox();
-      assert.ok(menu.x >= 0 && menu.x + menu.width <= width + 1);
+      const panel = await page.getByRole("dialog", { name: "Git actions", exact: true }).boundingBox();
+      const trigger = await page.getByRole("button", { name: "Git actions", exact: true }).boundingBox();
+      assert.ok(panel.x >= 0 && panel.x + panel.width <= width + 1);
+      assert.ok(panel.y >= trigger.y + trigger.height && panel.y + panel.height <= 900);
       await page.screenshot({ path: `/tmp/citropy-ai-git-${width}.png`, animations: "disabled" });
-      await page.keyboard.press("Escape");
     }
+    await page.keyboard.press("Escape");
+    await page.locator(".git-panel").waitFor({ state: "detached" });
+    assert.equal(await page.getByRole("button", { name: "Git actions", exact: true }).evaluate((button) => button === document.activeElement), true);
+    await f.close();
+  });
+
+  await t.test("the floating Git panel follows current changes, retries pushes, and can stay hidden", async () => {
+    const f = await fixture({ isGit: true });
+    const { page } = f;
+    const initial = { branch: "main", ahead: 1, behind: 0, clean: false, files: [
+      { path: "server/assistance.ts", staged: false, index: " ", work: "M", added: 48, removed: 12, untracked: false },
+      { path: "web/GitActions.tsx", staged: false, index: " ", work: "M", added: 96, removed: 24, untracked: false },
+    ] };
+    const previous = { action: "commit", status: "success", message: "Previous commit", commit: "abcdef012345678901234567890123456789012345" };
+    f.emit({ t: "thread.upsert", thread: { ...thread, gitAction: previous } });
+    f.emit({ t: "git.status", projectId: "workspace", threadId: "chat", status: initial });
+    const trigger = page.getByRole("button", { name: "Git actions", exact: true });
+    await trigger.click();
+    const panel = page.getByRole("dialog", { name: "Git actions", exact: true });
+    await panel.getByText("2 changed files", { exact: true }).waitFor();
+    assert.equal(await panel.getByText("Previous commit", { exact: true }).isVisible(), false);
+    assert.equal(await panel.getByRole("button", { name: "AI commit", exact: true }).isEnabled(), true);
+    await panel.getByText("+144", { exact: true }).waitFor();
+    await panel.getByText("-36", { exact: true }).waitFor();
+    const location = await trigger.boundingBox();
+    const inspector = await page.getByRole("button", { name: "Toggle inspector", exact: true }).boundingBox();
+    assert.ok(location.x < inspector.x && Math.abs(location.y - inspector.y) < 2);
+    const calls = [];
+    await page.route("**/api/threads/git-action?**", async (route) => {
+      const request = route.request().postDataJSON();
+      calls.push(request);
+      const action = { action: request.action, status: request.action === "push" ? "pushing" : "generating" };
+      f.emit({ t: "thread.upsert", thread: { ...thread, gitAction: action } });
+      await route.fulfill({ json: action });
+    });
+    await page.screenshot({ path: "/tmp/citropy-git-panel-changes-1440.png", animations: "disabled" });
+    await panel.getByRole("button", { name: "AI commit & push", exact: true }).click();
+    await panel.locator(".git-panel-progress").filter({ hasText: "Writing commit" }).waitFor();
+    assert.deepEqual(calls, [{ action: "commitPush", scope: "all" }]);
+    const failure = "Committed successfully, but the push failed. Use Push to retry.";
+    f.emit({ t: "thread.upsert", thread: { ...thread, gitAction: { action: "commitPush", status: "error", message: failure, commit: previous.commit } } });
+    f.emit({ t: "git.status", projectId: "workspace", threadId: "chat", status: { ...initial, clean: true, files: [] } });
+    await panel.getByRole("alert").filter({ hasText: failure }).waitFor();
+    await panel.getByRole("button", { name: "Push", exact: true }).click();
+    await panel.locator(".git-panel-progress").filter({ hasText: "Pushing" }).waitFor();
+    assert.deepEqual(calls[1], { action: "push", scope: "all" });
+    assert.equal(await panel.getByRole("button", { name: "Push", exact: true }).isDisabled(), true);
+    f.emit({ t: "thread.upsert", thread: { ...thread, gitAction: { action: "push", status: "success" } } });
+    f.emit({ t: "git.status", projectId: "workspace", threadId: "chat", status: { ...initial, clean: true, files: [], ahead: 0 } });
+    await panel.getByText("No commits to push", { exact: true }).waitFor();
+    assert.equal(await panel.getByRole("button", { name: "Push", exact: true }).isDisabled(), true);
+    assert.equal(await trigger.innerText(), "Git");
+    await panel.getByRole("button", { name: "Hide Git panel", exact: true }).click();
+    await panel.waitFor({ state: "detached" });
+    assert.equal(await trigger.getAttribute("aria-expanded"), "false");
+    assert.equal(await page.evaluate(() => localStorage.getItem("citropy.gitPanel")), "0");
+    await page.reload();
+    await trigger.waitFor();
+    assert.equal(await trigger.getAttribute("aria-expanded"), "false");
+    await page.clock.install();
+    const refreshes = f.requests.filter((event) => event.t === "git.refresh").length;
+    await page.clock.runFor(5500);
+    assert.equal(f.requests.filter((event) => event.t === "git.refresh").length, refreshes);
+    await f.close();
+  });
+
+  await t.test("the Git panel stays inside narrow windows and does not reuse another thread's result", async () => {
+    const other = { ...thread, id: "worktree", title: "Worktree conversation", workspacePath: "/example/worktree", workspaceBranch: "feature/other" };
+    const f = await fixture({ isGit: true, children: [other, { ...thread, id: "child-agent", parentThreadId: "chat", title: "Child agent" }] });
+    const { page } = f;
+    f.emit({ t: "thread.upsert", thread: { ...thread, gitAction: { action: "commit", status: "success", message: "Old conversation commit" } } });
+    f.emit({ t: "git.status", projectId: "workspace", threadId: "chat", status: { branch: "main", ahead: 2, behind: 0, clean: true, files: [] } });
+    await page.getByRole("button", { name: "Git actions", exact: true }).click();
+    await page.getByText("Last commit", { exact: true }).click();
+    await page.getByText("Old conversation commit", { exact: true }).waitFor();
+    await page.locator('.thread-card').filter({ hasText: "Worktree conversation" }).click();
+    const panel = page.getByRole("dialog", { name: "Git actions", exact: true });
+    await panel.getByText("feature/other", { exact: true }).waitFor();
+    assert.equal(await panel.getByText("Last commit", { exact: true }).count(), 0);
+    assert.equal(await panel.getByRole("button", { name: "Push", exact: true }).isDisabled(), true);
+    f.emit({ t: "git.status", projectId: "workspace", threadId: "worktree", status: { branch: "feature/other", ahead: 0, behind: 1, clean: true, files: [] } });
+    await panel.getByText("1 commit behind upstream", { exact: true }).waitFor();
+    assert.equal(await panel.getByRole("button", { name: "Push", exact: true }).getAttribute("title"), "Sync this branch before pushing");
+    for (const [width, scale] of [[600, 120], [480, 150]]) {
+      await page.setViewportSize({ width, height: 700 });
+      await page.evaluate(async (scale) => (await import("/web/src/lib/store.ts")).setUiScale(scale), scale);
+      await page.waitForFunction(() => {
+        const box = document.querySelector(".git-panel")?.getBoundingClientRect();
+        return box && box.x >= 0 && box.right <= innerWidth + 1 && box.y >= 0 && box.bottom <= innerHeight;
+      }, undefined, { timeout: 1000 });
+      const box = await panel.boundingBox();
+      assert.ok(box.x >= 0 && box.x + box.width <= width + 1);
+      assert.ok(box.y >= 0 && box.y + box.height <= 700);
+      await page.screenshot({ path: `/tmp/citropy-git-panel-${width}-${scale}.png`, animations: "disabled" });
+    }
+    assert.ok(f.requests.some((event) => event.t === "git.refresh" && event.threadId === "worktree"));
+    f.emit({ t: "git.status", projectId: "workspace", threadId: "worktree", status: { branch: "feature/other", upstream: null, ahead: 0, behind: 0, clean: true, files: [] } });
+    await panel.getByText("No upstream branch", { exact: true }).waitFor();
+    await panel.getByRole("button", { name: "Open Source control to publish this branch", exact: true }).waitFor();
+    assert.equal(await panel.getByText("No commits to push", { exact: true }).count(), 0);
+    await page.getByRole("button", { name: "Hide Git panel", exact: true }).click();
+    await page.evaluate(async () => (await import("/web/src/lib/store.ts")).selectThread("child-agent"));
+    assert.equal(await page.getByRole("button", { name: "Git actions", exact: true }).count(), 1);
     await f.close();
   });
 });

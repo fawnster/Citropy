@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { useReducedMotion } from "motion/react";
+import { useReducedMotion } from "./use-reduced-motion.ts";
 import { markTextPresented, useApp } from "./store.ts";
 
 export function useTextReveal(

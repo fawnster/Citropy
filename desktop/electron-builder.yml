@@ -26,4 +26,4 @@ publish:
   provider: github
   owner: tinuxongit
   repo: Citropy
-  private: true
+  private: false

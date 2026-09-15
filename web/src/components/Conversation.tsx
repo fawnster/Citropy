@@ -27,7 +27,9 @@ export function Conversation() {
       if (
         state.messages === previous?.messages &&
         state.parts === previous.parts &&
-        state.order === previous.order
+        state.order === previous.order &&
+        state.disclosures === previous.disclosures &&
+        state.threads[threadId ?? ""] === previous.threads[threadId ?? ""]
       )
         return rows;
       previous = state;
@@ -37,6 +39,8 @@ export function Conversation() {
     };
   }, [threadId]);
   const rows = useApp(selectRows);
+  const continuesReply = useApp((state) => state.messages[rows.at(-1)?.messageId ?? ""]?.role === "assistant");
+  const lastMessage = useApp((state) => state.messages[ids?.at(-1) ?? ""]);
   const status = useApp((state) =>
     threadId ? state.threads[threadId]?.status : undefined,
   );
@@ -79,6 +83,11 @@ export function Conversation() {
     overscan: virtualized ? 4 : 40,
     measureElement: (element) => element.offsetHeight,
   });
+  timeline.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+    const canvas = viewport.current;
+    const offset = instance.scrollOffset ?? 0;
+    return Boolean(canvas && offset <= canvas.scrollHeight - canvas.clientHeight + 1 && item.start < offset + instance.scrollAdjustments);
+  };
 
   useEffect(() => {
     if (threadId && connected) {
@@ -119,6 +128,14 @@ export function Conversation() {
 
   useEffect(() => {
     if (!searchMessageId || !ids?.includes(searchMessageId)) return;
+    const activity = rows.find(row => row.messageId === searchMessageId && row.row?.kind === "activity")?.row;
+    if (activity?.kind === "activity" && !activity.open) {
+      useApp.setState(state => ({ disclosures: {
+        ...state.disclosures,
+        [activity.id]: { ...state.disclosures[activity.id], activity: true },
+      } }));
+      return;
+    }
     const frame = requestAnimationFrame(() => {
       stopFollowing();
       const index = rows.findIndex((row) => row.messageId === searchMessageId);
@@ -156,7 +173,7 @@ export function Conversation() {
           className="canvas-inner"
           ref={content}
         >
-          {messages.length === 0 && (
+          {messages.length === 0 && !busy && (
             <div className="canvas-hint">
               <p>
                 {t("This thread is empty. Describe what you want changed and the provider will work in your repository.")}
@@ -181,7 +198,8 @@ export function Conversation() {
                     messageId={row.messageId}
                     row={row.row}
                     first={row.first}
-                    last={row.last}
+                    separator={row.separator}
+                    last={row.last && !(busy && continuesReply && item.index === rows.length - 1)}
                     streaming={
                       Boolean(running) && row.messageId === messages.at(-1)
                     }
@@ -195,14 +213,21 @@ export function Conversation() {
               {error}
             </div>
           )}
-          {busy && <Working status={status} tool={activeTool} compacting={compacting} startedAt={startedAt} />}
+          {busy && <MessageBlock
+            messageId={lastMessage?.role === "assistant" ? lastMessage.id : undefined}
+            first={!continuesReply}
+            last
+            streaming={false}
+          >
+            <Working status={status} tool={activeTool} compacting={compacting} startedAt={startedAt} />
+          </MessageBlock>}
           <div className="canvas-tail" />
         </div>
       </div>
 
       <MessageNavigator
         rows={rows}
-        activeMessageId={selectedMessageId ?? (atBottom ? messages.at(-1) : visibleItem && rows[visibleItem.index]?.messageId)}
+        activeMessageId={selectedMessageId ?? (atBottom ? rows.at(-1)?.messageId : visibleItem && rows[visibleItem.index]?.messageId)}
         onSelect={jumpToMessage}
       />
 

@@ -1,16 +1,19 @@
 import { useI18n } from "../lib/i18n.ts";
 import type { ReactNode } from "react";
 import { ArrowLeft } from "lucide-react";
+import { SlidingPanel } from "./SlidingPanel.tsx";
 import { ResizeHandle } from "./ResizeHandle.tsx";
 
 export function SectionSidebar({
   title,
+  open,
   onBack,
   children,
   navigation,
   workspace,
 }: {
   title: string;
+  open: boolean;
   onBack: () => void;
   children: ReactNode;
   navigation?: ReactNode;
@@ -18,7 +21,7 @@ export function SectionSidebar({
 }) {
   const t = useI18n();
   return (
-    <aside className="rail section-rail" aria-label={t(title)}>
+    <SlidingPanel open={open} side="left"><aside className="rail section-rail" aria-label={t(title)}>
       {workspace ? <div className="rail-head">{workspace}</div> : <div className="section-rail-heading">{t(title)}</div>}
       <nav className="section-nav scroll" aria-label={t("{title} sections", { title: t(title) })}>
         {children}
@@ -29,6 +32,6 @@ export function SectionSidebar({
       </div>
       {navigation}
       <ResizeHandle panel="sidebar" />
-    </aside>
+    </aside></SlidingPanel>
   );
 }

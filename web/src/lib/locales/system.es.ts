@@ -32,7 +32,7 @@ export const systemEs: Record<string, string> = {
   "Merge finished": "Merge terminado",
   "New thread": "Nueva conversación",
   "No release feed is available": "No hay ningún canal de versiones disponible",
-  "No release is accessible. Check your GitHub CLI sign-in and published Citropy releases.": "No hay ninguna versión accesible. Comprueba tu inicio de sesión de GitHub CLI y las versiones publicadas de Citropy.",
+  "No release is accessible. Check published Citropy releases and, for private repositories, your GitHub sign-in.": "No hay ninguna versión accesible. Comprueba las versiones publicadas de Citropy y, para los repositorios privados, tu inicio de sesión de GitHub.",
   "Open a real Chromium tab in Citropy's browser panel at a fixed 1920 × 1080 desktop resolution, scaled to fit the panel. The user sees and can interact with the same page. Use browser_snapshot to inspect it, or browser_action resize to test another resolution.": "Abre una pestaña real de Chromium en el panel del navegador de Citropy con una resolución de escritorio fija de 1920 × 1080, escalada para encajar en el panel. El usuario ve la misma página y puede interactuar con ella. Usa browser_snapshot para inspeccionarla o browser_action resize para probar otra resolución.",
   "Open an interactive terminal in this workspace. It appears in Citropy and returns its tabId.": "Abre un terminal interactivo en este espacio de trabajo. Aparece en Citropy y devuelve su tabId.",
   "Personal Codex prompt": "Indicador personal de Codex",

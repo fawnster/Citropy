@@ -1,6 +1,19 @@
 const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("citropyDesktop", {
+  environmentsState: () => ipcRenderer.invoke("environments:state"),
+  sshHosts: () => ipcRenderer.invoke("environments:hosts"),
+  saveEnvironment: (connection) => ipcRenderer.invoke("environments:save", connection),
+  configureProjectDefaults: (settings) => ipcRenderer.invoke("environments:project-defaults", settings),
+  connectEnvironment: (id) => ipcRenderer.invoke("environments:connect", id),
+  disconnectEnvironment: (id) => ipcRenderer.invoke("environments:disconnect", id),
+  removeEnvironment: (id) => ipcRenderer.invoke("environments:remove", id),
+  chooseWorkspaceFolder: (id, path) => ipcRenderer.invoke("environments:choose-folder", { id, path }),
+  onEnvironmentsState: (callback) => {
+    const listener = (_, state) => callback(state);
+    ipcRenderer.on("environments:state", listener);
+    return () => ipcRenderer.removeListener("environments:state", listener);
+  },
   updateState: () => ipcRenderer.invoke("updates:state"),
   updateCommand: (action) => ipcRenderer.invoke("updates:command", action),
   onUpdateState: (callback) => {

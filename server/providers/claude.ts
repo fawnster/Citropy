@@ -56,6 +56,9 @@ class ClaudeSession implements AgentSession {
   #tasks = new Map<string, TodoItem>();
   #pendingTasks = new Map<string, string>();
   #agents = new Map<string, { title: string; prompt?: string; model?: string }>();
+  #shells = new Map<string, string>();
+  #controls = new Map<string, { resolve: () => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
+  #nextControl = 0;
   #usage: MessageUsage;
   #initialCost = 0;
   #contextTokens = 0;
@@ -101,6 +104,7 @@ class ClaudeSession implements AgentSession {
     if (options.externalId) args.push("--resume", options.externalId);
 
     this.#child = spawn("claude", args, {
+      detached: process.platform !== "win32",
       cwd: options.cwd,
       env: {
         ...process.env,
@@ -172,15 +176,34 @@ class ClaudeSession implements AgentSession {
     this.#child.kill("SIGINT");
   }
 
+  stopShell(taskId: string): Promise<void> {
+    if (!this.#shells.has(taskId)) return Promise.resolve();
+    if (this.#disposed || !this.#child.stdin.writable) return Promise.reject(new Error("Claude session has closed."));
+    return new Promise((resolve, reject) => {
+      const requestId = `shell-stop-${++this.#nextControl}`;
+      const timer = setTimeout(() => {
+        this.#controls.delete(requestId);
+        reject(new Error("Claude did not confirm that the shell stopped."));
+      }, 10000);
+      this.#controls.set(requestId, { resolve, reject, timer });
+      this.#child.stdin.write(`${JSON.stringify({ type: "control_request", request_id: requestId, request: { subtype: "stop_task", task_id: taskId } })}\n`);
+    });
+  }
+
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    for (const pending of this.#controls.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("Claude session has closed."));
+    }
+    this.#controls.clear();
     try {
       this.#child.stdin.end();
     } catch {
       /* already closed */
     }
-    stopProcess(this.#child);
+    stopProcess(this.#child, true);
   }
 
   #block(index: number | undefined): string {
@@ -227,6 +250,18 @@ class ClaudeSession implements AgentSession {
   #handle(message: Record<string, unknown>): void {
     if (this.#disposed) return;
     const type = message.type;
+    if (type === "control_response") {
+      const response = message.response as { request_id?: string; subtype?: string; error?: string } | undefined;
+      const id = response?.request_id ?? "";
+      const pending = this.#controls.get(id);
+      if (pending) {
+        this.#controls.delete(id);
+        clearTimeout(pending.timer);
+        if (response?.subtype === "error") pending.reject(new Error(response.error ?? "Claude could not stop this shell."));
+        else pending.resolve();
+      }
+      return;
+    }
     if (type === "assistant") {
       const response = message.message as { id?: string; usage?: Record<string, number> } | undefined;
       const usage = response?.usage;
@@ -246,6 +281,18 @@ class ClaudeSession implements AgentSession {
     }
 
     if (type === "system" && ["task_started", "task_progress", "task_notification"].includes(String(message.subtype))) {
+      const taskId = String(message.task_id ?? "");
+      if (taskId && (message.task_type === "local_bash" || this.#shells.has(taskId))) {
+        const callId = this.#shells.get(taskId) ?? String(message.tool_use_id ?? taskId);
+        if (message.subtype === "task_notification") {
+          this.#shells.delete(taskId);
+          this.#emit({ type: "shell.end", callId, ok: message.status !== "failed", ...(message.status === "stopped" ? { stopped: true } : {}), output: typeof message.summary === "string" ? message.summary : undefined });
+        } else {
+          this.#shells.set(taskId, callId);
+          this.#emit({ type: "shell.background", callId, taskId });
+        }
+        return;
+      }
       const id = String(message.tool_use_id ?? message.task_id ?? "");
       if (message.task_type === "local_agent" && !this.#agents.has(id)) this.#agents.set(id, { title: String(message.description ?? "Subagent"), prompt: typeof message.prompt === "string" ? message.prompt : undefined });
       const agent = this.#agents.get(id);

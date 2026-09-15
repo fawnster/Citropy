@@ -1,3 +1,4 @@
+import { AnimatePresence } from "motion/react";
 import { ResizeHandle } from "./ResizeHandle.tsx";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
@@ -557,8 +558,7 @@ export function GitManager({
 
   return (
     <section className="section-view" aria-label={t("Git manager")}>
-      {sidebarOpen && (
-        <SectionSidebar title={t("Source control")} onBack={onBack} navigation={navigation} workspace={<WorkspaceSelector disabled={Boolean(busy)} />}>
+      <SectionSidebar open={sidebarOpen} title={t("Source control")} onBack={onBack} navigation={navigation} workspace={<WorkspaceSelector disabled={Boolean(busy)} />}>
           {tabs.map(({ name, icon: Icon }) => (
             <button
               className="section-link"
@@ -574,8 +574,7 @@ export function GitManager({
               )}
             </button>
           ))}
-        </SectionSidebar>
-      )}
+      </SectionSidebar>
       <div className="git-manager">
         <header className="git-header">
           <div className="git-heading">
@@ -1658,7 +1657,7 @@ export function GitManager({
           )}
         </div>
 
-        {dialog && (
+        <AnimatePresence>{dialog && (
           <GitDialog
             action={dialog}
             busy={Boolean(busy)}
@@ -1675,7 +1674,7 @@ export function GitManager({
                 setDialog(null);
             }}
           />
-        )}
+        )}</AnimatePresence>
       </div>
     </section>
   );

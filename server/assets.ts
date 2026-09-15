@@ -1,3 +1,4 @@
+import { dataRoot } from "./paths.ts";
 import { createReadStream, createWriteStream } from "node:fs";
 import {
   mkdir,
@@ -21,7 +22,7 @@ import { workspacePath } from "./workspaces.ts";
 import type { Attachment } from "../shared/protocol.ts";
 import type { FilePreviewData } from "../shared/features.ts";
 
-const root = join(homedir(), ".citropy", "attachments");
+const root = join(dataRoot, "attachments");
 export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 const MAX_TEXT_BYTES = 512 * 1024;
 const types: Record<string, string> = {

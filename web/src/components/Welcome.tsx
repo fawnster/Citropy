@@ -11,6 +11,8 @@ export function Welcome() {
   const home = useApp((state) => state.home);
   const activeProjectId = useApp((state) => state.activeProjectId);
   const choosing = useApp((state) => state.choosingWorkspace);
+  const creating = useApp((state) => state.creatingThread);
+  const connected = useApp((state) => state.connected);
 
   const hasProject = Boolean(activeProjectId);
 
@@ -25,7 +27,7 @@ export function Welcome() {
         </p>
 
         {hasProject ? (
-          <button className="btn" type="button" data-variant="primary" onClick={() => createThread()} disabled={!providers.some((provider) => provider.available && provider.enabled)}>
+          <button className="btn" type="button" data-variant="primary" onClick={() => createThread()} disabled={!connected || creating || !providers.some((provider) => provider.available && provider.enabled)}>
             <MessageSquarePlus size={14} />{t("New thread")}</button>
         ) : (
           <button className="btn" type="button" data-variant="primary" onClick={chooseWorkspace} disabled={choosing}>

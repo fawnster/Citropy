@@ -2,7 +2,9 @@
 *::before,
 *::after {
   box-sizing: border-box;
+  scrollbar-width: none;
 }
+*::-webkit-scrollbar { display: none; width: 0; height: 0; }
 
 html,
 body,
@@ -149,9 +151,6 @@ kbd {
 
 .scroll {
   overflow-y: auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar) transparent;
-  scrollbar-gutter: stable;
 }
 
 .collapsible {
@@ -161,22 +160,6 @@ kbd {
 .collapsible-clip {
   min-height: 0;
   overflow: hidden;
-}
-
-.scroll::-webkit-scrollbar {
-  width: 9px;
-  height: 9px;
-}
-
-.scroll::-webkit-scrollbar-thumb {
-  background: var(--scrollbar);
-  border-radius: var(--r-full);
-  border: 2.5px solid transparent;
-  background-clip: content-box;
-}
-
-.scroll::-webkit-scrollbar-track {
-  background: transparent;
 }
 
 .mono {

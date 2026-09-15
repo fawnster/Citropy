@@ -2,14 +2,14 @@ import { useI18n } from "../lib/i18n.ts";
 import { CircleHelp, Trash2 } from "lucide-react";
 import { answerConfirmation, useApp } from "../lib/store.ts";
 import { Modal } from "./Modal.tsx";
+import { AnimatePresence } from "motion/react";
 
 export function ConfirmationDialog() {
   const t = useI18n();
   const confirmation = useApp((state) => state.confirmation);
   const connected = useApp((state) => state.connected);
-  if (!confirmation) return null;
   return (
-    <Modal
+    <AnimatePresence>{confirmation && <Modal
       title={t(confirmation.title)}
       description={t(confirmation.description)}
       danger={confirmation.danger}
@@ -43,6 +43,6 @@ export function ConfirmationDialog() {
       {!connected && (
         <p className="dialog-error" role="alert">{t("Reconnect to Citropy to continue.")}</p>
       )}
-    </Modal>
+    </Modal>}</AnimatePresence>
   );
 }

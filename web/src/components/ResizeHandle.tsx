@@ -23,12 +23,14 @@ export function ResizeHandle({
 }) {
   const t = useI18n();
   const handle = useRef<HTMLDivElement>(null);
+  const frame = useRef(0);
   const drag = useRef<{
     x: number;
     width: number;
     root: HTMLElement;
     previous: string;
     moved: boolean;
+    pointerX: number;
   } | null>(null);
   const uiScale = useApp((state) => state.uiScale);
   const property = `--${panel}-width`;
@@ -46,7 +48,7 @@ export function ResizeHandle({
     if (panel === "inspector") {
       const root = handle.current?.closest(".shell");
       const sidebar =
-        root?.querySelector(".shell-body > .rail")?.getBoundingClientRect()
+        root?.querySelector('.shell-body > .sliding-panel[data-side="left"][data-open="true"] .rail')?.getBoundingClientRect()
           .width ?? 0;
       return Math.max(
         minimum,
@@ -61,6 +63,8 @@ export function ResizeHandle({
   const clamp = (value: number) =>
     Math.round(Math.max(minimum, Math.min(maximum(), value)));
   const cancel = () => {
+    cancelAnimationFrame(frame.current);
+    frame.current = 0;
     const current = drag.current;
     if (!current) return;
     if (current.previous)
@@ -116,6 +120,7 @@ export function ResizeHandle({
           root,
           previous: root.style.getPropertyValue(property),
           moved: false,
+          pointerX: event.clientX,
         };
         document.documentElement.dataset.resizing = "true";
       }}
@@ -123,15 +128,20 @@ export function ResizeHandle({
         const current = drag.current;
         if (!current) return;
         current.moved = true;
-        const next = clamp(
-          current.width +
-            (direction * (event.clientX - current.x)) / (uiScale / 100),
-        );
-        current.root.style.setProperty(property, `${next}px`);
+        current.pointerX = event.clientX;
+        if (frame.current) return;
+        frame.current = requestAnimationFrame(() => {
+          frame.current = 0;
+          if (drag.current !== current) return;
+          const next = clamp(current.width + direction * (current.pointerX - current.x) / (uiScale / 100));
+          current.root.style.setProperty(property, `${next}px`);
+        });
       }}
       onPointerUp={(event) => {
         const current = drag.current;
         if (!current) return;
+        cancelAnimationFrame(frame.current);
+        frame.current = 0;
         drag.current = null;
         delete document.documentElement.dataset.resizing;
         if (event.currentTarget.hasPointerCapture(event.pointerId))

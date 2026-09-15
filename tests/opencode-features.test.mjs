@@ -103,9 +103,32 @@ test(
       "file:///tmp/image%20with%20spaces.png",
     );
     assert.match(requests.at(-1).body.parts[0].text, /SKILL.md/);
+    notify("message.part.updated", { part: { id: "shell", type: "tool", callID: "shell", tool: "bash", state: { status: "running", input: { command: "npm test" }, metadata: { output: "Starting tests\n" } } } });
+    await until(() => events.some(event => event.type === "tool.output" && event.callId === "shell"));
+    assert.equal(events.findLast(event => event.type === "tool.output").output, "Starting tests\n");
+    const inputs = events.filter(event => event.type === "tool.input").length;
+    for (let i = 0; i < 30; i++) notify("message.part.updated", { part: { id: "shell", type: "tool", callID: "shell", tool: "bash", state: { status: "running", input: { command: "npm test" }, metadata: { output: `Progress ${i}` } } } });
+    await until(() => events.findLast(event => event.type === "tool.output")?.output === "Progress 29");
+    assert.equal(events.filter(event => event.type === "tool.input").length, inputs);
+    notify("message.part.updated", { part: { id: "shell", type: "tool", callID: "shell", tool: "bash", state: { status: "completed", input: { command: "npm test" }, output: "Tests passed\n" } } });
+    await until(() => events.some(event => event.type === "tool.end" && event.callId === "shell"));
     pending.end("{}");
     pending = undefined;
     await until(() => events.some((event) => event.type === "turn.end"));
+    notify("message.updated", { info: { id: "usage-first", role: "assistant", tokens: { total: 8496, input: 8180, output: 11, reasoning: 192, cache: { read: 113, write: 0 } } } });
+    await until(() => events.findLast(event => event.type === "usage")?.usage.contextTokens === 8496);
+    assert.equal(events.findLast(event => event.type === "usage").usage.output, 203);
+    notify("message.updated", { info: { id: "usage-pending", role: "assistant", tokens: { input: 0, output: 0, reasoning: 0 } } });
+    await until(() => events.findLast(event => event.type === "usage")?.usage.contextTokens === undefined);
+    notify("message.updated", { info: { id: "usage-pending", role: "assistant", tokens: { input: 344, output: 11, reasoning: 74, cache: { read: 8177, write: 0 } } } });
+    await until(() => events.findLast(event => event.type === "usage")?.usage.contextTokens === 8606);
+    const total = events.findLast(event => event.type === "usage").usage;
+    assert.equal(total.input, 8524);
+    assert.equal(total.output, 288);
+    assert.equal(total.cacheRead, 8290);
+    notify("message.updated", { info: { id: "usage-pending", role: "assistant", tokens: { total: 8606, input: 344, output: 11, reasoning: 74, cache: { read: 8177, write: 0 } } } });
+    await until(() => events.filter(event => event.type === "usage").length === 4);
+    assert.deepEqual(events.findLast(event => event.type === "usage").usage, total);
     await session.steer("Also check the tests", [], [{ name: "review", path: "/tmp/SKILL.md" }]);
     assert.equal(requests.at(-1).path, "/session/fixture/prompt_async");
     assert.match(requests.at(-1).body.parts[0].text, /^Use the review skill[\s\S]*Also check the tests$/);
@@ -146,7 +169,7 @@ test(
         tokens: { input: 20, output: 1 },
       },
     });
-    await until(() => events.some((event) => event.type === "usage"));
+    await until(() => events.findLast(event => event.type === "usage")?.usage.contextTokens === 21);
     pending.end("true");
     pending = undefined;
     await assert.rejects(compact, /Provider limit reached/);

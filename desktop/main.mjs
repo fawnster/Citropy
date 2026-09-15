@@ -1,3 +1,5 @@
+import { SshEnvironments, sshHosts } from "./ssh.mjs";
+import { chooseNativeFolder } from "./folder-picker.mjs";
 import { randomBytes } from "node:crypto";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -13,6 +15,7 @@ import {
   ipcMain,
   Menu,
   Notification,
+  screen,
   session,
   webContents,
 } from "electron";
@@ -45,6 +48,8 @@ if (app.isPackaged) {
 }
 const backend = app.isPackaged ? packagedBackend(process.env) : undefined;
 let updates;
+let environments;
+let folderChoice;
 let applyingUpdate = false;
 let connectDesktop;
 const base = new URL(process.env.CITROPY_URL ?? "http://127.0.0.1:4177");
@@ -194,6 +199,7 @@ async function applyMobileMode(tab) {
 }
 
 async function present(tab) {
+  if (environments?.activeId !== "local" && environments?.activeId) throw new Error("Switch to Local to use desktop browser tools.");
   if (tab.visible && window.isVisible() && !window.isMinimized()) return tab.layout;
   await frontendReady;
   if (window.isMinimized()) window.restore();
@@ -623,6 +629,7 @@ async function request(method, params) {
       });
     }
     ui.port = "5177";
+    if (environments) environments.origin = ui.origin;
     process.env.CITROPY_UI_URL = ui.href;
     await window.loadURL(ui.href);
     await window.webContents.executeJavaScript(
@@ -643,10 +650,7 @@ async function request(method, params) {
       if (window.isMinimized()) window.restore();
       window.show();
       window.focus();
-      window.webContents.send("notification:open", {
-        id: params.id,
-        target: params.target,
-      });
+      window.webContents.send("notification:open", { id: params.id, target: params.target, environmentId: "local" });
     });
     notification.on("close", () => notifications.delete(notification));
     notification.on("failed", () => notifications.delete(notification));
@@ -715,15 +719,22 @@ app
     try {
       saved = JSON.parse(readFileSync(windowFile, "utf8"));
     } catch {}
+    const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+    const minWidth = Math.min(960, workArea.width);
+    const minHeight = Math.min(640, workArea.height);
+    const width = Math.min(workArea.width, Math.max(minWidth,
+      Number.isFinite(saved.width) ? Math.round(saved.width) : Math.min(1440, workArea.width - 64),
+    ));
+    const height = Math.min(workArea.height, Math.max(minHeight,
+      Number.isFinite(saved.height) ? Math.round(saved.height) : Math.min(900, workArea.height - 64),
+    ));
     window = new BrowserWindow({
-      width: Number.isFinite(saved.width)
-        ? Math.max(960, Math.min(3000, saved.width))
-        : 1560,
-      height: Number.isFinite(saved.height)
-        ? Math.max(640, Math.min(2000, saved.height))
-        : 1000,
-      minWidth: 960,
-      minHeight: 640,
+      width,
+      height,
+      x: workArea.x + Math.round((workArea.width - width) / 2),
+      y: workArea.y + Math.round((workArea.height - height) / 2),
+      minWidth,
+      minHeight,
       title: "Citropy",
       icon: fileURLToPath(new URL("./assets/citropy.png", import.meta.url)),
       frame: false,
@@ -745,6 +756,50 @@ app
       event.sender === window.webContents &&
       event.senderFrame === window.webContents.mainFrame &&
       new URL(event.senderFrame.url).origin === ui.origin;
+    environments = new SshEnvironments({ directory: app.getPath("userData"), appRoot: fileURLToPath(new URL("..", import.meta.url)), origin: ui.origin, projectDefaults: async (settings, signal) => {
+      const response = await fetch(new URL("/api/projects/defaults", base), {
+        method: settings === undefined ? "GET" : "PATCH",
+        headers: { "content-type": "application/json" },
+        ...(settings === undefined ? {} : { body: JSON.stringify({ settings }) }),
+        signal: AbortSignal.any([AbortSignal.timeout(10000), ...(signal ? [signal] : [])]),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Could not save global project defaults.");
+      return data;
+    }, changed: state => {
+      if (!window.isDestroyed()) window.webContents.send("environments:state", state);
+    } });
+    await environments.load();
+    for (const [channel, action] of Object.entries({
+      state: () => environments.state(),
+      hosts: () => sshHosts(),
+      save: input => environments.save(input),
+      "project-defaults": settings => environments.syncProjectDefaults(settings),
+      connect: async id => {
+        if (id !== "local") await stopComputer();
+        const state = await environments.connect(id);
+        if (id !== "local") for (const tab of tabs.values()) {
+          tab.presentation++;
+          tab.visible = false;
+          tab.view.setBounds({ ...tab.view.getBounds(), x: window.getContentSize()[0] + 20 });
+        }
+        return state;
+      },
+      disconnect: id => environments.disconnect(id),
+      remove: id => environments.remove(id),
+      "choose-folder": async input => {
+        if (folderChoice) throw new Error("Finish choosing the current folder first.");
+        const connection = input?.id === "local" ? undefined : environments.connections.find(entry => entry.id === input?.id);
+        if (input?.id !== "local" && !connection) throw new Error("This SSH connection was removed.");
+        const controller = new AbortController();
+        folderChoice = controller;
+        try { return await chooseNativeFolder({ connection, path: typeof input.path === "string" ? input.path : undefined, signal: controller.signal }, options => dialog.showOpenDialog(window, options)); }
+        finally { if (folderChoice === controller) folderChoice = undefined; }
+      },
+    })) ipcMain.handle(`environments:${channel}`, (event, input) => {
+      if (!trusted(event)) throw new Error("Unavailable outside Citropy");
+      return action(input);
+    });
     const unavailableUpdate = !app.isPackaged
       ? "Development build. Live source changes are enabled; release updates require an installed Citropy build."
       : process.platform === "linux" && !(process.env.APPIMAGE && process.env.APPDIR && resolve(process.execPath).startsWith(`${resolve(process.env.APPDIR)}${sep}`))
@@ -764,8 +819,7 @@ app
         if (!token) {
           token = await promisify(execFile)("gh", ["auth", "token", "--hostname", "github.com"], { timeout: 8000, maxBuffer: 16000 }).then(result => result.stdout.trim()).catch(() => undefined);
         }
-        if (!token) throw new Error("GitHub token unavailable");
-        autoUpdater.setFeedURL({ provider: "github", owner: "tinuxongit", repo: "Citropy", private: true, token });
+        autoUpdater.setFeedURL({ provider: "github", owner: "tinuxongit", repo: "Citropy", private: Boolean(token), ...(token ? { token } : {}) });
       },
       prepareInstall: async () => {
         const response = await fetch(new URL("/api/updates/prepare", base), { method: "POST", headers: { "x-citropy-desktop-token": token }, signal: AbortSignal.timeout(10000) });
@@ -883,6 +937,7 @@ app
           return;
         const tab = tabs.get(id);
         if (!tab) return;
+        if (environments.activeId !== "local") { visible = false; cover = false; }
         const presentation = ++tab.presentation;
         if (visible) {
           if (
@@ -948,7 +1003,8 @@ app
       if (quitting) return;
       event.preventDefault();
       quitting = true;
-      void stopComputer().then(() => backend?.stop()).finally(() => {
+      folderChoice?.abort();
+      void stopComputer().then(() => environments?.dispose()).then(() => backend?.stop()).finally(() => {
         updates?.dispose();
         for (const notification of notifications) notification.close();
         for (const tab of tabs.values())

@@ -146,12 +146,16 @@
   color: var(--text);
   box-shadow: var(--shadow-lg);
   overflow: auto;
-  animation: dialog-enter 150ms ease-out;
+  transition: display 160ms allow-discrete, overlay 160ms allow-discrete;
 }
 .citropy-dialog::backdrop {
   background: rgba(0, 0, 0, 0.58);
   backdrop-filter: blur(5px);
+  animation: backdrop-enter var(--dur-fast) ease-out both;
 }
+.citropy-dialog[data-exiting]::backdrop { animation: backdrop-exit var(--dur-fast) ease-in both; }
+@keyframes backdrop-enter { from { opacity: 0; } to { opacity: 1; } }
+@keyframes backdrop-exit { to { opacity: 0; } }
 .dialog-heading {
   display: flex;
   align-items: flex-start;
@@ -251,18 +255,10 @@
   width: 16px;
   height: 16px;
 }
-@keyframes dialog-enter {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
 @media (prefers-reduced-motion: reduce) {
-  .citropy-dialog {
+  .citropy-dialog { transition: none; }
+  .citropy-dialog::backdrop,
+  .citropy-dialog[data-exiting]::backdrop {
     animation: none;
   }
 }
@@ -294,7 +290,6 @@
   box-shadow: var(--shadow-lg);
   overflow: hidden;
   text-align: left;
-  animation: dialog-enter 140ms ease-out;
 }
 .notification-center header {
   display: flex;
@@ -493,3 +488,33 @@
 .shell:has(.composer) .toasts {
   bottom: 154px;
 }
+.shells-wrap:empty { display: none; }
+.icon-btn.shells-trigger { display: inline-flex; align-items: center; gap: 6px; width: auto; padding-inline: 8px; }
+.shells-trigger > span { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-2); }
+.shells-panel { position: fixed; inset: auto; margin: 0; padding: 0; overflow: auto; border: 1px solid var(--line-strong); border-radius: var(--r-lg); background: var(--overlay); color: var(--text); font-size: 12px; }
+.shells-panel > header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.shells-panel h2 { margin: 0; font-size: 13px; font-weight: 600; flex: 1; }
+.shells-panel header > span { color: var(--text-3); font-size: 11px; }
+.shells-panel .icon-btn { flex-shrink: 0; }
+.shells-list { max-height: 200px; overflow: auto; padding: 6px; overscroll-behavior: contain; }
+.shells-list h3 { margin: 9px 8px 5px; color: var(--text-3); font-size: 10px; font-weight: 500; }
+.shell-row { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 48px; padding: 8px; border: 0; border-radius: var(--r-sm); text-align: left; background: transparent; transition: background var(--dur-fast); }
+.shell-row:hover { background: var(--raised); }
+.shell-row[data-selected="true"] { background: var(--raised-2); }
+.shell-status-dot { width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: var(--text-4); }
+.shell-status-dot[data-status="running"] { background: var(--ok); }
+.shell-status-dot[data-status="stopping"] { background: var(--heat); }
+.shell-status-dot[data-status="failed"] { background: var(--bad); }
+.shell-row-copy { min-width: 0; flex: 1; display: grid; gap: 3px; }
+.shell-row-copy code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.shell-row-copy small { color: var(--text-3); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shell-status { flex-shrink: 0; color: var(--text-3); font-size: 10px; }
+.shell-status[data-status="failed"] { color: var(--bad); }
+.shell-detail { border-top: 1px solid var(--line); padding: 12px 14px 14px; }
+.shell-command { display: block; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 80px; overflow: auto; font-size: 12px; user-select: text; }
+.shell-directory { margin-top: 5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; user-select: text; }
+.shell-actions { display: flex; gap: 8px; margin-top: 12px; }
+.shell-stop-hint, .shell-output-empty { margin: 9px 0 0; color: var(--text-3); font-size: 11px; line-height: 1.5; }
+.shell-error { color: var(--bad); font-size: 11px; }
+.shell-output-heading { display: flex; align-items: center; justify-content: space-between; min-height: 28px; margin-top: 12px; color: var(--text-3); font-size: 10px; }
+.shell-output { margin: 0; padding: 10px; max-height: 220px; overflow: auto; background: var(--canvas); border-radius: var(--r-sm); font: 11px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; overscroll-behavior: contain; }

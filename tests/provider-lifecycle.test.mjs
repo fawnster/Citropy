@@ -23,6 +23,8 @@ test("OpenCode owns and releases its process through startup failure, cancellati
   const originalSpawn = childProcess.spawn;
   const children = [];
   const sessions = [];
+  const prompts = [];
+  let abortResponse;
   let mode = "failure";
   const server = http.createServer((request, response) => {
     if (request.url === "/session") {
@@ -32,12 +34,19 @@ test("OpenCode owns and releases its process through startup failure, cancellati
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.write("data: {}\n\n");
       if (mode === "closed") response.end();
+    } else if (request.url === "/session/session/message" && mode === "interrupt") {
+      request.resume();
+      prompts.push(response);
+    } else if (request.url === "/session/session/abort" && mode === "interrupt") {
+      request.resume();
+      abortResponse = response;
     } else response.writeHead(404).end();
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   os.homedir = () => directory;
-  childProcess.spawn = () => {
+  childProcess.spawn = (_binary, _args, options) => {
+    assert.equal(options.detached, process.platform !== "win32");
     const child = new EventEmitter();
     child.stdout = new PassThrough();
     child.stderr = new PassThrough();
@@ -103,6 +112,39 @@ test("OpenCode owns and releases its process through startup failure, cancellati
   start();
   await waitFor(() => events.some((event) => event.type === "exit"));
   assert.deepEqual(children[3].signals, ["SIGTERM"]);
+
+  await t.test("an aborted OpenCode HTTP request drains before Continue reaches the same session", async () => {
+    mode = "interrupt";
+    const { store } = await import("../server/store.ts");
+    const { runtimeFor, disposeAll } = await import("../server/runtime.ts");
+    const project = store.openProject(directory);
+    const thread = store.createThread({ projectId: project.id, provider: "opencode", title: "Stop and continue", permissionMode: "plan" });
+    const runtime = runtimeFor(thread.id);
+    try {
+      await runtime.send("First");
+      await waitFor(() => prompts.length === 1);
+      runtime.stop();
+      const continuing = runtime.send("Continue");
+      await waitFor(() => abortResponse);
+      prompts[0].destroy();
+      await new Promise(resolve => setTimeout(resolve, 80));
+      assert.equal(prompts.length, 1);
+      assert.equal(thread.error, undefined);
+      abortResponse.writeHead(200, { "content-type": "application/json" }).end("true");
+      await continuing;
+      await waitFor(() => prompts.length === 2);
+      assert.equal(thread.running, true);
+      assert.equal(thread.error, undefined);
+      assert.equal(children.length, 5);
+      prompts[1].writeHead(200, { "content-type": "application/json" }).end("{}");
+      await waitFor(() => !thread.running);
+      assert.equal(thread.status, "idle");
+      assert.equal(thread.error, undefined);
+    } finally {
+      disposeAll();
+      store.flush();
+    }
+  });
 });
 
 test("provider shutdown clears its deadline on exit and escalates only for a stuck process", async (t) => {
@@ -142,4 +184,33 @@ test("shutdown waits for a real process that ignores graceful termination", { ti
   await waitForStoppedProcesses();
   assert.equal(child.signalCode, "SIGKILL");
   assert.throws(() => process.kill(child.pid, 0), { code: "ESRCH" });
+});
+
+test("provider shutdown terminates descendants when the parent exits first", { skip: process.platform !== "linux", timeout: 10_000 }, async t => {
+  const worker = "process.on('SIGTERM', () => {}); process.stdout.write(String(process.pid)); setInterval(() => {}, 1000);";
+  const unrelated = childProcess.spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)"], { stdio: "ignore" });
+  t.after(() => unrelated.kill("SIGKILL"));
+  for (const alreadyExited of [false, true]) {
+    const child = childProcess.spawn(process.execPath, ["-e", `const { spawn } = require('node:child_process'); process.on('SIGTERM', () => process.exit(0)); spawn(process.execPath, ['-e', ${JSON.stringify(worker)}], { stdio: ['ignore', 'inherit', 'ignore'] });`], { detached: true, stdio: ["ignore", "pipe", "ignore"] });
+    let descendant;
+    t.after(() => {
+      try { process.kill(-child.pid, "SIGKILL"); } catch {}
+      if (descendant) try { process.kill(descendant, "SIGKILL"); } catch {}
+    });
+    descendant = Number(String((await once(child.stdout, "data"))[0]));
+    assert.ok(descendant > 0);
+    if (alreadyExited) {
+      const exit = once(child, "exit");
+      child.kill("SIGTERM");
+      await exit;
+    }
+    stopProcess(child, true);
+    await waitForStoppedProcesses();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    let state;
+    try { state = fs.readFileSync(`/proc/${descendant}/stat`, "utf8").split(") ")[1].split(" ")[0]; }
+    catch (error) { if (error.code !== "ENOENT") throw error; }
+    assert.ok(state === undefined || state === "Z", `Descendant still running: ${state}`);
+    assert.doesNotThrow(() => process.kill(unrelated.pid, 0));
+  }
 });

@@ -1,3 +1,4 @@
+import { remoteId } from "./remote.ts";
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { EventEmitter } from "node:events";
@@ -70,6 +71,7 @@ export function desktopRequest<T>(
   method: string,
   params: unknown = {},
 ): Promise<T> {
+  if (remoteId) return Promise.reject(new Error("Desktop browser and computer tools are available in Local environments only."));
   if (!connection || connection.readyState !== connection.OPEN)
     return Promise.reject(new Error("Open Citropy desktop to use desktop tools."));
   return new Promise((resolve, reject) => {
@@ -84,6 +86,7 @@ export function desktopRequest<T>(
 }
 
 export function openDesktop(): Promise<void> {
+  if (remoteId) return Promise.reject(new Error("Desktop browser and computer tools are available in Local environments only."));
   if (connection) return desktopRequest("focus");
   if (starting) return starting;
   starting = new Promise<void>((resolve, reject) => {

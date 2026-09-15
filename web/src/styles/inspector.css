@@ -340,7 +340,5 @@
 }
 
 .term .xterm-viewport {
-  scrollbar-width: thin;
-  scrollbar-color: var(--scrollbar) transparent;
   background: transparent !important;
 }

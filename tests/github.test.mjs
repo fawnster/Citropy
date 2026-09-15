@@ -112,6 +112,21 @@ test("GitHub integration validates targets, paginates, preserves request bodies,
     assert.equal(result.project.path, join(directory, "fresh"));
   });
 
+  await t.test("cloning uses the selected destination without opening a server-side folder dialog", async () => {
+    const parent = join(directory, "Selected destination");
+    fs.mkdirSync(parent);
+    chooser = null;
+    respond = call => {
+      assert.deepEqual(call.args, ["repo", "clone", "owner/selected", join(parent, "selected")]);
+      assert.equal(call.options.cwd, parent);
+      return "";
+    };
+    const result = await handleGitHub({ operation: "clone", repo: "owner/selected", parent });
+    assert.equal(result.project.path, join(parent, "selected"));
+    await assert.rejects(handleGitHub({ operation: "clone", repo: "owner/selected", parent }), /already exists/);
+    await assert.rejects(handleGitHub({ operation: "clone", repo: "owner/selected", parent: join(directory, "missing") }), /ENOENT/);
+  });
+
   await t.test("publishing checks local history and existing remotes before creating anything on GitHub", async () => {
     const { store } = await import("../server/store.ts");
     const project = store.openProject(join(directory, "fresh"));

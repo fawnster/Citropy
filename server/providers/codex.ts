@@ -23,6 +23,8 @@ interface Item {
   text?: string;
   summary?: string[];
   command?: string;
+  cwd?: string;
+  processId?: string | null;
   aggregatedOutput?: string;
   exitCode?: number;
   status?: string;
@@ -62,12 +64,17 @@ class CodexSession implements AgentSession {
   #agents = new Map<string, Map<string, string>>();
   #compacting = false;
   #lastCompaction = "";
+  #background = new Map<string, string>();
+  #backgroundTimer: NodeJS.Timeout | undefined;
+  #backgroundRefresh: Promise<void> | undefined;
+  #backgroundRevision = 0;
 
   constructor(options: StartOptions) {
     this.#options = options;
     const args = ["app-server"];
     if (options.mcp) args.push("-c", `mcp_servers.citropy.url=${JSON.stringify(options.mcp.url)}`, "-c", 'mcp_servers.citropy.bearer_token_env_var="CITROPY_MCP_TOKEN"');
     this.#child = spawn("codex", args, {
+      detached: process.platform !== "win32",
       cwd: options.cwd,
       env: { ...process.env, RUST_LOG: "error", ...(options.mcp ? { CITROPY_MCP_TOKEN: options.mcp.headers.Authorization?.replace(/^Bearer /, "") } : {}) },
       stdio: ["pipe", "pipe", "pipe"],
@@ -115,7 +122,7 @@ class CodexSession implements AgentSession {
     if (!this.#disposed && !this.#failed) this.#child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
-  #request(method: string, params: unknown): Promise<Wire> {
+  #request(method: string, params: unknown, fatalTimeout = true): Promise<Wire> {
     if (this.#disposed || this.#failed) return Promise.reject(new Error("Codex session is closed"));
     return new Promise((resolve, reject) => {
       const id = ++this.#nextId;
@@ -123,8 +130,9 @@ class CodexSession implements AgentSession {
         this.#requests.delete(id);
         const message = `Codex ${method} timed out`;
         reject(new Error(message));
-        this.#fail(message);
-      }, 30_000);
+        if (fatalTimeout) this.#fail(message);
+      }, fatalTimeout ? 30_000 : 10_000);
+      if (!fatalTimeout) timer.unref();
       this.#requests.set(id, { resolve, reject, timer });
       this.#write({ id, method, params });
     });
@@ -200,6 +208,7 @@ class CodexSession implements AgentSession {
   dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
+    clearTimeout(this.#backgroundTimer);
     this.#queue = [];
     cancelThread(this.#options.threadId);
     for (const pending of this.#requests.values()) {
@@ -208,7 +217,7 @@ class CodexSession implements AgentSession {
     }
     this.#requests.clear();
     this.#child.stdin.end();
-    stopProcess(this.#child);
+    stopProcess(this.#child, true);
   }
 
   #fail(message: string): void {
@@ -229,11 +238,52 @@ class CodexSession implements AgentSession {
     this.#interruptPending = false;
     for (const blockId of this.#blocks.keys()) this.#options.emit({ type: "block.end", blockId });
     this.#blocks.clear();
+    if ([...this.#items.values()].some(item => item.type === "commandExecution")) void this.#refreshBackground();
     this.#items.clear();
     cancelThread(this.#options.threadId, false);
     if (compacting && !error) this.#options.emit({ type: "compacted" });
     else this.#options.emit({ type: "turn.end", ...(error ? { error } : {}) });
     void this.#pump();
+  }
+
+  async stopShell(processId: string): Promise<void> {
+    if (![...this.#background.values()].includes(processId)) return;
+    this.#backgroundRevision++;
+    await this.#request("thread/backgroundTerminals/terminate", { threadId: this.#threadId, processId }, false);
+    this.#backgroundRevision++;
+    for (const [id, value] of this.#background) if (value === processId) this.#background.delete(id);
+    if (!this.#background.size) clearTimeout(this.#backgroundTimer);
+  }
+
+  #refreshBackground(): Promise<void> {
+    if (this.#backgroundRefresh) return this.#backgroundRefresh;
+    clearTimeout(this.#backgroundTimer);
+    this.#backgroundRefresh = (async () => {
+      const revision = this.#backgroundRevision;
+      const active = new Map<string, string>();
+      const shells: Array<{ itemId: string; processId: string; command: string; cwd: string }> = [];
+      let cursor: string | undefined;
+      do {
+        const result = await this.#request("thread/backgroundTerminals/list", { threadId: this.#threadId, limit: 100, ...(cursor ? { cursor } : {}) }, false);
+        if (this.#disposed) return;
+        for (const shell of (result.data ?? []) as typeof shells) {
+          active.set(shell.itemId, shell.processId);
+          shells.push(shell);
+        }
+        cursor = typeof result.nextCursor === "string" ? result.nextCursor : undefined;
+      } while (cursor);
+      if (revision !== this.#backgroundRevision) return;
+      for (const shell of shells) this.#options.emit({ type: "shell.background", callId: shell.itemId, taskId: shell.processId, command: shell.command, cwd: shell.cwd });
+      for (const id of this.#background.keys()) if (!active.has(id)) this.#options.emit({ type: "shell.end", callId: id, ok: true });
+      this.#background = active;
+    })().catch(() => {}).finally(() => {
+      this.#backgroundRefresh = undefined;
+      if (!this.#disposed && this.#background.size) {
+        this.#backgroundTimer = setTimeout(() => { void this.#refreshBackground(); }, 2000);
+        this.#backgroundTimer.unref();
+      }
+    });
+    return this.#backgroundRefresh;
   }
 
   #text(id: string, kind: "text" | "reasoning", text: string, full = false): void {
@@ -276,6 +326,9 @@ class CodexSession implements AgentSession {
       return;
     }
     switch (method) {
+      case "item/commandExecution/outputDelta":
+        emit({ type: "tool.output", callId: String(params.itemId), output: String(params.delta ?? ""), append: true });
+        return;
       case "turn/started":
         this.#turnId = (params.turn as { id: string }).id;
         emit({ type: "status", status: this.#compacting ? "working" : "thinking", ...(this.#compacting ? { tool: "Compacting context" } : {}) });
@@ -327,6 +380,22 @@ class CodexSession implements AgentSession {
 
   #item(item: Item, done: boolean): void {
     const emit = this.#options.emit;
+    const wasBackground = this.#background.has(item.id);
+    if (done && item.type === "commandExecution" && item.processId && item.exitCode == null && item.status !== "failed" && item.status !== "declined") {
+      if (this.#background.get(item.id) !== item.processId) this.#backgroundRevision++;
+      this.#background.set(item.id, item.processId);
+      emit({ type: "shell.background", callId: item.id, taskId: item.processId, command: item.command, cwd: item.cwd });
+    }
+    if (item.type === "commandExecution" && (wasBackground || !this.#busy)) {
+      if (item.aggregatedOutput) emit({ type: "tool.output", callId: item.id, output: item.aggregatedOutput });
+      if (done && item.exitCode != null) {
+        this.#backgroundRevision++;
+        this.#background.delete(item.id);
+        emit({ type: "shell.end", callId: item.id, ok: item.exitCode === 0 });
+        if (!this.#background.size) clearTimeout(this.#backgroundTimer);
+      } else if (done) void this.#refreshBackground();
+      return;
+    }
     const started = this.#items.has(item.id);
     this.#items.set(item.id, item);
     if (item.type === "agentMessage" || item.type === "plan" || item.type === "reasoning") {
@@ -350,7 +419,7 @@ class CodexSession implements AgentSession {
         return;
       case "commandExecution":
         name = "Bash";
-        input = { command: item.command };
+        input = { command: item.command, cwd: item.cwd };
         output = item.aggregatedOutput ?? "";
         ok = ok && (item.exitCode ?? 0) === 0;
         break;
@@ -388,6 +457,7 @@ class CodexSession implements AgentSession {
     else emit({ type: "tool.input", callId: item.id, input });
     if (done) emit({ type: "tool.end", callId: item.id, ok, output });
     else emit({ type: "status", status: "working", tool: name });
+    if (done && item.type === "commandExecution" && item.processId && item.exitCode == null) void this.#refreshBackground();
   }
 
   #agentEvent(id: string, method: string, params: Wire): void {

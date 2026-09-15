@@ -10,6 +10,15 @@ import type { ProviderInfo, Thread } from "../shared/protocol.ts";
 
 const titleJobs = new Set<string>();
 const gitJobs = new Set<string>();
+const commitInstruction = [
+  "Write a Git commit message for the supplied change set.",
+  "Use a concise imperative subject in title, at most 72 characters. Follow the recent commit subjects' language and conventions.",
+  "Review every supplied file and hunk, then group related changes by purpose. The title should name the main purpose; use the body to cover the rest.",
+  "When there are multiple independent fixes or features, body is required. Write a separate bullet for each independent behavior change or significant internal fix, including smaller UI, state, and lifecycle fixes. Group implementation and tests for the same change instead of listing every file.",
+  "Each bullet must name the affected behavior or control and say what changed. Do not hide unrelated fixes behind vague phrases such as 'improve UI behavior', 'polish the sidebar', or 'various fixes'. Keep individual bullets concise without limiting how many distinct changes the body covers.",
+  "Do not let a large feature hide smaller independent fixes. Before returning, check the file summary and all diff sections for changes missing from the message.",
+  "Large hunks may contain marked excerpts. Describe only evidenced changes, do not infer unseen behavior from filenames, and never claim tests were run. You may mention tests added or updated when the diff shows them.",
+].join("\n");
 
 export function workspaceGitBusy(cwd: string): boolean {
   return gitJobs.has(cwd);
@@ -92,7 +101,7 @@ export function startGitAction(threadId: string, action: GitActionState["action"
     try {
       if (action === "push") await git.pushCurrentBranch(cwd, checkReady);
       else await git.assistedCommit(cwd, scope, action === "commitPush", async (context) => {
-        const result = await generateText(writingModel(thread, "commitModel"), "Write a Git commit message for the supplied diff. Use a concise imperative subject in title, at most 72 characters. Follow the recent commit subjects' language and conventions. Put a brief explanation in body only when useful. Describe only evidenced changes, and never claim tests were run.", context);
+        const result = await generateText(writingModel(thread, "commitModel"), commitInstruction, context);
         return result.body ? `${result.title}\n\n${result.body}` : result.title;
       }, checkReady, (status, message, commit) => update({ status, message, commit }));
       update({ status: "success" });

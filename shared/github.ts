@@ -263,7 +263,7 @@ export interface GitHubRequests {
   branches: { repo: string };
   releases: { repo: string; page?: number };
   notifications: { page?: number; all: boolean };
-  clone: { repo: string };
+  clone: { repo: string; parent?: string };
   createRepository: { name: string; description: string; private: boolean };
   mutate: { repo: string; mutation: GitHubMutation };
 }

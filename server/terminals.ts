@@ -1,10 +1,22 @@
 import { spawn, type IPty } from "node-pty";
 import { env, platform } from "node:process";
 import { bus } from "./bus.ts";
+import { panelList, closePanel } from "./panels.ts";
+import { startShell, shellOutput, endShell } from "./shells.ts";
+import { stopProcess, waitForStoppedProcesses } from "./providers/process.ts";
 
 const sessions = new Map<string, IPty>();
 const outputs = new Map<string, string>();
 const directories = new Map<string, string>();
+
+bus.subscribe(event => {
+  if (event.t !== "thread.remove" && event.t !== "project.remove") return;
+  for (const panel of panelList()) {
+    if (panel.kind !== "terminal" || (event.t === "thread.remove" ? panel.threadId !== event.id : panel.projectId !== event.id)) continue;
+    close(panel.id);
+    closePanel(panel.id);
+  }
+});
 
 function shell(): string {
   if (platform === "win32") return env.COMSPEC ?? "powershell.exe";
@@ -42,14 +54,21 @@ export function open(termId: string, cwd: string, cols: number, rows: number, co
   outputs.set(termId, command ? `${command}\r\n` : "");
   directories.set(termId, cwd);
   sessions.set(termId, pty);
+  const panel = panelList().find(panel => panel.id === termId);
+  if (panel) startShell({
+    id: `terminal:${termId}`, projectId: panel.projectId, threadId: panel.threadId, panelId: termId,
+    command: command || "", cwd, background: true, stopMode: "shell",
+  }, async () => { close(termId); closePanel(termId); await waitForStoppedProcesses(); });
   pty.onData((data) => {
     if (sessions.get(termId) !== pty) return;
     outputs.set(termId, `${outputs.get(termId) ?? ""}${data}`.slice(-200_000));
+    shellOutput(`terminal:${termId}`, data, true);
     bus.emit({ t: "term.data", termId, data });
   });
   pty.onExit(({ exitCode }) => {
     if (sessions.get(termId) !== pty) return;
     sessions.delete(termId);
+    endShell(`terminal:${termId}`, exitCode === 0 ? "finished" : "failed");
     outputs.set(termId, `${outputs.get(termId) ?? ""}\r\n[process exited with code ${exitCode}]\r\n`);
     bus.emit({ t: "term.exit", termId, code: exitCode });
   });
@@ -80,7 +99,8 @@ export function close(termId: string): void {
   if (!pty) return;
   sessions.delete(termId);
   try {
-    pty.kill();
+    stopProcess(pty, true);
+    void waitForStoppedProcesses().then(() => endShell(`terminal:${termId}`, "stopped"));
   } catch {
     /* already dead */
   }

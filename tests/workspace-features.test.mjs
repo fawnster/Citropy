@@ -188,6 +188,110 @@ test("workspace features persist and use conversation boundaries", async (t) => 
       );
     },
   );
+  await t.test("global defaults inherit, persist, and respect folder overrides", async () => {
+    const { callWorkspaceTool } = await import("../server/mcp.ts");
+    const { resolveProjectSettings } = await import("../shared/project-settings.ts");
+    const original = structuredClone(project.settings);
+    const folderPath = join(directory, "inherited folder");
+    execFileSync("git", ["clone", repo, folderPath], { stdio: "pipe" });
+    const folder = store.openProject(folderPath);
+    const defaults = {
+      provider: "claude", model: "fixture", effort: "low",
+      permissionMode: "acceptEdits", workspace: "new", autoPull: false, browserAccess: false,
+    };
+    try {
+      const configured = await request("projects/defaults", "PATCH", { settings: defaults });
+      assert.equal(configured.status, 200);
+      assert.deepEqual(configured.data, defaults);
+      assert.deepEqual((await request("projects/defaults", "GET")).data, defaults);
+      const remoteModel = { ...defaults, provider: "opencode", model: "remote/model", effort: "high" };
+      assert.deepEqual((await request("projects/defaults", "PATCH", { settings: remoteModel })).data, remoteModel);
+      assert.deepEqual(new Store().projectDefaults, remoteModel);
+      assert.equal((await request(`projects?projectId=${folder.id}`, "PATCH", { settings: remoteModel })).status, 400);
+      await request("projects/defaults", "PATCH", { settings: defaults });
+      assert.deepEqual(store.projects.get(project.id).settings, original);
+      assert.equal(store.projects.get(folder.id).settings, undefined);
+      const created = await request("threads", "POST", { projectId: folder.id });
+      assert.equal(created.status, 200, JSON.stringify(created.data));
+      assert.equal(created.data.provider, "claude");
+      assert.equal(created.data.model, "fixture");
+      assert.equal(created.data.effort, "low");
+      assert.equal(created.data.permissionMode, "acceptEdits");
+      assert.notEqual(created.data.workspacePath, folderPath);
+      catalog.push({ id: "codex", label: "Codex", available: true, enabled: true, models: [{ id: "codex-fixture", label: "Codex Fixture", efforts: ["low", "high"], defaultEffort: "high", isDefault: true }] });
+      const otherProvider = await request("threads", "POST", { projectId: folder.id, provider: "codex", workspace: { kind: "current" } });
+      assert.equal(otherProvider.status, 200);
+      assert.equal(otherProvider.data.model, "codex-fixture");
+      assert.equal(otherProvider.data.effort, "high");
+      await assert.rejects(callWorkspaceTool(created.data.id, "browser_tabs", {}), /Browser access is disabled/);
+      await request(`projects?projectId=${folder.id}`, "PATCH", { settings: {
+        provider: "claude", model: "fixture", effort: "high",
+        permissionMode: "plan", workspace: "current", browserAccess: true,
+      } });
+      await assert.doesNotReject(callWorkspaceTool(created.data.id, "browser_tabs", {}));
+      const overridden = await request("threads", "POST", { projectId: folder.id });
+      assert.equal(overridden.data.effort, "high");
+      assert.equal(overridden.data.permissionMode, "plan");
+      assert.equal(overridden.data.workspacePath, folderPath);
+      assert.equal(store.threads.get(created.data.id).permissionMode, "acceptEdits");
+      store.configureNotifications({ sound: true });
+      store.setComputerEnabled(true);
+      store.setProviderEnabled("opencode", false);
+      store.configureAssistance({ ...store.assistance, automaticTitles: false });
+      assert.deepEqual(new Store().projectDefaults, defaults);
+      assert.equal(new Store().projects.get(folder.id).settings.browserAccess, true);
+      await request("projects/defaults", "PATCH", { settings: { ...defaults, permissionMode: "manual", effort: "high", browserAccess: true } });
+      assert.equal(resolveProjectSettings(store.projectDefaults, folder.settings).permissionMode, "plan");
+      await request(`projects?projectId=${folder.id}`, "PATCH", { settings: { provider: null, workspace: "current" } });
+      const automatic = resolveProjectSettings(store.projectDefaults, folder.settings);
+      assert.equal(automatic.provider, null);
+      assert.equal(automatic.model, undefined);
+      assert.equal(automatic.effort, undefined);
+      assert.equal(automatic.permissionMode, "manual");
+      catalog[0].models.push({ id: "other", label: "Other", efforts: ["low", "high"], defaultEffort: "low" });
+      const explicit = await request("threads", "POST", { projectId: folder.id, provider: "claude", model: "other" });
+      assert.equal(explicit.data.model, "other");
+      assert.equal(explicit.data.effort, "low");
+      await request(`projects?projectId=${folder.id}`, "PATCH", { settings: {} });
+      const inherited = await request("threads", "POST", { projectId: folder.id });
+      assert.equal(inherited.data.model, "fixture");
+      assert.equal(inherited.data.effort, "high");
+      assert.equal(inherited.data.permissionMode, "manual");
+      assert.notEqual(inherited.data.workspacePath, folderPath);
+      assert.deepEqual(new Store().projects.get(folder.id).settings, {});
+      await assert.doesNotReject(callWorkspaceTool(created.data.id, "browser_tabs", {}));
+      await request(`projects?projectId=${folder.id}`, "PATCH", { settings: { browserAccess: false } });
+      await assert.rejects(callWorkspaceTool(created.data.id, "browser_tabs", {}), /Browser access is disabled/);
+      for (const invalid of [{ provider: "unknown" }, { provider: null, model: "fixture" }, { browserAccess: "false" }, { permissionMode: "unknown" }, { workspace: "existing" }, { actions: [] }, []]) {
+        const response = await request("projects/defaults", "PATCH", { settings: invalid });
+        assert.equal(response.status, 400, JSON.stringify(invalid));
+      }
+      assert.equal(store.projectDefaults.provider, "claude");
+      assert.equal(store.projectDefaults.effort, "high");
+      const current = await request("threads", "POST", { projectId: folder.id, model: "other", workspace: { kind: "current" } });
+      assert.equal(current.data.effort, "low");
+      assert.equal(current.data.workspacePath, folderPath);
+      await request("projects/defaults", "PATCH", { settings: { ...defaults, workspace: "current", autoPull: true } });
+      fs.writeFileSync(join(repo, "global-pull.txt"), "inherited pull");
+      git("add", "global-pull.txt");
+      git("commit", "-m", "Global pull fixture");
+      const pulled = await request("threads", "POST", { projectId: folder.id });
+      assert.equal(pulled.status, 200, JSON.stringify(pulled.data));
+      assert.equal(fs.readFileSync(join(folderPath, "global-pull.txt"), "utf8"), "inherited pull");
+      await request(`projects?projectId=${folder.id}`, "PATCH", { settings: { autoPull: false } });
+      fs.writeFileSync(join(repo, "global-pull.txt"), "folder pull disabled");
+      git("add", "global-pull.txt");
+      git("commit", "-m", "Folder pull fixture");
+      const unchanged = await request("threads", "POST", { projectId: folder.id });
+      assert.equal(unchanged.status, 200);
+      assert.equal(fs.readFileSync(join(folderPath, "global-pull.txt"), "utf8"), "inherited pull");
+    } finally {
+      store.configureProjectDefaults({});
+      store.setProviderEnabled("opencode", true);
+      store.setComputerEnabled(false);
+      store.configureNotifications({ sound: false });
+    }
+  });
   await t.test(
     "uploads preview, reach the provider, and cannot escape their conversation",
     async () => {

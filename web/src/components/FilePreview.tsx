@@ -1,3 +1,4 @@
+import { serverUrl } from "../lib/environment.ts";
 import { useI18n } from "../lib/i18n.ts";
 import { useEffect, useState } from "react";
 import { X, Download, Code, Eye } from "lucide-react";
@@ -32,7 +33,7 @@ export function FilePreview({
   const [error, setError] = useState("");
   const [source, setSource] = useState(false);
   const query = assetQuery(projectId, path, threadId, attachmentId);
-  const url = `/api/assets?${query}`;
+  const url = serverUrl(`/api/assets?${query}`);
   useEffect(() => {
     if (!connected) return;
     const controller = new AbortController();

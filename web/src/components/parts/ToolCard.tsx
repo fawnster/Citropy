@@ -37,7 +37,7 @@ function label(name: string, status: ToolPart["status"], t: ReturnType<typeof us
 
 export function ToolCard({ part }: { part: ToolPart }) {
   const t = useI18n();
-  const [open, setOpen] = useDisclosure(part.id, "tool", Boolean(part.patch));
+  const [open, setOpen] = useDisclosure(part.id, "tool");
   const Icon = shapeIcon[part.shape];
   const elapsed = part.endedAt ? part.endedAt - part.startedAt : null;
   const output = part.output ?? "";

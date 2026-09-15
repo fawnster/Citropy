@@ -5,6 +5,7 @@ import { Modal } from "./Modal.tsx";
 import { ProviderIcon } from "./ProviderIcon.tsx";
 import type { PermissionRequest } from "../../../shared/protocol.ts";
 import { useI18n } from "../lib/i18n.ts";
+import { AnimatePresence } from "motion/react";
 
 function lines(value: unknown): string[] {
   return typeof value === "string" ? value.split("\n") : [];
@@ -90,10 +91,9 @@ export function PermissionLayer() {
     request ? state.threads[request.threadId] : undefined,
   );
   const connected = useApp((state) => state.connected);
-  if (!request) return null;
-  const Icon = shapeIcon[request.shape];
+  const Icon = request ? shapeIcon[request.shape] : Ban;
   return (
-    <Modal
+    <AnimatePresence mode="wait">{request && <Modal
       key={request.id}
       className="permission-dialog"
       title={t("Review this action")}
@@ -149,6 +149,6 @@ export function PermissionLayer() {
           {t("Reconnect to Citropy to respond.")}
         </p>
       )}
-    </Modal>
+    </Modal>}</AnimatePresence>
   );
 }

@@ -9,7 +9,8 @@ import {
   Fragment,
 } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { Check } from "./icons.ts";
+import { useReducedMotion } from "../lib/use-reduced-motion.ts";
+import { Check, ChevronRight } from "./icons.ts";
 
 import { useApp, viewportWidth } from "../lib/store.ts";
 
@@ -23,7 +24,9 @@ export interface MenuItem {
   danger?: boolean;
   disabled?: boolean;
   section?: string;
-  onSelect: () => void;
+  action?: { label: string; icon: ReactNode; pressed?: boolean; onSelect: () => void };
+  children?: MenuItem[];
+  onSelect?: () => void;
 }
 
 interface Props {
@@ -35,11 +38,12 @@ interface Props {
   items: MenuItem[];
   align?: "start" | "end";
   header?: string;
+  controls?: ReactNode;
   width?: number;
   searchable?: boolean;
   searchPlaceholder?: string;
   className?: string;
-  footer?: ReactNode;
+  emptyMessage?: string;
 }
 
 export function Menu({
@@ -47,19 +51,41 @@ export function Menu({
   items,
   align = "start",
   header,
+  controls,
   width = 232,
   searchable = false,
   searchPlaceholder = "Search models",
   className = "",
-  footer,
+  emptyMessage,
 }: Props) {
   const t = useI18n();
+  const reducedMotion = useReducedMotion();
   const uiScale = useApp((state) => state.uiScale);
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const wrap = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
   const id = useId();
+  const visibleItems: (MenuItem & { depth: number })[] = [];
+  const matches = (item: MenuItem, text: string): boolean =>
+    `${item.label} ${item.id} ${item.hint ?? ""}`.toLowerCase().includes(text) || Boolean(item.children?.some(child => matches(child, text)));
+  const collect = (entries: MenuItem[], depth: number, text: string) => {
+    for (const item of entries) {
+      if (!matches(item, text)) continue;
+      visibleItems.push({ ...item, depth });
+      if (item.children && (text || !collapsed.has(item.id))) {
+        const groupMatches = `${item.label} ${item.hint ?? ""}`.toLowerCase().includes(text);
+        collect(item.children, depth + 1, groupMatches ? "" : text);
+      }
+    }
+  };
+  collect(items, 0, query.toLowerCase());
+  const toggleGroup = (itemId: string, collapse = !collapsed.has(itemId)) => setCollapsed(previous => {
+    const next = new Set(previous);
+    if (collapse) next.add(itemId); else next.delete(itemId);
+    return next;
+  });
 
   useLayoutEffect(() => {
     const element = menu.current;
@@ -88,7 +114,7 @@ export function Menu({
       element.querySelector<HTMLInputElement>(".menu-search")?.focus({ preventScroll: true });
     } else {
       const selected = menu.current?.querySelector<HTMLButtonElement>(
-        '[data-selected="true"]:not(:disabled)',
+        '[role="menuitem"][data-selected="true"]:not(:disabled)',
       );
       (
         selected ??
@@ -132,6 +158,11 @@ export function Menu({
     };
   }, [open, id]);
 
+  useLayoutEffect(() => {
+    if (open && document.activeElement === document.body)
+      menu.current?.querySelector<HTMLElement>(".menu-search, .menu-item")?.focus({ preventScroll: true });
+  }, [open, items]);
+
   return (
     <div
       className="menu-wrap"
@@ -154,11 +185,24 @@ export function Menu({
             }}
             role="menu"
             aria-labelledby={id}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.12 }}
+            initial={{ opacity: 0, scale: reducedMotion ? 1 : 0.985 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: reducedMotion ? 1 : 0.985, pointerEvents: "none" }}
+            transition={{ duration: reducedMotion ? 0 : 0.16, ease: [0.16, 1, 0.3, 1] }}
             onKeyDown={(event) => {
+              if (event.target instanceof HTMLSelectElement) return;
+              const option = (event.target as HTMLElement).closest(".menu-option");
+              const groupId = option?.getAttribute("data-group");
+              if (groupId && ["ArrowLeft", "ArrowRight"].includes(event.key)) {
+                event.preventDefault();
+                toggleGroup(groupId, event.key === "ArrowLeft");
+                return;
+              }
+              if (option && ["ArrowLeft", "ArrowRight"].includes(event.key)) {
+                const target = option.querySelector<HTMLButtonElement>(event.key === "ArrowRight" ? ".menu-item-action" : ".menu-item");
+                if (target) { event.preventDefault(); target.focus(); }
+                return;
+              }
               if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key))
                 return;
               if (
@@ -174,7 +218,7 @@ export function Menu({
               if (!buttons.length) return;
               event.preventDefault();
               const current = buttons.indexOf(
-                document.activeElement as HTMLButtonElement,
+                (option?.querySelector(".menu-item") ?? document.activeElement) as HTMLButtonElement,
               );
               const next =
                 event.key === "Home"
@@ -190,6 +234,7 @@ export function Menu({
             }}
           >
             {header && <div className="menu-header eyebrow">{header}</div>}
+            {controls}
             {searchable && (
               <input
                 className="menu-search"
@@ -200,65 +245,68 @@ export function Menu({
               />
             )}
             <div className="menu-list scroll">
-              {items
-                .filter((item) =>
-                  `${item.label} ${item.id} ${item.hint ?? ""}`
-                    .toLowerCase()
-                    .includes(query.toLowerCase()),
-                )
-                .map((item, index, visibleItems) => (
+              {visibleItems.map((item, index) => (
                   <Fragment key={item.id}>
                     {item.section &&
                       item.section !== visibleItems[index - 1]?.section && (
                         <div className="menu-section">{item.section}</div>
                       )}
-                    <button
-                      key={item.id}
-                      type="button"
-                      disabled={item.disabled}
-                      role="menuitem"
-                      tabIndex={-1}
-                      className="menu-item"
-                      data-selected={item.selected || undefined}
-                      data-danger={item.danger || undefined}
-                      title={item.hint}
-                      onClick={() => {
-                        setOpen(false);
-                        document.getElementById(id)?.focus();
-                        item.onSelect();
-                      }}
-                    >
-                      {item.icon && (
-                        <span className="menu-icon">{item.icon}</span>
-                      )}
-                      <span className="menu-copy">
-                        <span className="menu-label truncate">
-                          {item.label}
-                        </span>
-                        {item.hint && (
-                          <span className="menu-hint">
-                            {item.hintIcon}
-                            <span className="truncate">{item.hint}</span>
-                          </span>
+                    <div className="menu-option" data-selected={item.selected || undefined} data-group={item.children ? item.id : undefined}>
+                      <button
+                        type="button"
+                        disabled={item.disabled}
+                        role="menuitem"
+                        tabIndex={-1}
+                        className="menu-item"
+                        data-selected={item.selected || undefined}
+                        data-danger={item.danger || undefined}
+                        data-depth={item.depth || undefined}
+                        style={item.depth ? { paddingInlineStart: 10 + item.depth * 18 } : undefined}
+                        aria-expanded={item.children ? Boolean(query) || !collapsed.has(item.id) : undefined}
+                        title={item.hint}
+                        onClick={() => {
+                          if (item.children) { toggleGroup(item.id); return; }
+                          setOpen(false);
+                          document.getElementById(id)?.focus();
+                          item.onSelect?.();
+                        }}
+                      >
+                        {item.icon && (
+                          <span className="menu-icon">{item.icon}</span>
                         )}
-                      </span>
-                      {item.selected && (
-                        <Check size={13} className="menu-check" />
-                      )}
-                    </button>
+                        <span className="menu-copy">
+                          <span className="menu-label truncate">
+                            {item.label}
+                          </span>
+                          {item.hint && (
+                            <span className="menu-hint">
+                              {item.hintIcon}
+                              <span className="truncate">{item.hint}</span>
+                            </span>
+                          )}
+                        </span>
+                        {item.selected && (
+                          <Check size={13} className="menu-check" />
+                        )}
+                        {item.children && <ChevronRight size={13} className="menu-group-chevron" data-expanded={Boolean(query) || !collapsed.has(item.id)} />}
+                      </button>
+                      {item.action && <button
+                        type="button"
+                        className="menu-item-action"
+                        aria-label={item.action.label}
+                        title={item.action.label}
+                        aria-pressed={item.action.pressed}
+                        onClick={item.action.onSelect}
+                      >{item.action.icon}</button>}
+                    </div>
                   </Fragment>
                 ))}
-              {!items.some((item) =>
-                `${item.label} ${item.id} ${item.hint ?? ""}`
-                  .toLowerCase()
-                  .includes(query.toLowerCase()),
-              ) && (
+              {!visibleItems.length && (
                 <div className="menu-empty">
-                  {query ? t("No matches") : t("No options available")}
+                  {query ? t("No matches") : emptyMessage ?? t("No options available")}
                 </div>
               )}
             </div>
-            {footer && <div className="menu-footer">{footer}</div>}
           </motion.div>
         )}
       </AnimatePresence>

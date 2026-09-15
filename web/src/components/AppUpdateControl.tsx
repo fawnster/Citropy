@@ -1,3 +1,5 @@
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "../lib/use-reduced-motion.ts";
 import { useI18n } from "../lib/i18n.ts";
 import { useEffect, useId, useRef, useState } from "react";
 import {
@@ -14,6 +16,7 @@ const size = (bytes?: number) =>
 
 export function AppUpdateControl({ variant = "rail" }: { variant?: "rail" | "settings" }) {
   const t = useI18n();
+  const reducedMotion = useReducedMotion();
   const [state, setState] = useState<AppUpdateState>({
     status: "unsupported",
     currentVersion: "",
@@ -150,8 +153,8 @@ export function AppUpdateControl({ variant = "rail" }: { variant?: "rail" | "set
           <span className="update-available-dot" />
         )}
       </button>
-      {open && (
-        <div className="app-update-popover" id={id} role="tooltip">
+      <AnimatePresence>{open && (
+        <motion.div initial={{ opacity: 0, y: reducedMotion ? 0 : 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: reducedMotion ? 0 : 4, pointerEvents: "none" }} transition={{ duration: reducedMotion ? 0 : 0.16 }} className="app-update-popover" id={id} role="tooltip">
           <div className="app-update-heading">
             <Icon size={16} />
             <strong>{t(title)}</strong>
@@ -200,8 +203,8 @@ export function AppUpdateControl({ variant = "rail" }: { variant?: "rail" | "set
           ) : (
             <p>{t("Check the latest Citropy release.")}</p>
           )}
-        </div>
-      )}
+        </motion.div>
+      )}</AnimatePresence>
     </div>
   );
 }

@@ -1,3 +1,5 @@
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "../lib/use-reduced-motion.ts";
 import { currentLocale, useI18n } from "../lib/i18n.ts";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -24,6 +26,7 @@ export function NotificationCenter({
   onOpen: (target: NotificationTarget) => void;
 }) {
   const t = useI18n();
+  const reducedMotion = useReducedMotion();
   const notifications = useApp((state) => state.notifications);
   const connected = useApp((state) => state.connected);
   const [open, setOpen] = useState(false);
@@ -81,8 +84,8 @@ export function NotificationCenter({
         <Bell size={17} />
         {unread > 0 && <span className="notification-dot" />}
       </button>
-      {open && (
-        <section
+      <AnimatePresence>{open && (
+        <motion.section initial={{ opacity: 0, y: reducedMotion ? 0 : -5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: reducedMotion ? 0 : -5, pointerEvents: "none" }} transition={{ duration: reducedMotion ? 0 : 0.16 }}
           className="notification-center"
           role="dialog"
           aria-label={t("Notifications")}
@@ -207,8 +210,8 @@ export function NotificationCenter({
             >
               <Trash2 size={13} />{t("Clear read")}</button>
           </footer>
-        </section>
-      )}
+        </motion.section>
+      )}</AnimatePresence>
     </div>
   );
 }

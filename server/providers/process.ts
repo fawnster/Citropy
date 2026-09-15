@@ -1,23 +1,52 @@
 import type { ChildProcess } from "node:child_process";
+import type { IPty } from "node-pty";
 
-const stopping = new Map<ChildProcess, Promise<void>>();
+const stopping = new Map<ChildProcess | IPty, Promise<void>>();
 
-export function stopProcess(child: ChildProcess): void {
-  if (child.exitCode != null || child.signalCode != null || stopping.has(child)) return;
+export function stopProcess(child: ChildProcess | IPty, processGroup = false): void {
+  if (stopping.has(child)) return;
+  let ended = "onExit" in child ? false : child.exitCode != null || child.signalCode != null;
+  const group = processGroup && process.platform !== "win32" ? child.pid : undefined;
+  const alive = () => {
+    if (!group) return !ended;
+    try { process.kill(-group, 0); return true; }
+    catch { return false; }
+  };
+  if (!alive()) return;
+  const signal = (value: NodeJS.Signals) => {
+    if (!group) { child.kill(value); return; }
+    try { process.kill(-group, value); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") child.kill(value); }
+  };
   let complete!: () => void;
+  let escalated = false;
   stopping.set(child, new Promise<void>((resolve) => { complete = resolve; }));
   const finish = () => {
     clearTimeout(timer);
-    child.off("exit", finish);
-    child.off("close", finish);
+    if (subscription) subscription.dispose();
+    else if ("off" in child) {
+      child.off("exit", exited);
+      child.off("close", exited);
+    }
     stopping.delete(child);
     complete();
   };
-  const timer = setTimeout(() => child.kill("SIGKILL"), 2000);
-  timer.unref();
-  child.once("exit", finish);
-  child.once("close", finish);
-  child.kill("SIGTERM");
+  const exited = () => {
+    ended = true;
+    if (!group || escalated || !alive()) finish();
+  };
+  const timer = setTimeout(() => {
+    escalated = true;
+    signal("SIGKILL");
+    if (group && ended) finish();
+  }, 2000);
+  if (!group) timer.unref();
+  const subscription = "onExit" in child ? child.onExit(exited) : undefined;
+  if ("once" in child) {
+    child.once("exit", exited);
+    child.once("close", exited);
+  }
+  signal("SIGTERM");
 }
 
 export async function waitForStoppedProcesses(): Promise<void> {

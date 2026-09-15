@@ -17,6 +17,7 @@ test("Git manager stages selectively, reviews history, manages branches and pres
     assert.equal(empty.hasCommits, false);
     assert.equal(empty.mergeInProgress, false);
     assert.ok(empty.status.branch);
+    assert.equal(empty.status.upstream, null);
     assert.equal(empty.branches.length, 0);
     git("config", "user.name", "Citropy Test"); git("config", "user.email", "test@example.invalid");
     writeFileSync(join(dir, "one.txt"), "first\n"); writeFileSync(join(dir, "two.txt"), "second\n");
@@ -67,6 +68,7 @@ test("Git manager stages selectively, reviews history, manages branches and pres
     assert.equal((await overview(dir)).remotes[0].name, "origin");
     await manage(dir, "publish", "origin");
     assert.equal((await overview(dir)).branches.find(b => b.current).upstream, `origin/${base}`);
+    assert.equal((await overview(dir)).status.upstream, `origin/${base}`);
     await manage(dir, "fetch");
     await manage(dir, "pull");
     await manage(dir, "push");

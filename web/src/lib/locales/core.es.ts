@@ -140,6 +140,7 @@ export const coreEs: Record<string, string> = {
   "Open source control": "Abrir control de versiones",
   "Open the installed Citropy desktop app to manage release updates.": "Abre la aplicación de escritorio de Citropy instalada para gestionar las actualizaciones.",
   "Open workspace panels": "Paneles abiertos del espacio de trabajo",
+  "More panels": "Más paneles",
   "personal": "personal",
   "plan": "plan",
   "plans": "planes",

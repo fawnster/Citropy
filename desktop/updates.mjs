@@ -42,7 +42,7 @@ export function createAppUpdater({
       code.includes("SHA512") || detail.includes("checksum")
         ? "The download failed verification. Download a fresh copy to try again."
         : /404|403|401|token|release|not found/i.test(`${code} ${detail}`)
-          ? "No release is accessible. Check your GitHub CLI sign-in and published Citropy releases."
+          ? "No release is accessible. Check published Citropy releases and, for private repositories, your GitHub sign-in."
           : action === "install"
             ? error?.userMessage ||
               "The update could not be applied. Citropy has kept the current version."

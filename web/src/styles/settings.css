@@ -101,8 +101,9 @@
   background-color: var(--canvas);
 }
 
-.assistance-model-row > select {
-  flex-basis: 260px;
+.assistance-model-row > .menu-wrap {
+  flex: 0 1 300px;
+  min-width: 0;
 }
 
 .setting-row[data-disabled="true"],
@@ -392,7 +393,7 @@
     gap: 12px;
   }
   .assistance-model-row > span,
-  .assistance-model-row > select {
+  .assistance-model-row > .menu-wrap {
     flex: 1 1 100%;
     width: 100%;
   }
@@ -529,8 +530,9 @@
   flex: none;
 }
 
-.provider-card + .provider-card {
-  border-top: 1px solid var(--line-strong);
+.provider-settings-group {
+  display: grid;
+  gap: 16px;
 }
 .provider-maintenance {
   padding: 0 22px 16px;

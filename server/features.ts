@@ -1,5 +1,6 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { store } from "./store.ts";
+import { stopShell } from "./shells.ts";
 import { dev } from "./config.ts";
 import { desktopRequest } from "./desktop.ts";
 import { reloadProviderSessions, providerBusy, runtimeFor } from "./runtime.ts";
@@ -9,6 +10,7 @@ import { waitForStoppedProcesses } from "./providers/process.ts";
 import { openPanel } from "./panels.ts";
 import * as terminals from "./terminals.ts";
 import { modelSettings } from "../shared/model-options.ts";
+import { resolveProjectSettings } from "../shared/project-settings.ts";
 import {
   chooseThreadWorkspace,
   workspaceOptions,
@@ -46,25 +48,33 @@ async function body(req: IncomingMessage): Promise<Record<string, any>> {
 function settings(
   input: Record<string, any>,
   providers: ProviderInfo[],
+  shared = false,
 ): ProjectSettings {
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    throw new Error("Invalid project settings");
   const out: ProjectSettings = {};
   if (input.provider !== undefined) {
-    if (!providers.some((provider) => provider.id === input.provider))
+    if (input.provider !== null && !(shared
+      ? ["claude", "codex", "opencode"].includes(input.provider)
+      : providers.some((provider) => provider.id === input.provider)))
       throw new Error("Unknown provider");
     out.provider = input.provider;
   }
   if (input.model) {
+    if (!out.provider || typeof input.model !== "string" || input.model.length > 300)
+      throw new Error("Select an available model.");
     const model = providers
       .find((provider) => provider.id === out.provider)
       ?.models.find((model) => model.id === input.model);
-    if (!model) throw new Error("Select an available model.");
-    out.model = model.id;
+    if (!shared && !model) throw new Error("Select an available model.");
+    out.model = input.model;
     if (input.effort) {
-      if (!model.efforts?.includes(input.effort))
+      if (typeof input.effort !== "string" || input.effort.length > 80 || (!shared && !model?.efforts?.includes(input.effort)))
         throw new Error("This model does not support that effort.");
       out.effort = input.effort;
     }
   }
+  if (input.effort && !out.model) throw new Error("Select a model before choosing its effort.");
   if (input.permissionMode) {
     if (
       !["manual", "acceptEdits", "plan", "bypass"].includes(
@@ -124,7 +134,7 @@ export async function handleFeatures(
 ): Promise<boolean> {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (
-    !/^\/api\/(attachments|assets|preview|workspaces|projects|threads|commands|skills|usage|diagnostics|browser|computer|providers)(\/|$)/.test(
+    !/^\/api\/(attachments|assets|preview|workspaces|projects|threads|commands|skills|usage|diagnostics|browser|computer|providers|shells)(\/|$)/.test(
       url.pathname,
     )
   )
@@ -160,7 +170,12 @@ export async function handleFeatures(
       .end(JSON.stringify(value));
   };
   try {
-    if (url.pathname === "/api/providers/assistance" && req.method === "GET") respond(store.assistance);
+    if (url.pathname === "/api/shells/stop" && req.method === "POST") {
+      const { id } = await body(req);
+      if (typeof id !== "string" || !id) throw new Error("Choose a running shell.");
+      await stopShell(id);
+      respond({ ok: true });
+    } else if (url.pathname === "/api/providers/assistance" && req.method === "GET") respond(store.assistance);
     else if (url.pathname === "/api/providers/assistance" && req.method === "PATCH") respond(configureAssistance(await body(req), providers));
     else if (url.pathname === "/api/threads/git-action" && req.method === "POST") {
       const input = await body(req);
@@ -227,6 +242,15 @@ export async function handleFeatures(
       const project = store.projects.get(projectId ?? "");
       if (!project) throw new Error("Workspace not found");
       respond(await workspaceOptions(project));
+    } else if (url.pathname === "/api/projects/defaults" && req.method === "GET") {
+      respond(store.projectDefaults);
+    } else if (url.pathname === "/api/projects/defaults" && req.method === "PATCH") {
+      const input = await body(req);
+      if (input.settings?.actions !== undefined)
+        throw new Error("Terminal actions belong to a folder.");
+      const defaults = settings(input.settings ?? {}, providers, true);
+      store.configureProjectDefaults(defaults);
+      respond(defaults);
     } else if (url.pathname === "/api/projects" && req.method === "PATCH") {
       const input = await body(req);
       const project = store.projects.get(projectId ?? "");
@@ -265,7 +289,7 @@ export async function handleFeatures(
       const input = await body(req);
       const project = store.projects.get(input.projectId);
       if (!project) throw new Error("Workspace not found");
-      const defaults = project.settings;
+      const defaults = resolveProjectSettings(store.projectDefaults, project.settings);
       const provider = providers.find(
         (entry) => entry.id === (input.provider ?? defaults?.provider),
       );
@@ -287,7 +311,9 @@ export async function handleFeatures(
           model:
             input.model ??
             (provider.id === defaults?.provider ? defaults.model : undefined),
-          effort: input.effort ?? defaults?.effort,
+          effort: input.effort ?? (provider.id === defaults.provider && (!input.model || input.model === defaults.model) ? defaults.effort : undefined),
+          contextWindow: input.contextWindow,
+          fastMode: input.fastMode,
         }),
         permissionMode:
           input.permissionMode ?? defaults?.permissionMode ?? "manual",

@@ -19,6 +19,9 @@ export type AgentEvent =
   | { type: "tool.start"; callId: string; name: string; input: unknown }
   | { type: "tool.input"; callId: string; input: unknown }
   | { type: "tool.end"; callId: string; ok: boolean; output: string }
+  | { type: "tool.output"; callId: string; output: string; append?: boolean }
+  | { type: "shell.background"; callId: string; taskId: string; command?: string; cwd?: string }
+  | { type: "shell.end"; callId: string; ok: boolean; output?: string; stopped?: boolean }
   | { type: "todos"; items: TodoItem[] }
   | { type: "usage"; usage: Partial<Usage> }
   | { type: "turn.end"; error?: string }
@@ -43,10 +46,11 @@ export interface StartOptions {
 }
 
 export interface AgentSession {
+  stopShell?(taskId: string): Promise<void>;
   send(text: string, attachments?: Attachment[], skills?: Array<{ name: string; path: string }>): void | Promise<void>;
   steer?(text: string, attachments?: Attachment[], skills?: Array<{ name: string; path: string }>): Promise<void>;
   compact?(): Promise<void>;
-  interrupt(): void;
+  interrupt(): void | Promise<void>;
   dispose(): void;
 }
 

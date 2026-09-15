@@ -1,21 +1,30 @@
+import { AnimatePresence, motion } from "motion/react";
+import { useReducedMotion } from "../lib/use-reduced-motion.ts";
 import { useId, useState } from "react";
 import { Minimize2 } from "lucide-react";
 import { cost, tokens } from "../lib/format.ts";
 import { useApp } from "../lib/store.ts";
 import { useI18n } from "../lib/i18n.ts";
+import { selectedModel } from "../../../shared/model-options.ts";
 
 export function ContextUsage({ onCompact }: { onCompact?: () => void }) {
   const t = useI18n();
+  const reducedMotion = useReducedMotion();
   const [open, setOpen] = useState(false);
   const id = useId();
   const connected = useApp((state) => state.connected);
   const thread = useApp((state) => state.threads[state.activeThreadId ?? ""]);
+  const provider = useApp((state) => state.providers.find((entry) => entry.id === thread?.provider));
   const usage = thread?.usage;
-  const contextMax = thread?.contextWindow ?? usage?.contextMax ?? 0;
-  const known = Boolean(usage && usage.turns > 0 && contextMax > 0);
+  const model = selectedModel(provider?.models ?? [], thread?.model);
+  const reported = Boolean(usage && (usage.contextTokens > 0 || usage.contextMax > 0));
+  const fresh = !thread?.externalId && !thread?.running && !usage?.turns;
+  const contextMax = (usage?.contextMax || thread?.contextWindow || model?.contextMax) ?? 0;
+  const known = Boolean(contextMax > 0 && (reported || fresh));
+  const contextTokens = fresh ? 0 : usage?.contextTokens ?? 0;
   const fill =
-    known && usage
-      ? Math.max(0, Math.min(usage.contextTokens / contextMax, 1))
+    known
+      ? Math.max(0, Math.min(contextTokens / contextMax, 1))
       : 0;
   const label = known
     ? t("{percent}% context used", { percent: Math.round(fill * 100) })
@@ -24,14 +33,20 @@ export function ContextUsage({ onCompact }: { onCompact?: () => void }) {
   return (
     <div
       className="context-usage"
-      onFocus={() => setOpen(true)}
+      onFocus={(event) => {
+        if (event.target.matches(":focus-visible")) setOpen(true);
+      }}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
       }}
       onMouseEnter={() => setOpen(true)}
-      onMouseLeave={(event) => {
-        if (!event.currentTarget.contains(document.activeElement))
+      onMouseLeave={() => setOpen(false)}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.currentTarget.querySelector<HTMLButtonElement>(".context-ring")?.focus({ preventScroll: true });
           setOpen(false);
+          event.stopPropagation();
+        }
       }}
     >
       <button
@@ -40,11 +55,7 @@ export function ContextUsage({ onCompact }: { onCompact?: () => void }) {
         aria-label={label}
         aria-describedby={open ? id : undefined}
         aria-expanded={open}
-        onFocus={() => setOpen(true)}
-        onClick={() => setOpen(true)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") setOpen(false);
-        }}
+        onPointerDown={(event) => event.preventDefault()}
         data-hot={fill > 0.8}
         data-connected={connected}
       >
@@ -82,12 +93,12 @@ export function ContextUsage({ onCompact }: { onCompact?: () => void }) {
             fontSize="9"
             fontWeight="500"
           >
-            {known ? Math.round(fill * 100) : "?"}
+            {known || fresh ? Math.round(fill * 100) : ""}
           </text>
         </svg>
       </button>
-      {open && (
-        <div
+      <AnimatePresence>{open && (
+        <motion.div initial={{ opacity: 0, y: reducedMotion ? 0 : 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: reducedMotion ? 0 : 4, pointerEvents: "none" }} transition={{ duration: reducedMotion ? 0 : 0.16 }}
           className="context-details"
           role="group"
           aria-label={t("Context usage")}
@@ -104,12 +115,13 @@ export function ContextUsage({ onCompact }: { onCompact?: () => void }) {
           <p>
             {known && usage
               ? t("{used} of {total} tokens", {
-                  used: tokens(usage.contextTokens),
+                  used: tokens(contextTokens),
                   total: tokens(contextMax),
                 })
               : t("Usage appears when the provider reports it.")}
           </p>
-          {usage && usage.turns > 0 && (
+          {usage && reported && !fresh && (<>
+            <p className="context-totals-label">{t("Conversation totals")}</p>
             <dl>
               <div>
                 <dt>{t("Input")}</dt>
@@ -140,7 +152,7 @@ export function ContextUsage({ onCompact }: { onCompact?: () => void }) {
                 </div>
               )}
             </dl>
-          )}
+          </>)}
           {thread?.compacting ? (
             <div className="context-compacting" role="status">
                 <Minimize2 size={15} />{t("Compacting context")}…
@@ -152,15 +164,9 @@ export function ContextUsage({ onCompact }: { onCompact?: () => void }) {
               </button>
             </div>
           )}
-          {!thread?.compacting && <div className="context-connection">
-            {connected
-              ? thread?.running
-                ? t("Provider working")
-                : t("Connected")
-              : t("Reconnecting…")}
-          </div>}
-        </div>
-      )}
+          {!connected && <div className="context-connection">{t("Reconnecting…")}</div>}
+        </motion.div>
+      )}</AnimatePresence>
     </div>
   );
 }

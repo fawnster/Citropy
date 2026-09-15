@@ -1,9 +1,13 @@
+import { GitCommitHorizontal, Server } from "lucide-react";
+import { environmentName, isRemote } from "../lib/environment.ts";
 import { useI18n } from "../lib/i18n.ts";
 import { Folder, GitBranch, PanelLeft, PanelRight } from "./icons.ts";
 import { toggleInspector, useApp } from "../lib/store.ts";
 import { NotificationCenter } from "./NotificationCenter.tsx";
 import { ComputerIndicator } from "./ComputerPane.tsx";
 import { WindowControls } from "./WindowControls.tsx";
+import { GitActions } from "./GitActions.tsx";
+import { RunningShells } from "./RunningShells.tsx";
 import type { NotificationTarget } from "../../../shared/protocol.ts";
 
 export function Titlebar({
@@ -24,6 +28,15 @@ export function Titlebar({
   const thread = useApp((state) =>
     activeThreadId ? state.threads[activeThreadId] : undefined,
   );
+  const gitThread = useApp(state => {
+    let selected = thread;
+    const visited = new Set<string>();
+    while (selected?.parentThreadId && !visited.has(selected.id)) {
+      visited.add(selected.id);
+      selected = state.threads[selected.parentThreadId];
+    }
+    return selected?.parentThreadId ? undefined : selected;
+  });
   const git = useApp((state) =>
     activeProjectId ? state.git[activeProjectId] : undefined,
   );
@@ -73,12 +86,14 @@ export function Titlebar({
               className="workspace-breadcrumb"
               title={thread?.workspacePath ?? project?.path}
             >
+              {isRemote() && <><Server size={13} /><span className="environment-breadcrumb truncate">{environmentName()}</span><span className="breadcrumb-separator" aria-hidden="true">/</span></>}
               <Folder size={14} />
               <span className="truncate">
                 {project?.name ?? t("No workspace")}
               </span>
               {(git?.branch || thread?.workspaceBranch) && view === "chat" && (
                 <span className="branch">
+                  <span className="breadcrumb-separator" aria-hidden="true">/</span>
                   <GitBranch size={12} />
                   {git?.branch || thread?.workspaceBranch}
                 </span>
@@ -99,6 +114,8 @@ export function Titlebar({
       <div className="topbar-right">
         <ComputerIndicator />
         <NotificationCenter onOpen={onNotification} />
+        <RunningShells onOpen={onNotification} />
+        {project && (project.isGit && gitThread ? <GitActions key={gitThread.id} thread={gitThread} /> : <button type="button" className="icon-btn git-panel-trigger" aria-label={t("Git actions")} title={t("Git actions")} onClick={() => useApp.setState({ activeView: "git", readingThreadId: null })}><GitCommitHorizontal size={16} /><span className="git-trigger-label">Git</span></button>)}
         {view === "chat" && (
           <button
             className="icon-btn"

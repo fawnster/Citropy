@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { github } from "./actions.ts";
 import { useApp } from "./store.ts";
+import { useEnvironments } from "./environment.ts";
 import type {
   GitHubRequests,
   GitHubResponses,
@@ -11,7 +12,8 @@ export function useGitHub<K extends keyof GitHubRequests>(
   input: GitHubRequests[K] | null,
 ) {
   const connected = useApp((state) => state.connected);
-  const key = JSON.stringify(input);
+  const { activeId } = useEnvironments();
+  const key = JSON.stringify({ environment: activeId, input });
   const [revision, setRevision] = useState(0);
   const [result, setResult] = useState<{
     key: string;
@@ -21,13 +23,13 @@ export function useGitHub<K extends keyof GitHubRequests>(
   }>({ key, loading: true });
   useEffect(() => {
     let cancelled = false;
-    if (!connected || key === "null") return;
+    if (!connected || input === null) return;
     setResult((previous) => ({
       key,
       data: previous.key === key ? previous.data : undefined,
       loading: true,
     }));
-    void github(operation, JSON.parse(key)).then(
+    void github(operation, JSON.parse(key).input).then(
       (data) => {
         if (!cancelled) setResult({ key, data, loading: false });
       },
@@ -48,11 +50,11 @@ export function useGitHub<K extends keyof GitHubRequests>(
   return {
     data: key === result.key ? result.data : undefined,
     error:
-      connected && key !== "null" && key === result.key
+      connected && input !== null && key === result.key
         ? result.error
         : undefined,
     loading:
-      key !== "null" && connected && (key !== result.key || result.loading),
+      input !== null && connected && (key !== result.key || result.loading),
     refresh: () => setRevision((value) => value + 1),
   };
 }

@@ -1,3 +1,4 @@
+import { rememberWorkspaces, serverUrl } from "./environment.ts";
 import { applyEvents, useApp } from "./store.ts";
 import { rejectResponses, resolveResponse } from "./requests.ts";
 import type { ClientEvent, ServerEvent } from "../../../shared/protocol.ts";
@@ -24,6 +25,10 @@ function flush(): void {
   queue = [];
   if (batch.length === 0) return;
   useApp.setState((previous) => applyEvents(previous, batch));
+  if (batch.some(event => ["hello", "project.upsert", "project.remove"].includes(event.t))) {
+    const state = useApp.getState();
+    rememberWorkspaces(state.projects, state.home);
+  }
   const notifications = useApp.getState().notifications;
   const read: string[] = [];
   for (const event of batch) {
@@ -98,8 +103,9 @@ export function connect(): void {
     return;
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = null;
-  const protocol = location.protocol === "https:" ? "wss" : "ws";
-  const current = new WebSocket(`${protocol}://${location.host}/socket`);
+  const url = new URL(serverUrl("/socket"), `${location.protocol}//${location.host}`);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  const current = new WebSocket(url);
   socket = current;
 
   current.onopen = () => {
@@ -134,7 +140,7 @@ export function connect(): void {
   current.onerror = () => current.close();
 }
 
-export function disconnect(): void {
+export function disconnect(switching = false): void {
   flush();
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = null;
@@ -149,11 +155,28 @@ export function disconnect(): void {
   }
   outbox.length = 0;
   termListeners.clear();
-  rejectResponses();
+  rejectResponses(switching);
   useApp.setState({ connected: false });
 }
 
-if (import.meta.hot) import.meta.hot.dispose(disconnect);
+export function waitUntilConnected(signal: AbortSignal): Promise<void> {
+  if (useApp.getState().connected) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const finish = (error?: Error) => {
+      clearTimeout(timeout);
+      unsubscribe();
+      signal.removeEventListener("abort", abort);
+      error ? reject(error) : resolve();
+    };
+    const abort = () => finish(new DOMException("Environment changed", "AbortError"));
+    const unsubscribe = useApp.subscribe(state => { if (state.connected) finish(); });
+    const timeout = setTimeout(() => finish(new Error("The workspace connection timed out. Reconnect to try again.")), 20000);
+    signal.addEventListener("abort", abort, { once: true });
+    if (signal.aborted) abort();
+  });
+}
+
+if (import.meta.hot) import.meta.hot.dispose(() => disconnect());
 
 let counter = 0;
 export function requestId(): string {

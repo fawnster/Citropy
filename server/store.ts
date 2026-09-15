@@ -1,3 +1,4 @@
+import { dataRoot } from "./paths.ts";
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, existsSync, renameSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -11,6 +12,7 @@ import type {
   Message,
   Part,
   Project,
+  ProjectSettings,
   Thread,
   ThreadMeta,
   Usage,
@@ -18,9 +20,9 @@ import type {
   NotificationPreferences,
 } from "../shared/protocol.ts";
 
-const root = join(homedir(), ".citropy");
+const root = dataRoot;
 const previousRoot = join(homedir(), ".loom");
-if (!existsSync(root) && existsSync(previousRoot)) renameSync(previousRoot, root);
+if (!process.env.CITROPY_DATA_DIR && !existsSync(root) && existsSync(previousRoot)) renameSync(previousRoot, root);
 const threadsDir = join(root, "threads");
 const settingsFile = join(root, "settings.json");
 const projectsFile = join(root, "projects.json");
@@ -56,6 +58,7 @@ export class Store {
   disabledProviders = new Set<ProviderId>();
   computerEnabled = false;
   assistance: AssistanceSettings = { ...defaultAssistance };
+  projectDefaults: Omit<ProjectSettings, "actions"> = {};
   notifications: AppNotification[] = [];
   notificationPreferences: NotificationPreferences = {
     toasts: true,
@@ -74,6 +77,8 @@ export class Store {
     if (existsSync(settingsFile)) {
       try {
         const settings = JSON.parse(readFileSync(settingsFile, "utf8"));
+        if (settings.projectDefaults && typeof settings.projectDefaults === "object" && !Array.isArray(settings.projectDefaults))
+          this.projectDefaults = settings.projectDefaults;
         this.computerEnabled = settings.computerEnabled === true;
         if (typeof settings.assistance?.automaticTitles === "boolean") this.assistance.automaticTitles = settings.assistance.automaticTitles;
         for (const key of ["titleModel", "commitModel"] as const) {
@@ -175,6 +180,7 @@ export class Store {
       notifications: this.notificationPreferences,
       computerEnabled: this.computerEnabled,
       assistance: this.assistance,
+      projectDefaults: this.projectDefaults,
     });
     this.disabledProviders = disabled;
   }
@@ -185,6 +191,7 @@ export class Store {
       notifications: this.notificationPreferences,
       computerEnabled: enabled,
       assistance: this.assistance,
+      projectDefaults: this.projectDefaults,
     });
     this.computerEnabled = enabled;
   }
@@ -236,6 +243,7 @@ export class Store {
       notifications: preferences,
       computerEnabled: this.computerEnabled,
       assistance: this.assistance,
+      projectDefaults: this.projectDefaults,
     });
     this.notificationPreferences = preferences;
     bus.emit({ t: "notifications.preferences", preferences });
@@ -247,9 +255,22 @@ export class Store {
       notifications: this.notificationPreferences,
       computerEnabled: this.computerEnabled,
       assistance: settings,
+      projectDefaults: this.projectDefaults,
     });
     this.assistance = settings;
     bus.emit({ t: "assistance.settings", settings });
+  }
+
+  configureProjectDefaults(settings: Omit<ProjectSettings, "actions">): void {
+    save(settingsFile, {
+      disabledProviders: [...this.disabledProviders],
+      notifications: this.notificationPreferences,
+      computerEnabled: this.computerEnabled,
+      assistance: this.assistance,
+      projectDefaults: settings,
+    });
+    this.projectDefaults = settings;
+    bus.emit({ t: "project.defaults", settings });
   }
 
   openProject(path: string): Project {

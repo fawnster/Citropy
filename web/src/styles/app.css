@@ -28,7 +28,45 @@
   display: flex;
   min-height: 0;
   position: relative;
+  overflow: clip;
 }
+
+.sliding-panel {
+  --panel-width: var(--rail);
+  position: relative;
+  flex: none;
+  width: var(--panel-width);
+  min-height: 0;
+  transition: margin var(--panel-duration) var(--ease-out);
+}
+.sliding-panel[hidden] { display: none; }
+.sliding-panel[data-animate="false"],
+.sliding-panel[data-animate="false"] > .rail,
+.sliding-panel[data-animate="false"] > .inspector { transition: none; }
+.sliding-panel[data-side="right"] { --panel-width: var(--inspector); }
+.sliding-panel > .rail,
+.sliding-panel > .inspector {
+  height: 100%;
+  width: var(--panel-width);
+  transition: translate var(--panel-duration) var(--ease-out), opacity var(--panel-duration) var(--ease-out);
+}
+.sliding-panel[data-open="false"] { pointer-events: none; }
+.sliding-panel[data-side="left"][data-open="false"] { margin-left: calc(-1 * var(--panel-width)); }
+.sliding-panel[data-side="right"][data-open="false"] { margin-right: calc(-1 * var(--panel-width)); }
+.sliding-panel[data-side="left"][data-open="false"] > .rail { translate: -16px 0; opacity: 0; }
+.sliding-panel[data-side="right"][data-open="false"] > .inspector { translate: 16px 0; opacity: 0; }
+@starting-style {
+  .sliding-panel[data-animate="true"][data-side="left"][data-open="true"] { margin-left: calc(-1 * var(--panel-width)); }
+  .sliding-panel[data-animate="true"][data-side="right"][data-open="true"] { margin-right: calc(-1 * var(--panel-width)); }
+  .sliding-panel[data-animate="true"][data-side="left"][data-open="true"] > .rail { translate: -16px 0; opacity: 0; }
+  .sliding-panel[data-animate="true"][data-side="right"][data-open="true"] > .inspector { translate: 16px 0; opacity: 0; }
+}
+:root[data-resizing] .sliding-panel,
+:root[data-resizing] .sliding-panel > *,
+:root[data-resizing] .topbar-left { transition: none; }
+:root[data-page-hidden] *,
+:root[data-page-hidden] *::before,
+:root[data-page-hidden] *::after { animation-play-state: paused !important; }
 
 .topbar {
   display: flex;
@@ -52,6 +90,7 @@
   align-self: stretch;
   padding: 0 12px 0 18px;
   width: 168px;
+  transition: width 200ms var(--ease-out);
 }
 
 .shell[data-sidebar="true"] .topbar-left {
@@ -63,6 +102,218 @@
 .topbar-right {
   padding-right: 14px;
 }
+
+.git-panel {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 0;
+  max-width: calc(var(--viewport-width) - 24px);
+  overflow: auto;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--overlay);
+  color: var(--text);
+  font-size: 12px;
+  box-shadow: var(--shadow-md);
+  transform-origin: top right;
+}
+
+.git-panel-heading {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 10px 9px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.git-panel-heading h2 {
+  flex: 1;
+  font-size: 13px;
+}
+
+.git-panel-heading .icon-btn {
+  width: 26px;
+  height: 26px;
+}
+
+.git-panel-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 14px 4px;
+  color: var(--text-2);
+}
+
+.git-panel-context > svg,
+.git-panel-changes > svg {
+  flex: none;
+  color: var(--text-3);
+}
+
+.git-panel-context small {
+  margin-left: auto;
+  color: var(--text-3);
+  flex: none;
+}
+
+.git-panel-changes {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: calc(100% - 16px);
+  margin: 4px 8px 9px;
+  padding: 8px 6px;
+  border-radius: var(--r-xs);
+  text-align: left;
+}
+
+.git-panel-changes:hover:not(:disabled) {
+  background: var(--raised-2);
+}
+
+.git-panel-change-copy {
+  display: grid;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+
+.git-panel-change-copy strong {
+  font-weight: 500;
+}
+
+.git-panel-change-copy small,
+.git-panel-scope,
+.git-panel-sync,
+.git-panel-note {
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.git-panel-counts {
+  display: flex;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+}
+
+.git-panel-counts .added { color: var(--add); }
+.git-panel-counts .removed { color: var(--del); }
+.git-panel-body { padding: 0 14px 12px; }
+.git-panel-scope,
+.git-panel-sync,
+.git-panel-note { margin: 0 0 8px; }
+.git-panel-note { margin: 8px 0 0; }
+.git-panel-scope { display: flex; justify-content: space-between; gap: 8px; }
+
+.git-panel-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.git-panel-buttons .btn {
+  flex: 1;
+  min-width: 0;
+  justify-content: center;
+}
+
+.git-panel-combined {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-top: 7px;
+  padding: 5px;
+  border-radius: var(--r-xs);
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+.git-panel-combined:hover:not(:disabled) { background: var(--raised-2); }
+.git-panel-combined:disabled { color: var(--text-4); opacity: 0.5; cursor: default; }
+.git-panel-progress,
+.git-panel-error { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 10px; }
+.git-panel-progress > svg,
+.git-panel-error > svg { flex: none; margin-top: 2px; }
+.git-panel-trigger[data-error],
+.git-panel-error { color: var(--bad); }
+.git-panel-error p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.git-actions .spin { animation: citropy-spin 1s linear infinite; }
+
+.git-panel-footer {
+  display: grid;
+  gap: 9px;
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  color: var(--text-3);
+  font-size: 10.5px;
+}
+
+.git-panel-result summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  color: var(--text-2);
+}
+
+.git-panel-result summary code { margin-left: auto; color: var(--text-3); }
+.git-panel-result[open] summary > svg { transform: rotate(90deg); }
+.git-panel-result p { margin: 9px 0 0; max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+
+.model-picker-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 10px;
+  border-radius: var(--r-sm);
+  background: var(--canvas);
+  color: var(--text-2);
+  font-size: 12px;
+  text-align: left;
+  transition: background var(--dur-fast);
+}
+.model-picker-trigger:hover:not(:disabled),
+.model-picker-trigger[aria-expanded="true"] { background: var(--raised-2); }
+.model-picker-trigger:disabled { opacity: 0.5; }
+.model-picker-trigger > .truncate { flex: 1; }
+.model-picker-trigger > svg { flex: none; }
+.model-picker-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  min-height: 44px;
+  margin: 0 5px 5px;
+  padding: 4px 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+.model-picker-providers { display: flex; gap: 5px; }
+.model-picker-toolbar button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 32px;
+  border-radius: var(--r-sm);
+  color: var(--text-3);
+}
+.model-picker-toolbar button:hover { background: var(--raised); color: var(--text); }
+.model-picker-toolbar button[aria-pressed="true"] { background: var(--raised-2); color: var(--text); }
+.model-picker-toolbar .provider-icon { width: 18px; height: 18px; }
+.model-picker-toolbar .model-picker-locked { width: 51px; gap: 7px; }
+.model-picker-favorites[aria-pressed="true"] svg { color: var(--warn); }
+.menu.model-picker-menu { height: 360px; }
+.model-picker-menu .menu-list { align-content: start; max-height: none; }
+.model-picker-menu .menu-search { flex: none; background: transparent; border-color: transparent; border-radius: 0; margin-bottom: 8px; }
+.model-picker-menu .menu-search:focus-visible { outline: none; border-bottom-color: var(--line-strong); }
+.model-picker-menu .menu-item { min-height: 38px; }
+.model-picker-note { margin: 0 10px 10px; color: var(--text-3); font-size: 11px; }
+.git-panel-footer > .menu-wrap { width: 100%; }
 
 .topbar-center {
   flex: 1;
@@ -105,7 +356,9 @@
   gap: 5px;
   color: var(--text-3);
   font-size: 11px;
+  flex: none;
 }
+.workspace-breadcrumb .branch .breadcrumb-separator { margin: 0 5px; font-size: 12px; }
 
 .breadcrumb {
   display: flex;
@@ -265,21 +518,29 @@
   .inspector > .panel-resize {
     display: none;
   }
-  .shell-body .inspector {
+  .shell-body .sliding-panel[data-side="right"] {
     position: absolute;
     right: 0;
     top: 0;
     bottom: 0;
     z-index: 15;
-    width: min(460px, 100%);
-    box-shadow: var(--shadow-md);
+    --panel-width: min(460px, var(--viewport-width));
+    margin: 0;
   }
-  .shell-body .rail {
+  .shell-body .sliding-panel[data-side="left"] {
     position: absolute;
     inset: 0 auto 0 0;
     z-index: 18;
-    width: min(280px, calc(var(--viewport-width) * 0.85));
-    box-shadow: var(--shadow-md);
+    --panel-width: min(280px, calc(var(--viewport-width) * 0.85));
+    margin: 0;
+  }
+  .sliding-panel > .rail,
+  .sliding-panel > .inspector { box-shadow: var(--shadow-md); }
+  .sliding-panel[data-side="left"][data-open="false"] > .rail { translate: -100% 0; }
+  .sliding-panel[data-side="right"][data-open="false"] > .inspector { translate: 100% 0; }
+  @starting-style {
+    .sliding-panel[data-animate="true"][data-side="left"][data-open="true"] > .rail { translate: -100% 0; }
+    .sliding-panel[data-animate="true"][data-side="right"][data-open="true"] > .inspector { translate: 100% 0; }
   }
 
   .sidebar-scrim {
@@ -326,6 +587,7 @@
 }
 .topbar[data-desktop="true"] button,
 .topbar[data-desktop="true"] .notifications-wrap,
+.topbar[data-desktop="true"] .git-actions,
 .topbar[data-desktop="true"] a {
   -webkit-app-region: no-drag;
 }

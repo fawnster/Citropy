@@ -593,6 +593,18 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
     },
   );
 
+  await t.test("terminal commands are exposed in running shells and keep permission checks", async () => {
+    const { shellList } = await import("../server/shells.ts");
+    assert.equal((await tool("terminal_open", { command: "" })).isError, true);
+    const opened = JSON.parse((await tool("terminal_open", { command: "printf 'managed-command-output\\n'" })).content[0].text);
+    await waitFor(() => shellList().find(shell => shell.panelId === opened.tabId)?.status === "finished");
+    const shell = shellList().find(shell => shell.panelId === opened.tabId);
+    assert.equal(shell.threadId, parent.id);
+    assert.match(shell.output, /managed-command-output/);
+    terminals.close(opened.tabId);
+    closePanel(opened.tabId);
+  });
+
   await t.test(
     "terminals retain state when reattached and close independently",
     async () => {

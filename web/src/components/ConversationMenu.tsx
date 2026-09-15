@@ -1,3 +1,4 @@
+import { AnimatePresence } from "motion/react";
 import { useState } from "react";
 import {
   Archive,
@@ -164,7 +165,7 @@ export function ConversationMenu({
           </button>
         )}
       />
-      {editing && (
+      <AnimatePresence>{editing && (
         <Modal
           title={
             editing === "title"
@@ -227,7 +228,7 @@ export function ConversationMenu({
             </p>
           )}
         </Modal>
-      )}
+      )}</AnimatePresence>
     </>
   );
 }

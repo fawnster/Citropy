@@ -1,10 +1,11 @@
 import { useI18n } from "../lib/i18n.ts";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Terminal } from "@xterm/xterm";
 import type { FitAddon } from "@xterm/addon-fit";
 import "@xterm/xterm/css/xterm.css";
 import { onTerminal, send } from "../lib/socket.ts";
 import { useApp } from "../lib/store.ts";
+import { environmentSignal } from "../lib/environment.ts";
 import type { PanelTab } from "../../../shared/workbench.ts";
 
 const DARK = {
@@ -80,6 +81,7 @@ export function TerminalPane({
   const term = useRef<Terminal | null>(null);
   const fit = useRef<FitAddon | null>(null);
   const attached = useRef(false);
+  const [signal] = useState(environmentSignal);
   const projectId = panel.projectId;
   const connected = useApp((state) => state.connected);
   const theme = useApp((state) => state.theme);
@@ -87,7 +89,7 @@ export function TerminalPane({
   useEffect(() => {
     if (!connected) attached.current = false;
     if (term.current) term.current.options.cursorBlink = active && connected;
-    if (!active || !connected || !host.current) return;
+    if (!active || !connected || !host.current || signal.aborted) return;
     if (term.current) {
       fit.current?.fit();
       if (!attached.current) {
@@ -101,7 +103,7 @@ export function TerminalPane({
           rows: term.current.rows,
         });
       }
-      term.current.focus();
+      if (!document.activeElement?.matches('[role="tab"]:focus-visible')) term.current.focus();
       return;
     }
     let disposed = false;
@@ -113,7 +115,7 @@ export function TerminalPane({
           import("@xterm/addon-fit"),
           import("@xterm/addon-web-links"),
         ]);
-      if (disposed || !host.current) return;
+      if (disposed || signal.aborted || !host.current) return;
 
       const instance = new Xterm({
         fontFamily: "'JetBrains Mono Variable', ui-monospace, monospace",
@@ -134,7 +136,7 @@ export function TerminalPane({
       if (hasWebgl2()) {
         try {
           const { WebglAddon } = await import("@xterm/addon-webgl");
-          if (disposed) {
+          if (disposed || signal.aborted) {
             instance.dispose();
             return;
           }
@@ -146,7 +148,7 @@ export function TerminalPane({
         }
       }
 
-      if (disposed) {
+      if (disposed || signal.aborted) {
         instance.dispose();
         return;
       }
@@ -163,13 +165,13 @@ export function TerminalPane({
         rows: instance.rows,
       });
 
-      instance.onData((data) =>
-        send({ t: "term.data", termId: panel.id, data }),
-      );
-      instance.onResize(({ cols, rows }) =>
-        send({ t: "term.resize", termId: panel.id, cols, rows }),
-      );
-      instance.focus();
+      instance.onData((data) => {
+        if (!signal.aborted) send({ t: "term.data", termId: panel.id, data });
+      });
+      instance.onResize(({ cols, rows }) => {
+        if (!signal.aborted) send({ t: "term.resize", termId: panel.id, cols, rows });
+      });
+      if (!document.activeElement?.matches('[role="tab"]:focus-visible')) instance.focus();
     })();
 
     return () => {

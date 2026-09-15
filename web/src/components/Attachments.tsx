@@ -1,8 +1,11 @@
+import { serverUrl } from "../lib/environment.ts";
+import { AnimatePresence } from "motion/react";
 import { useState } from "react";
 import { X, Download } from "lucide-react";
 import { FileIcon } from "./FileIcon.tsx";
 import { Modal } from "./Modal.tsx";
 import { FilePreview } from "./FilePreview.tsx";
+import { ImageViewer } from "./ImageViewer.tsx";
 import { assetQuery } from "../lib/api.ts";
 import type { Attachment } from "../../../shared/protocol.ts";
 import { useI18n } from "../lib/i18n.ts";
@@ -24,7 +27,7 @@ export function Attachments({
     <>
       <div className="attachments">
         {files.map((file) => (
-          <div className="attachment" key={file.id ?? file.path}>
+          <div className="attachment" data-image={file.mime?.startsWith("image/") || undefined} key={file.id ?? file.path}>
             <button
               type="button"
               className="attachment-open"
@@ -35,12 +38,14 @@ export function Attachments({
               {file.mime?.startsWith("image/") ? (
                 <img
                   alt={file.label}
-                  src={`/api/assets?${assetQuery(projectId, file.path, threadId, file.id)}`}
+                  loading="lazy"
+                  decoding="async"
+                  src={serverUrl(`/api/assets?${assetQuery(projectId, file.path, threadId, file.id)}`)}
                 />
               ) : (
                 <FileIcon path={file.label} mime={file.mime} size={22} className="attachment-file-icon" />
               )}
-              <span>
+              {!file.mime?.startsWith("image/") && <span>
                 <strong className="truncate">{file.label}</strong>
                 <small>
                   {file.size !== undefined
@@ -49,12 +54,12 @@ export function Attachments({
                       : `${Math.max(1, Math.ceil(file.size / 1024))} KB`
                     : t("File")}
                 </small>
-              </span>
+              </span>}
             </button>
             {onRemove && (
               <button
                 type="button"
-                className="icon-btn"
+                className="icon-btn attachment-remove"
                 aria-label={`${t("Remove")} ${file.label}`}
                 onClick={() => onRemove(file.id!)}
               >
@@ -64,7 +69,12 @@ export function Attachments({
           </div>
         ))}
       </div>
-      {preview && (
+      <AnimatePresence>{preview && (preview.mime?.startsWith("image/") ? <ImageViewer
+        key={preview.id ?? preview.path}
+        src={serverUrl(`/api/assets?${assetQuery(projectId, preview.path, threadId, preview.id)}`)}
+        name={preview.label}
+        onClose={() => setPreview(undefined)}
+      /> : (
         <Modal
           title={preview.label}
           icon={<FileIcon path={preview.label} mime={preview.mime} size={21} />}
@@ -74,7 +84,7 @@ export function Attachments({
             <>
               <a
                 className="btn"
-                href={`/api/assets?${assetQuery(projectId, preview.path, threadId, preview.id)}&download=1`}
+                href={serverUrl(`/api/assets?${assetQuery(projectId, preview.path, threadId, preview.id)}&download=1`)}
                 download={preview.label}
               >
                 <Download size={15} />
@@ -100,7 +110,7 @@ export function Attachments({
             hideHeader
           />
         </Modal>
-      )}
+      ))}</AnimatePresence>
     </>
   );
 }

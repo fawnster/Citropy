@@ -1,3 +1,4 @@
+import { AnimatePresence } from "motion/react";
 import { useState } from "react";
 import { Download, Plus, RefreshCw, Tag } from "lucide-react";
 import { useGitHub } from "../../lib/use-github.ts";
@@ -99,7 +100,7 @@ export function GitHubReleases({
           onChange={setPage}
         />
       )}
-      {creating && (
+      <AnimatePresence>{creating && (
         <GitHubDialog
           title={t("Create a release")}
           description={t("Create a release in {repo}. Saving a draft keeps it unpublished.", { repo: repository.full_name })}
@@ -151,7 +152,7 @@ export function GitHubReleases({
             {t("Mark as a pre-release")}
           </label>
         </GitHubDialog>
-      )}
+      )}</AnimatePresence>
     </div>
   );
 }

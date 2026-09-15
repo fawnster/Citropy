@@ -37,7 +37,7 @@ export function modelSource(
     "amazon-bedrock": "Amazon Bedrock",
     azure: "Azure",
   };
-  return `${provider.label} · ${names[source] ?? source}`;
+  return names[source] ?? source;
 }
 
 export function effortLabel(effort: string): string {

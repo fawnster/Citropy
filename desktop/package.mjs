@@ -31,6 +31,7 @@ for (const name of [
   "package-lock.json",
 ])
   await cp(join(root, name), join(staging, name), { recursive: true });
+await cp(join(root, "package-lock.json"), join(staging, "desktop/remote-package-lock.json"));
 const manifest = JSON.parse(
   await readFile(join(staging, "package.json"), "utf8"),
 );

@@ -29,6 +29,7 @@ test(
     process.env.XDG_CONFIG_HOME = join(directory, ".config");
     syncBuiltinESMExports();
     const { store } = await import("../server/store.ts");
+    store.assistance.automaticTitles = false;
     const { handleFeatures } = await import("../server/features.ts");
     const { bus } = await import("../server/bus.ts");
     const { runtimeFor, disposeAll } = await import("../server/runtime.ts");
@@ -154,6 +155,7 @@ test(
         t: "hello",
         snapshot: {
           home: directory,
+          projectDefaults: store.projectDefaults,
           projects: [...store.projects.values()],
           threads: store.allMeta(),
           providers: catalog,
@@ -224,10 +226,8 @@ test(
       fs.rmSync(directory, { recursive: true, force: true });
     });
     await page.goto(`http://127.0.0.1:${server.address().port}`);
-    await page
-      .getByRole("complementary", { name: "Conversations" })
-      .getByRole("button", { name: "New thread", exact: true })
-      .click();
+    await page.locator(".workspace-select").click();
+    await page.getByRole("menuitem", { name: "New thread with workspace options…", exact: true }).click();
     await page
       .getByRole("combobox", { name: "Provider", exact: true })
       .selectOption("claude");
@@ -267,11 +267,16 @@ test(
     await page
       .getByRole("button", { name: "Preview example.png", exact: true })
       .click();
-    await page.locator(".media-preview img").waitFor();
+    await page.locator(".image-viewer img").waitFor();
     await page.waitForFunction(
-      () => document.querySelector(".media-preview img")?.naturalWidth > 0,
+      () => document.querySelector(".image-viewer img")?.naturalWidth > 0,
     );
-    await page.getByRole("button", { name: "Close", exact: true }).click();
+    await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+    assert.equal(await page.getByRole("button", { name: "Fit image", exact: true }).textContent(), "125%");
+    await page.getByRole("button", { name: "Fit image", exact: true }).click();
+    assert.equal(await page.getByRole("button", { name: "Fit image", exact: true }).textContent(), "100%");
+    await page.getByRole("link", { name: "Download image", exact: true }).waitFor();
+    await page.getByRole("button", { name: "Close dialog", exact: true }).click();
     await page
       .getByLabel("Message", { exact: true })
       .fill("Please inspect these attachments.");
@@ -385,16 +390,72 @@ test(
       .click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Projects", exact: true }).click();
+    const global = page.getByRole("region", { name: "Global defaults", exact: true });
+    const folder = page.getByRole("region", { name: "Folder defaults", exact: true });
+    await global.getByRole("button", { name: "Default model: Use the last selected model", exact: true }).click();
+    await page.getByRole("menuitem", { name: /^Claude Fixture/ }).click();
+    await global.getByLabel("Reasoning effort").selectOption("low");
+    await global.getByLabel("Permissions").selectOption("plan");
+    await global.getByRole("button", { name: "Save global defaults", exact: true }).click();
+    await global.getByText("Global defaults saved", { exact: true }).waitFor();
+    assert.equal(store.projectDefaults.permissionMode, "plan");
+    assert.equal(store.projectDefaults.effort, "low");
+    assert.equal(await folder.getByLabel("Use global model and effort", { exact: true }).isChecked(), true);
+    assert.equal(await folder.getByRole("button", { name: "Default model: Claude Fixture", exact: true }).isDisabled(), true);
+    assert.equal(await folder.getByLabel("Reasoning effort").inputValue(), "low");
+    assert.equal(await folder.getByLabel("Permissions").inputValue(), "");
+    await folder.getByLabel("Use global model and effort", { exact: true }).uncheck();
+    await folder.getByLabel("Reasoning effort").selectOption("high");
+    await folder.getByLabel("Permissions").selectOption("manual");
     await page.getByLabel("Project name").fill("Design workspace");
     await page
-      .getByRole("button", { name: "Save settings", exact: true })
+      .getByRole("button", { name: "Save folder settings", exact: true })
       .click();
-    await page.getByText("Project settings saved", { exact: true }).waitFor();
+    await page.getByText("Folder settings saved", { exact: true }).waitFor();
     assert.equal(store.projects.get(project.id).name, "Design workspace");
     await page.screenshot({
       animations: "disabled",
       path: "/tmp/citropy-feature-project-settings.png",
     });
+    assert.equal(store.projects.get(project.id).settings.effort, "high");
+    assert.equal(store.projects.get(project.id).settings.permissionMode, "manual");
+    await global.getByLabel("Permissions").selectOption("acceptEdits");
+    await global.getByRole("button", { name: "Save global defaults", exact: true }).click();
+    await global.getByText("Global defaults saved", { exact: true }).waitFor();
+    assert.equal(await folder.getByLabel("Permissions").inputValue(), "manual");
+    await folder.getByLabel("Use global model and effort", { exact: true }).check();
+    await folder.getByLabel("Permissions").selectOption("");
+    await page.getByRole("button", { name: "Save folder settings", exact: true }).click();
+    await page.getByText("Folder settings saved", { exact: true }).waitFor();
+    assert.deepEqual(store.projects.get(project.id).settings, {});
+    const secondPath = join(directory, "another-folder");
+    fs.mkdirSync(secondPath);
+    const second = store.openProject(secondPath);
+    await page.getByRole("button", { name: "Configure folder: Design workspace", exact: true }).click();
+    await page.getByRole("menuitem", { name: /another-folder/ }).click();
+    assert.equal(await page.getByLabel("Project name").inputValue(), "another-folder");
+    await page.getByRole("button", { name: "Add action", exact: true }).click();
+    await page.getByLabel("Name", { exact: true }).fill("Check");
+    await page.getByLabel("Command", { exact: true }).fill("npm test");
+    await page.getByRole("button", { name: "Save folder settings", exact: true }).click();
+    await page.getByText("Folder settings saved", { exact: true }).waitFor();
+    assert.equal(store.projects.get(second.id).settings.actions[0].command, "npm test");
+    assert.equal(store.projects.get(project.id).settings.actions, undefined);
+    await page.getByRole("button", { name: "Configure folder: another-folder", exact: true }).click();
+    await page.getByRole("menuitem", { name: /Design workspace/ }).click();
+    assert.equal(await page.getByLabel("Project name").inputValue(), "Design workspace");
+    assert.equal(await page.getByLabel("Command", { exact: true }).count(), 0);
+    for (const width of [1440, 600]) {
+      await page.setViewportSize({ width, height: 900 });
+      if (width === 600) await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+      await global.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `/tmp/citropy-project-defaults-${width}.png`, animations: "disabled" });
+      await folder.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: `/tmp/citropy-project-folder-${width}.png`, animations: "disabled" });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    }
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
     await page.getByRole("button", { name: "Skills", exact: true }).click();
     const enable = page.getByRole("switch", {
       name: "Enable review for claude",
@@ -428,6 +489,28 @@ test(
       ),
       true,
     );
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.reload();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Projects", exact: true }).click();
+    assert.equal(await global.getByLabel("Reasoning effort").inputValue(), "low");
+    assert.equal(await folder.getByLabel("Use global model and effort", { exact: true }).isChecked(), true);
+    await page.screenshot({ path: "/tmp/citropy-project-settings-overview.png", animations: "disabled" });
+    await page.getByRole("button", { name: "General", exact: true }).click();
+    await page.locator(".setting-row select").first().selectOption("es");
+    await page.locator('.section-link[data-settings-section="projects"]').click();
+    await page.getByRole("heading", { name: "Valores globales", exact: true }).waitFor();
+    await page.screenshot({ path: "/tmp/citropy-project-settings-spanish.png", animations: "disabled" });
+    await page.setViewportSize({ width: 600, height: 900 });
+    await page.getByRole("button", { name: "Mostrar u ocultar barra lateral", exact: true }).click();
+    await page.getByRole("region", { name: "Ajustes de la carpeta", exact: true }).scrollIntoViewIfNeeded();
+    await page.screenshot({ path: "/tmp/citropy-project-settings-spanish-narrow.png", animations: "disabled" });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    for (const entry of store.projects.values()) bus.emit({ t: "project.remove", id: entry.id });
+    await page.getByText("Abre una carpeta para personalizar sus ajustes. Los valores globales se aplican a todas las carpetas que abras.", { exact: true }).waitFor();
+    await page.getByRole("button", { name: "Guardar valores globales", exact: true }).click();
+    await page.getByText("Valores globales guardados", { exact: true }).waitFor();
+    assert.equal(store.projectDefaults.effort, "low");
     assert.deepEqual(errors, []);
   },
 );

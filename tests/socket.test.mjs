@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-test("the local connection recovers without replaying GitHub actions", async (t) => {
+test("the local connection recovers without replaying GitHub actions", { timeout: 10000 }, async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const frames = new Map();
   let nextFrame = 0;
@@ -76,9 +76,8 @@ test("the local connection recovers without replaying GitHub actions", async (t)
         error = reason;
       });
       current.close();
-      await Promise.resolve();
-      assert.match(error?.message ?? "", /interrupted/i);
       await pending;
+      assert.match(error?.message ?? "", /interrupted/i);
       assert.equal(useApp.getState().connected, false);
       t.mock.timers.tick(400);
       current = sockets.at(-1);

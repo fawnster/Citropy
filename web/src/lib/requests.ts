@@ -25,9 +25,15 @@ export function resolveResponse(id: string, value?: unknown, error?: string): vo
   else request.resolve(value);
 }
 
-export function rejectResponses(): void {
-  for (const id of pending.keys())
-    resolveResponse(id, undefined, "The connection to Citropy was interrupted. Check the result before retrying this action.");
+export function rejectResponses(switching = false): void {
+  for (const [id, request] of pending) {
+    if (!switching) resolveResponse(id, undefined, "The connection to Citropy was interrupted. Check the result before retrying this action.");
+    else {
+      pending.delete(id);
+      clearTimeout(request.timer);
+      request.reject(new DOMException("Environment changed", "AbortError"));
+    }
+  }
 }
 
-if (import.meta.hot) import.meta.hot.dispose(rejectResponses);
+if (import.meta.hot) import.meta.hot.dispose(() => rejectResponses());

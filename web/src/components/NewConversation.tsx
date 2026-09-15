@@ -4,9 +4,10 @@ import { Folder, GitBranch, GitFork, LoaderCircle } from "lucide-react";
 import { Modal } from "./Modal.tsx";
 import { ProviderIcon } from "./ProviderIcon.tsx";
 import { api } from "../lib/api.ts";
-import { loadThread, refreshGit } from "../lib/actions.ts";
+import { loadThread, refreshGit, rememberThreadSettings } from "../lib/actions.ts";
 import { selectThread, useApp } from "../lib/store.ts";
 import { selectedModel } from "../../../shared/model-options.ts";
+import { resolveProjectSettings } from "../../../shared/project-settings.ts";
 import type { WorkspaceOptions } from "../../../shared/features.ts";
 import type { ProviderId, ThreadMeta, WorkspaceChoice } from "../../../shared/protocol.ts";
 
@@ -15,23 +16,23 @@ export function NewConversation() {
   const initialProvider = useApp((state) => state.newThreadProvider);
   const [providerId, setProviderId] = useState(initialProvider);
   const providers = useApp((state) => state.providers);
+  const defaults = useApp((state) => state.threadDefaults);
+  const projectDefaults = useApp((state) => state.projectDefaults);
   const connected = useApp((state) => state.connected);
   const project = useApp((state) =>
     state.projects.find((entry) => entry.id === state.activeProjectId),
   );
   const provider = providers.find((entry) => entry.id === providerId);
+  const preferences = resolveProjectSettings(projectDefaults, project?.settings);
+  const preferred = preferences.provider === providerId ? preferences : defaults?.provider === providerId ? defaults : undefined;
   const [options, setOptions] = useState<WorkspaceOptions>();
   const [kind, setKind] = useState<WorkspaceChoice["kind"]>(
-    project?.settings?.workspace ?? "current",
+    preferences.workspace ?? "current",
   );
   const [path, setPath] = useState("");
   const [branch, setBranch] = useState("");
   const [base, setBase] = useState("HEAD");
-  const [model, setModel] = useState(
-    project?.settings?.provider === providerId
-      ? (project.settings.model ?? "")
-      : "",
-  );
+  const [model, setModel] = useState(preferred?.model ?? "");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -59,6 +60,7 @@ export function NewConversation() {
           projectId: project.id,
           provider: provider.id,
           model: currentModel?.id,
+          effort: currentModel?.id === selectedModel(provider.models, preferred?.model)?.id ? preferred?.effort : undefined,
           workspace: { kind, path, branch, base },
         }),
       });
@@ -69,6 +71,7 @@ export function NewConversation() {
           : [thread.id, ...state.threadOrder],
       }));
       selectThread(thread.id);
+      rememberThreadSettings(thread);
       loadThread(thread.id);
       refreshGit(project.id);
       close();
@@ -126,7 +129,7 @@ export function NewConversation() {
             onChange={(event) => {
               const id = event.target.value as ProviderId;
               setProviderId(id);
-              setModel(project.settings?.provider === id ? project.settings.model ?? "" : "");
+              setModel(preferences.provider === id ? preferences.model ?? "" : defaults?.provider === id ? defaults.model ?? "" : "");
             }}
           >
             {providers.filter((entry) => entry.available && entry.enabled).map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}

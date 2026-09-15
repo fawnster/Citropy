@@ -54,7 +54,6 @@ export const WorkGroup = memo(function WorkGroup({ ids }: { ids: string[] }) {
             {stats.removed > 0 && <span className="diff-minus">-{stats.removed}</span>}
           </span>
         )}
-        <span className="group-count">{tools.length}</span>
       </button>
 
       <Collapsible open={open} className="group-body">

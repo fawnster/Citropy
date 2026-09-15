@@ -14,6 +14,15 @@ declare global {
   interface Window {
     loomDesktop?: Window["citropyDesktop"];
     citropyDesktop?: {
+      environmentsState(): Promise<import("../../shared/environments.ts").EnvironmentState>;
+      configureProjectDefaults(settings: import("../../shared/protocol.ts").ProjectSettings): Promise<import("../../shared/protocol.ts").ProjectSettings>;
+      sshHosts(): Promise<string[]>;
+      saveEnvironment(connection: Omit<import("../../shared/environments.ts").SshConnection, "id"> & { id?: string }): Promise<import("../../shared/environments.ts").SshConnection>;
+      connectEnvironment(id: string): Promise<import("../../shared/environments.ts").EnvironmentState>;
+      disconnectEnvironment(id: string): Promise<void>;
+      removeEnvironment(id: string): Promise<void>;
+      chooseWorkspaceFolder(id: string, path?: string): Promise<string | null>;
+      onEnvironmentsState(callback: (state: import("../../shared/environments.ts").EnvironmentState) => void): () => void;
       updateState(): Promise<import("../../shared/app-update.ts").AppUpdateState>;
       updateCommand(action: "check" | "download" | "install"): Promise<import("../../shared/app-update.ts").AppUpdateState>;
       onUpdateState(callback: (state: import("../../shared/app-update.ts").AppUpdateState) => void): () => void;
@@ -25,6 +34,7 @@ declare global {
       onNotification(
         callback: (notification: {
           id: string;
+          environmentId?: string;
           target: import("../../shared/protocol.ts").NotificationTarget;
         }) => void,
       ): () => void;

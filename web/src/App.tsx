@@ -1,3 +1,6 @@
+import { RemoteConnectionBanner } from "./components/EnvironmentSettings.tsx";
+import { environmentStorage, selectEnvironment, useEnvironments } from "./lib/environment.ts";
+import { AnimatePresence } from "motion/react";
 import { useI18n } from "./lib/i18n.ts";
 import { NewConversation } from "./components/NewConversation.tsx";
 import {
@@ -14,6 +17,7 @@ import { SidebarFooter } from "./components/SidebarFooter.tsx";
 import { Conversation } from "./components/Conversation.tsx";
 import { Composer } from "./components/Composer.tsx";
 import { Inspector } from "./components/Inspector.tsx";
+import { SlidingPanel } from "./components/SlidingPanel.tsx";
 import { PermissionLayer } from "./components/PermissionLayer.tsx";
 import { Toasts } from "./components/Toasts.tsx";
 import { ConfirmationDialog } from "./components/ConfirmationDialog.tsx";
@@ -28,6 +32,7 @@ import {
 } from "./lib/store.ts";
 import { send } from "./lib/socket.ts";
 import { createThread } from "./lib/actions.ts";
+import { reportError } from "./lib/api.ts";
 import { useGitHub } from "./lib/use-github.ts";
 
 const GitHub = lazy(() =>
@@ -53,6 +58,7 @@ const UsageView = lazy(() =>
 
 export function App() {
   const t = useI18n();
+  const { activeId: environment } = useEnvironments();
   const view = useApp((state) => state.activeView);
   const setView = (activeView: typeof view) => useApp.setState({ activeView });
   const [settingsSection, setSettingsSection] = useState("General");
@@ -77,6 +83,16 @@ export function App() {
   useEffect(() => {
     document.documentElement.lang = language;
   }, [language]);
+
+  useEffect(() => {
+    const update = () => document.documentElement.toggleAttribute("data-page-hidden", document.hidden);
+    update();
+    document.addEventListener("visibilitychange", update);
+    return () => {
+      document.removeEventListener("visibilitychange", update);
+      document.documentElement.removeAttribute("data-page-hidden");
+    };
+  }, []);
 
   const openView = (next: typeof view) => {
     if (next !== "chat") useApp.setState({ readingThreadId: null });
@@ -118,7 +134,7 @@ export function App() {
       state.projects.some((project) => project.id === target.projectId)
     ) {
       useApp.setState({ activeProjectId: target.projectId });
-      localStorage.setItem("citropy.project", target.projectId);
+      environmentStorage.setItem("citropy.project", target.projectId);
     }
     if (target.threadId && state.threads[target.threadId])
       selectThread(target.threadId);
@@ -128,8 +144,11 @@ export function App() {
   useEffect(
     () =>
       window.citropyDesktop?.onNotification?.((notification) => {
-        send({ t: "notifications.read", ids: [notification.id] });
-        openNotification(notification.target);
+        void (async () => {
+          if (notification.environmentId) await selectEnvironment(notification.environmentId);
+          send({ t: "notifications.read", ids: [notification.id] });
+          openNotification(notification.target);
+        })().catch(reportError);
       }),
     [],
   );
@@ -206,11 +225,13 @@ export function App() {
       }
     >
       <Titlebar
+        key={environment}
         onNotification={openNotification}
         view={view}
         sidebarOpen={navigationOpen}
         onToggleSidebar={toggleNavigation}
       />
+      <RemoteConnectionBanner />
       <div className="shell-body">
         {navigationOpen && (
           <button
@@ -220,8 +241,9 @@ export function App() {
             onClick={toggleNavigation}
           />
         )}
-        {view === "chat" && sidebarOpen && (
+        {view === "chat" && <SlidingPanel open={sidebarOpen} side="left">
           <Sidebar
+            key={environment}
             onSettings={() => {
               setSettingsSection("General");
               openView("settings");
@@ -231,7 +253,7 @@ export function App() {
             onGitHub={() => openView("github")}
             onConversation={() => openView("chat")}
           />
-        )}
+        </SlidingPanel>}
         <main className="stage">
           <Suspense
             fallback={
@@ -240,6 +262,7 @@ export function App() {
           >
             {view === "usage" ? (
               <UsageView
+                key={environment}
                 navigation={navigation}
                 sidebarOpen={sectionSidebarOpen}
                 onBack={() => openView("chat")}
@@ -247,7 +270,7 @@ export function App() {
             ) : view === "git" ? (
               <GitManager
                 navigation={navigation}
-                key={`${activeProjectId}:${activeThreadId}`}
+                key={`${environment}:${activeProjectId}:${activeThreadId}`}
                 sidebarOpen={sectionSidebarOpen}
                 onCloseSidebar={() => setSectionSidebarOpen(false)}
                 onBack={() => openView("chat")}
@@ -257,7 +280,7 @@ export function App() {
                 navigation={navigation}
                 status={githubStatus}
                 onGit={() => openView("git")}
-                key={activeProjectId}
+                key={`${environment}:${activeProjectId}`}
                 sidebarOpen={sectionSidebarOpen}
                 onCloseSidebar={() => setSectionSidebarOpen(false)}
                 onBack={() => openView("chat")}
@@ -271,7 +294,7 @@ export function App() {
                 onBack={() => openView("chat")}
               />
             ) : hasProject && activeThreadId ? (
-              <Fragment key={activeThreadId}>
+              <Fragment key={`${environment}:${activeThreadId}`}>
                 <Conversation />
                 <Composer
                   onUsage={() => openView("usage")}
@@ -282,15 +305,17 @@ export function App() {
                 />
               </Fragment>
             ) : (
-              <Welcome />
+              <Welcome key={environment} />
             )}
           </Suspense>
         </main>
-        {hasProject && <Inspector visible={inspectorOpen && view === "chat"} />}
+        {hasProject && <SlidingPanel open={inspectorOpen && view === "chat"} side="right" keepMounted>
+          <Inspector key={environment} visible={inspectorOpen && view === "chat"} />
+        </SlidingPanel>}
       </div>
-      {newThreadProvider && (
-        <NewConversation key={`${activeProjectId}:${newThreadProvider}`} />
-      )}
+      <AnimatePresence>{newThreadProvider && (
+        <NewConversation key={`${environment}:${activeProjectId}:${newThreadProvider}`} />
+      )}</AnimatePresence>
       <PermissionLayer />
       <ConfirmationDialog />
       <Toasts onOpen={openNotification} />

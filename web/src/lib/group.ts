@@ -4,8 +4,6 @@ import type { Translator } from "./translations.ts";
 
 export type Row = { kind: "part"; id: string } | { kind: "group"; ids: string[] };
 
-const STANDALONE = new Set<ToolShape>(["edit", "write"]);
-
 export function buildRows(parts: Array<Part | undefined>): Row[] {
   const rows: Row[] = [];
   let batch: string[] = [];
@@ -19,7 +17,7 @@ export function buildRows(parts: Array<Part | undefined>): Row[] {
   for (const part of parts) {
     if (!part) continue;
     if ((part.kind === "text" || part.kind === "reasoning") && part.text.trim() === "") continue;
-    if (part.kind === "tool" && !STANDALONE.has(part.shape)) {
+    if (part.kind === "tool") {
       batch.push(part.id);
       continue;
     }

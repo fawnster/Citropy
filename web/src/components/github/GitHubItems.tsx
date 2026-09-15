@@ -1,3 +1,4 @@
+import { AnimatePresence } from "motion/react";
 import { ResizeHandle } from "../ResizeHandle.tsx";
 import { useState } from "react";
 import {
@@ -576,7 +577,7 @@ export function GitHubItems({
           )}
         </div>
       </div>
-      {action && (
+      <AnimatePresence>{action && (
         <GitHubDialog
           title={titles[action]}
           description={`${repo}${selected && action !== "new" ? ` · #${selected}` : ""}. ${action === "merge" ? t("Merge the reviewed commit into the base branch. GitHub branch protections still apply.") : action === "new" && pull ? t("Both branches must already be pushed to GitHub.") : t("Changes will be saved to GitHub under your signed-in account.")}`}
@@ -713,7 +714,7 @@ export function GitHubItems({
             </label>
           )}
         </GitHubDialog>
-      )}
+      )}</AnimatePresence>
     </div>
   );
 }

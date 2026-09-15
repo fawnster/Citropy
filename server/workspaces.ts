@@ -1,3 +1,4 @@
+import { dataRoot } from "./paths.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, realpath } from "node:fs/promises";
@@ -5,6 +6,7 @@ import { join } from "node:path";
 import { homedir } from "node:os";
 import { uid } from "./ids.ts";
 import { store } from "./store.ts";
+import { resolveProjectSettings } from "../shared/project-settings.ts";
 import type { Project, WorkspaceChoice } from "../shared/protocol.ts";
 import type { WorkspaceOptions } from "../shared/features.ts";
 
@@ -86,9 +88,10 @@ export async function chooseThreadWorkspace(
   project: Project,
   choice?: WorkspaceChoice,
 ): Promise<{ workspacePath: string; workspaceBranch?: string }> {
-  const options = choice ?? { kind: project.settings?.workspace ?? "current" };
+  const defaults = resolveProjectSettings(store.projectDefaults, project.settings);
+  const options = choice ?? { kind: defaults.workspace ?? "current" };
   if (options.kind === "current") {
-    if (project.settings?.autoPull) {
+    if (defaults.autoPull) {
       const clean = await git(project.path, ["status", "--porcelain"]).then(
         (text) => !text,
         () => false,
@@ -130,7 +133,7 @@ export async function chooseThreadWorkspace(
     throw new Error(
       "Choose a branch from this repository as the starting point.",
     );
-  const parent = join(homedir(), ".citropy", "worktrees", project.id);
+  const parent = join(dataRoot, "worktrees", project.id);
   await mkdir(parent, { recursive: true });
   const path = join(parent, uid("checkout"));
   await git(project.path, ["worktree", "add", "-b", branch, path, base]);

@@ -52,6 +52,21 @@ export interface ToolPart {
   endedAt?: number;
 }
 
+export interface ShellProcess {
+  id: string;
+  projectId: string;
+  threadId?: string;
+  panelId?: string;
+  command: string;
+  cwd: string;
+  status: "running" | "stopping" | "finished" | "failed" | "stopped";
+  background: boolean;
+  stopMode: "shell" | "task";
+  output: string;
+  startedAt: number;
+  endedAt?: number;
+}
+
 export interface TextPart {
   id: string;
   kind: "text";
@@ -173,7 +188,7 @@ export interface Project {
 }
 
 export interface ProjectSettings {
-  provider?: ProviderId;
+  provider?: ProviderId | null;
   model?: string;
   effort?: string;
   permissionMode?: PermissionMode;
@@ -245,6 +260,7 @@ export interface GitFile {
 
 export interface GitStatus {
   branch: string;
+  upstream?: string | null;
   ahead: number;
   behind: number;
   files: GitFile[];
@@ -318,6 +334,8 @@ export interface AppNotification {
 }
 
 export interface Snapshot {
+  shells?: ShellProcess[];
+  projectDefaults?: Omit<ProjectSettings, "actions">;
   assistance?: import("./assistance.ts").AssistanceSettings;
   computer?: ComputerState;
   notifications?: AppNotification[];
@@ -335,6 +353,9 @@ export interface Snapshot {
 }
 
 export type ServerEvent =
+  | { t: "shell.upsert"; shell: ShellProcess }
+  | { t: "shell.remove"; id: string }
+  | { t: "project.defaults"; settings: Omit<ProjectSettings, "actions"> }
   | { t: "assistance.settings"; settings: import("./assistance.ts").AssistanceSettings }
   | { t: "computer.state"; computer: ComputerState }
   | { t: "thread.accepted"; requestId: string }
@@ -393,7 +414,7 @@ export type ClientEvent = (
   | { t: "github.request"; requestId: string; request: GitHubRequest }
   | { t: "git.manage"; requestId: string; projectId: string; operation: GitOperation; value?: string; offset?: number; remote?: string }
   | { t: "thread.search"; query: string; projectId?: string }
-  | { t: "project.choose" }
+  | { t: "project.choose"; path?: string }
   | { t: "providers.refresh" }
   | { t: "providers.configure"; provider: ProviderId; enabled: boolean }
   | { t: "project.open"; path: string }
@@ -427,6 +448,8 @@ export type ClientEvent = (
   | {
       t: "thread.config";
       id: string;
+      requestId?: string;
+      provider?: ProviderId;
       model?: string;
       effort?: string | null;
       contextWindow?: number;
