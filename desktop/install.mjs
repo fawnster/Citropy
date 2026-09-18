@@ -8,7 +8,7 @@ if (process.platform !== "linux")
     "Use npm run desktop on this platform. The application-menu installer currently supports Linux.",
   );
 const root = fileURLToPath(new URL("..", import.meta.url));
-const data = process.env.XDG_DATA_HOME ?? join(homedir(), ".local/share");
+const data = process.env.XDG_DATA_HOME || join(homedir(), ".local/share");
 const directory = join(data, "applications");
 const icons = join(data, "icons/hicolor/512x512/apps");
 mkdirSync(directory, { recursive: true });
