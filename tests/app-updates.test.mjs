@@ -263,11 +263,8 @@ createRoot(root).render(React.createElement('aside', {className:'rail', style:{w
         bytesPerSecond: 2097152,
       }),
     );
-    await page.getByRole("progressbar").waitFor();
-    assert.equal(
-      await page.getByRole("progressbar").getAttribute("aria-valuenow"),
-      "42",
-    );
+    const progress = page.locator('[role="progressbar"][aria-valuenow="42"]');
+    await progress.waitFor();
     assert.equal(
       await page.getByRole("button", { name: "Downloading 42%" }).isDisabled(),
       true,
