@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="public/citropy.svg" width="88" alt="">
+  <img src="public/citropy.svg" width="84" alt="">
   <h1>Citropy</h1>
   <p>A desktop workspace for Claude Code, Codex, and OpenCode.</p>
   <p>
@@ -9,35 +9,87 @@
   </p>
 </div>
 
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/screenshot-dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/screenshot-light.png">
-    <img width="100%" alt="Citropy showing a conversation with Claude Code beside the conversation list and Git status" src="docs/assets/screenshot-light.png">
-  </picture>
-</p>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/chat-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/chat-light.png">
+  <img alt="Citropy running a Claude Code conversation beside the task list and Git status" src="docs/assets/chat-light.png">
+</picture>
 
-Citropy runs the coding agent CLIs you already have, in one desktop window. Each conversation keeps its own provider, model, reasoning effort, and permission mode, while files, Git, terminals, browser tabs, and checkpoints belong to the shared workspace. It runs against a local backend on your machine, or on a remote host over SSH.
+Citropy runs the coding agent CLIs you already have, in one window. Each conversation keeps its own provider, model, reasoning effort, and permission mode, while files, Git, terminals, browser tabs, and checkpoints belong to the workspace. It runs against a local backend on your machine, or on a remote host over SSH.
 
-## Highlights
+## Commit and push with the agent
 
-- **Three agents, one window.** Claude Code, Codex, and OpenCode use their installed CLIs and existing sign-ins.
-- **Git built around turns.** Commit and push with the selected model, and checkpoint files before and after every turn.
-- **Rewind and branch.** Restore files, conversation, or both to an earlier message, or branch that message into a new conversation with its visible history.
-- **Review down to the line.** Stage, unstage, or revert individual hunks, attach comments to lines, and send them back to the agent as feedback.
-- **Local, SSH, and container workspaces.** Open a folder, add an SSH host, or start a Docker environment. Per-folder settings inherit from global defaults or override them.
-- **The workspace panel.** Browser, terminal, files, changes, subagents, and tools open beside the conversation, and agents reach the same sessions through MCP.
-- **Provider questions in one place.** Answer one or many choices, write your own, or skip. Models with tool support can also ask through `ask_user`.
-- **Native computer use.** Share a Linux screen and let a conversation move, click, drag, scroll, and type, subject to the conversation's permission mode.
-- **Context you can see.** `@` file and folder references, a context inspector with the selected excerpts and discovered instruction files, plus skills and commands from each provider.
-- **Usage and resources.** Claude Code and Codex allowances with reset times, token totals from saved conversations, and a live view of memory, CPU, terminals, and running work.
-- **Long sessions stay fast.** Conversations are journaled to SQLite, replayed after a reconnect, and rendered in virtualized timelines.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/git-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/git-light.png">
+  <img alt="The Git panel showing the branch, changed files, and AI commit buttons" src="docs/assets/git-light.png">
+</picture>
 
-## Requirements
+The floating Git panel shows the branch, the change counts, and the commits waiting to push. AI commit writes the message from a bounded diff in a separate session, and the model used for it is chosen per conversation.
 
-Linux, Node.js 22.18 or newer, and Git. Install and sign in to at least one of the Claude Code, Codex, or OpenCode CLIs.
+## Review every change
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/changes-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/changes-light.png">
+  <img alt="The Changes panel with grouped files and an expanded diff" src="docs/assets/changes-light.png">
+</picture>
+
+Files group by added, changed, and deleted, with diffs inline. Stage, unstage, or revert single hunks, comment on lines, and send the comments back to the agent as feedback. Every turn is checkpointed, so a message can be restored or branched into a new conversation.
+
+## Browser, terminals, and files beside the chat
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/browser-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/browser-light.png">
+  <img alt="The browser panel showing a local dashboard next to the conversation" src="docs/assets/browser-light.png">
+</picture>
+
+The workspace panel opens a browser, terminal, file tree, changes view, subagents, and the MCP tool list. Tabs and terminals stay open while you move between them, and providers drive the same browser and terminal sessions through Citropy's MCP tools. Page resolution, mobile mode, and phone presets are one click away.
+
+## Computer use, for the whole desktop
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/computer-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/computer-light.png">
+  <img alt="The Computer panel sharing a Linux desktop with recent activity" src="docs/assets/computer-light.png">
+</picture>
+
+Share a screen and let a conversation move, click, drag, scroll, and type in native desktop apps. Input follows the conversation's permission mode, a screen indicator keeps pause and stop reachable from anywhere, and sessions end after five minutes without actions.
+
+## Questions land in one panel
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/question-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/question-light.png">
+  <img alt="A question from the agent with answer choices above the composer" src="docs/assets/question-light.png">
+</picture>
+
+Claude Code, Codex, and OpenCode ask in the same panel above the composer. Pick one option, select several, write your own answer, or skip. Replies return to the waiting tool, and drafts survive switching conversations and reconnecting.
+
+## Local, SSH, and Docker workspaces
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/workspaces-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/workspaces-light.png">
+  <img alt="The workspace picker showing local folders, an SSH host, and Docker" src="docs/assets/workspaces-light.png">
+</picture>
+
+Open a local folder, connect to a host over SSH, or start a Docker environment. Files, Git, terminals, and provider sessions run on that host while the interface stays local. Per-folder settings inherit from global defaults or override them, and switching hosts preserves drafts, selections, and running shells.
+
+## Usage and resources
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/usage-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/assets/usage-light.png">
+  <img alt="The Usage view with allowances, token totals, and per-conversation usage" src="docs/assets/usage-light.png">
+</picture>
+
+Claude Code and Codex allowances with reset times, token totals for every saved conversation, and a live view of memory, CPU, terminals, browsers, and running work.
 
 ## Install
+
+Linux, Node.js 22.18 or newer, and Git, plus at least one of the agent CLIs installed and signed in.
 
 ```sh
 git clone https://github.com/tinuxongit/Citropy.git
@@ -63,11 +115,7 @@ npm run build         # production web bundle
 
 ## Documentation
 
-[docs/guide.md](docs/guide.md) covers workspaces, Git and checkpoints, providers, the browser and computer tools, settings, storage, and the code layout.
-
-## Contributing
-
-Issues and pull requests are welcome. Run `npm run typecheck` and `npm test` before opening a pull request.
+[docs/guide.md](docs/guide.md) covers workspaces, Git and checkpoints, providers, the browser and computer tools, settings, storage, and the code layout. Issues and pull requests are welcome.
 
 ## License
 
