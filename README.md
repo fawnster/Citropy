@@ -109,6 +109,7 @@ npm start             # web interface at http://127.0.0.1:4177
 npm run typecheck     # TypeScript
 npm test              # test suite
 npm run build         # production web bundle
+npm run screenshots   # regenerate the images in docs/assets
 ```
 
 `npm run desktop:dev` uses separate data in `~/.citropy-dev`, a **Citropy Dev** desktop profile, and backend port 4178. The live interface runs on port 5177. Development controls stay out of normal builds.

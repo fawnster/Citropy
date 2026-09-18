@@ -24,7 +24,8 @@
     "desktop:dev": "node desktop/start.mjs --dev",
     "desktop:install": "node desktop/install.mjs",
     "desktop:package": "node desktop/package.mjs",
-    "desktop:smoke": "node desktop/smoke.mjs"
+    "desktop:smoke": "node desktop/smoke.mjs",
+    "screenshots": "node tests/screenshots.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist-mono": "5.3.0",

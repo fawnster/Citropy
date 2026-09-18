@@ -97,7 +97,7 @@
   margin-bottom: 16px;
 }
 .feature-section-heading h2,
-.allowance h3 {
+.allowance-provider h3 {
   font-size: var(--text-body);
   font-weight: 500;
 }
@@ -552,68 +552,71 @@
 .usage-metrics strong {
   font-size: 21px;
 }
-.allowance-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(230px, 100%), 1fr));
-  gap: 16px;
+.allowance-list {
+  padding: 4px 20px 14px;
   margin-bottom: 16px;
-}
-.allowance {
-  padding: 22px;
   background: var(--panel);
-  border: 0;
   border-radius: var(--r-lg);
 }
-.allowance h3 {
+.allowance-provider {
+  padding: 14px 0 8px;
+}
+.allowance-provider + .allowance-provider {
+  border-top: 1px solid var(--line);
+}
+.allowance-provider h3 {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 22px;
+  gap: 9px;
+  margin-bottom: 2px;
 }
-.allowance > small {
-  display: block;
-  margin-top: 18px;
-  color: var(--text-4);
-  font-size: var(--text-xs);
+.allowance-row {
+  display: grid;
+  grid-template-columns: 120px minmax(140px, 1fr) 58px 150px;
+  align-items: center;
+  gap: 14px;
+  padding: 7px 0;
 }
-.allowance-window {
-  margin-bottom: 20px;
-}
-.allowance-window > div {
-  display: flex;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: var(--text-sm);
-}
-.allowance-window > div > span {
+.allowance-window-name {
+  overflow: hidden;
   color: var(--text-2);
-}
-.allowance-window strong {
-  font-weight: 500;
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.allowance-window progress {
+.allowance-row progress {
   display: block;
   appearance: none;
   width: 100%;
   height: 5px;
-  margin: 12px 0 8px;
   border: 0;
   border-radius: 4px;
   overflow: hidden;
   background: var(--raised-2);
   accent-color: var(--web-icon);
 }
-.allowance-window progress::-webkit-progress-bar {
+.allowance-row progress::-webkit-progress-bar {
   background: var(--raised-2);
 }
-.allowance-window progress::-webkit-progress-value {
+.allowance-row progress::-webkit-progress-value {
   background: var(--web-icon);
   border-radius: 4px;
 }
-.allowance-window small {
-  font-size: var(--text-xs);
+.allowance-row progress[data-low="true"]::-webkit-progress-value {
+  background: var(--warn);
+}
+.allowance-row strong {
+  font-weight: 500;
+  text-align: right;
+  white-space: nowrap;
+}
+.allowance-row small {
+  overflow: hidden;
   color: var(--text-3);
+  font-size: var(--text-xs);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .attachments {
   display: flex;

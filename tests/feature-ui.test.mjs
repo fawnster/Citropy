@@ -133,7 +133,7 @@ test(
                     usedPercent: 24,
                     resetsAt: Date.now() + 3600000,
                   },
-                  { label: "Weekly", usedPercent: 40 },
+                  { label: "Weekly", usedPercent: 88 },
                 ],
               },
             ],
@@ -381,6 +381,8 @@ test(
     await page.getByRole("button", { name: "Close", exact: true }).click();
     await page.getByRole("button", { name: "Usage", exact: true }).click();
     await page.getByText("76% left", { exact: true }).waitFor();
+    await page.getByText("12% left", { exact: true }).waitFor();
+    await page.getByText(/^Resets \d/).waitFor();
     await page.screenshot({
       animations: "disabled",
       path: "/tmp/citropy-feature-usage.png",

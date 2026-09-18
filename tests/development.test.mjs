@@ -53,8 +53,10 @@ test("application-menu launchers keep public and development identities separate
   const development = readFileSync(join(directory, "applications/citropy-dev.desktop"), "utf8");
   assert.match(production, /Name=Citropy\n/);
   assert.doesNotMatch(production, /--dev/);
+  assert.match(production, /Icon=.*citropy\.png\n/);
   assert.match(development, /Name=Citropy Dev\n/);
   assert.match(development, /--dev/);
+  assert.match(development, /Icon=.*citropy-dev\.png\n/);
 });
 
 test("development serves an isolated live interface and exposes its controls", { timeout: 60000 }, async t => {

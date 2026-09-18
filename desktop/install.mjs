@@ -18,10 +18,11 @@ const quote = (value) =>
 const development = process.argv.includes("--dev");
 const name = development ? "Citropy Dev" : "Citropy";
 const mode = development ? " --dev" : "";
+const icon = join(root, "desktop/assets", development ? "citropy-dev.png" : "citropy.png");
 const path = join(directory, development ? "citropy-dev.desktop" : "citropy.desktop");
 writeFileSync(
   path,
-  `[Desktop Entry]\nType=Application\nName=${name}\nComment=Your workspace for AI conversations and code\nExec=${quote(process.execPath)} ${quote(join(root, "desktop/start.mjs"))}${mode}\nPath=${root}\nIcon=${join(root, "desktop/assets/citropy.png")}\nTerminal=false\nCategories=Development;IDE;\nStartupWMClass=${name}\n`,
+  `[Desktop Entry]\nType=Application\nName=${name}\nComment=Your workspace for AI conversations and code\nExec=${quote(process.execPath)} ${quote(join(root, "desktop/start.mjs"))}${mode}\nPath=${root}\nIcon=${icon}\nTerminal=false\nCategories=Development;IDE;\nStartupWMClass=${name}\n`,
   { mode: 0o755 },
 );
 chmodSync(path, 0o755);

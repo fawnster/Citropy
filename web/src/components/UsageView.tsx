@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { BarChart3, RefreshCw } from "lucide-react";
 import { api } from "../lib/api.ts";
-import { tokens, cost, providerLabels } from "../lib/format.ts";
+import { clock, cost, providerLabels, tokens, until } from "../lib/format.ts";
 import { ProviderIcon } from "./ProviderIcon.tsx";
 import { SectionSidebar } from "./SectionSidebar.tsx";
 import type { UsageReport } from "../../../shared/features.ts";
@@ -36,6 +36,9 @@ export function UsageView({
       });
     return () => controller.abort();
   }, [revision]);
+  const updated = data
+    ? Math.max(0, ...data.providers.map((entry) => entry.updatedAt))
+    : 0;
   return (
     <section className="section-view" aria-label={t("Usage")}>
       <SectionSidebar activeItem="usage" open={sidebarOpen} title={t("Usage")} onBack={onBack} navigation={navigation}>
@@ -73,12 +76,15 @@ export function UsageView({
             data && (
               <div className="feature-stack">
                 <section>
-                  <h2 className="settings-group-heading">
-                    {t("Remaining allowance")}
-                  </h2>
-                  <div className="allowance-grid">
+                  <div className="feature-section-heading">
+                    <h2>{t("Remaining allowance")}</h2>
+                    {updated > 0 && (
+                      <span>{t("Updated {time}", { time: clock(updated) })}</span>
+                    )}
+                  </div>
+                  <div className="allowance-list">
                     {data.providers.map((entry) => (
-                      <article className="allowance" key={entry.provider}>
+                      <article className="allowance-provider" key={entry.provider}>
                         <h3>
                           <ProviderIcon provider={entry.provider} />
                           {providerLabels[entry.provider]}
@@ -88,37 +94,39 @@ export function UsageView({
                             const hours = /^(\d+(?:\.\d+)?) hours$/.exec(part);
                             return hours ? t("{hours} hours", { hours: hours[1]! }) : t(part);
                           }).join(" · ");
+                          const remaining = Math.max(0, 100 - window.usedPercent);
                           return (
-                          <div className="allowance-window" key={window.label}>
-                            <div>
-                              <span>{label}</span>
+                            <div className="allowance-row" key={window.label}>
+                              <span className="allowance-window-name" title={label}>
+                                {label}
+                              </span>
+                              <progress
+                                value={remaining}
+                                max={100}
+                                aria-label={t("{period} remaining", { period: label })}
+                                data-low={remaining <= 20 ? "true" : undefined}
+                              />
                               <strong>
-                                {Math.max(0, 100 - window.usedPercent).toFixed(
-                                  0,
-                                )}
+                                {remaining.toFixed(0)}
                                 {t("% left")}
                               </strong>
+                              <small
+                                title={
+                                  window.resetsAt
+                                    ? new Date(window.resetsAt).toLocaleString(currentLocale())
+                                    : undefined
+                                }
+                              >
+                                {window.resetsAt
+                                  ? t("Resets {when}", { when: until(window.resetsAt) })
+                                  : t("Reset time not reported")}
+                              </small>
                             </div>
-                            <progress
-                              value={Math.max(0, 100 - window.usedPercent)}
-                              max={100}
-                              aria-label={t("{period} remaining", { period: label })}
-                            />
-                            <small>
-                              {window.resetsAt
-                                ? t("Resets {date}", { date: new Date(window.resetsAt).toLocaleString(currentLocale()) })
-                                : t("Reset time not reported")}
-                            </small>
-                          </div>
                           );
                         })}
                         {entry.error && (
                           <p className="feature-note">{t(entry.error)}</p>
                         )}
-                        <small>
-                          {t("Checked")}{" "}
-                          {new Date(entry.updatedAt).toLocaleTimeString(currentLocale())}
-                        </small>
                       </article>
                     ))}
                   </div>

@@ -719,7 +719,7 @@ app
       minWidth,
       minHeight,
       title: appName,
-      icon: fileURLToPath(new URL("./assets/citropy.png", import.meta.url)),
+      icon: fileURLToPath(new URL(`./assets/${development ? "citropy-dev" : "citropy"}.png`, import.meta.url)),
       frame: false,
       ...(process.platform === "darwin"
         ? { titleBarStyle: "hidden", trafficLightPosition: { x: 15, y: 20 } }
