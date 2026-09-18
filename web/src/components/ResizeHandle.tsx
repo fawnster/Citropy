@@ -1,6 +1,7 @@
 import { useI18n } from "../lib/i18n.ts";
 import { useEffect, useRef, useState } from "react";
 import {
+  scaled,
   setPanelWidth,
   useApp,
   viewportWidth,
@@ -134,7 +135,7 @@ export function ResizeHandle({
           frame.current = 0;
           if (drag.current !== current) return;
           const next = clamp(current.width + direction * (current.pointerX - current.x) / (uiScale / 100));
-          current.root.style.setProperty(property, `${next}px`);
+          current.root.style.setProperty(property, `${scaled(next)}px`);
         });
       }}
       onPointerUp={(event) => {

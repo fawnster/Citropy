@@ -246,6 +246,7 @@
   gap: 6px;
   width: 100%;
   padding: 7px 8px;
+  padding-left: calc(8px + var(--depth, 0) * 13px);
   border-radius: var(--r-xs);
   color: var(--text-2);
   font-size: var(--text-sm);

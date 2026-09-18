@@ -5,7 +5,7 @@ import { ChevronDown } from "./icons.ts";
 import { MessageBlock } from "./MessageBlock.tsx";
 import { MessageNavigator } from "./MessageNavigator.tsx";
 import { Working } from "./Working.tsx";
-import { useApp } from "../lib/store.ts";
+import { scaled, useApp } from "../lib/store.ts";
 import { loadThread, refreshGit } from "../lib/actions.ts";
 import { useStickToBottom } from "../lib/use-stick.ts";
 import {
@@ -64,6 +64,7 @@ export function Conversation() {
   const connected = useApp((state) => state.connected);
   const loaded = useApp((state) => Boolean(threadId && state.loaded[threadId]));
   const followRequest = useApp((state) => state.followRequest);
+  const uiScale = useApp((state) => state.uiScale);
   const [selectedMessageId, setSelectedMessageId] = useState<string>();
   const {
     viewport,
@@ -79,9 +80,9 @@ export function Conversation() {
     count: rows.length,
     getScrollElement: () => viewport.current,
     getItemKey,
-    estimateSize: () => 180,
-    initialOffset: () => viewport.current?.scrollTop ?? rows.length * 180,
-    paddingStart: 30,
+    estimateSize: () => scaled(180),
+    initialOffset: () => viewport.current?.scrollTop ?? rows.length * scaled(180),
+    paddingStart: scaled(30),
     overscan: virtualized ? 4 : 40,
     measureElement: (element) => element.offsetHeight,
   });
@@ -104,6 +105,10 @@ export function Conversation() {
     setSelectedMessageId(undefined);
     scrollToBottom("auto");
   }, [threadId, followRequest, scrollToBottom]);
+
+  useLayoutEffect(() => {
+    if (atBottom) scrollToBottom("instant");
+  }, [uiScale, atBottom, scrollToBottom]);
 
   useLayoutEffect(() => {
     const update = () => {
@@ -189,7 +194,7 @@ export function Conversation() {
         const row = element?.closest<HTMLElement>(".timeline-row");
         const item = timeline.getVirtualItems().find(item => item.index === index);
         if (!element || !row || !item) return;
-        const offset = item.start + (element.getBoundingClientRect().top - row.getBoundingClientRect().top) / (useApp.getState().uiScale / 100) - 16;
+        const offset = item.start + element.getBoundingClientRect().top - row.getBoundingClientRect().top - scaled(16);
         timeline.scrollToOffset(offset, { align: "start" });
         element.querySelector<HTMLButtonElement>(".tool-head")?.focus({ preventScroll: true });
         useApp.setState({ searchShellId: null });

@@ -24,7 +24,7 @@ import { SubagentsPane } from "./SubagentsPane.tsx";
 import { ToolsPane } from "./ToolsPane.tsx";
 import { ComputerPane } from "./ComputerPane.tsx";
 import { Menu } from "./Menu.tsx";
-import { selectPanel, useApp } from "../lib/store.ts";
+import { scaled, selectPanel, useApp } from "../lib/store.ts";
 import { openWorkbenchPanel } from "../lib/actions.ts";
 import { send } from "../lib/socket.ts";
 import type { PanelKind } from "../../../shared/workbench.ts";
@@ -90,8 +90,10 @@ export function Inspector({ visible }: { visible: boolean }) {
     projectId && tabs.some((panel) => panel.id === activePanels[projectId])
       ? activePanels[projectId]
       : tabs[0]?.id;
-  const tabLimit = tabWidth > 0 && tabs.length * 52 - 4 > tabWidth
-    ? Math.max(1, Math.floor((tabWidth - 32) / 52))
+  const tabGap = scaled(4);
+  const tabSpan = scaled(48) + tabGap;
+  const tabLimit = tabWidth > 0 && tabs.length * tabSpan - tabGap > tabWidth
+    ? Math.max(1, Math.floor((tabWidth - scaled(32)) / tabSpan))
     : tabs.length;
   const visibleTabs = tabs.slice(0, tabLimit);
   const selectedTab = tabs.find(panel => panel.id === activeId);

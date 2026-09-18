@@ -1,6 +1,6 @@
 import { useLayoutEffect, useRef } from "react";
 import type { ThreadMeta } from "../../../shared/protocol.ts";
-import { useApp, viewportWidth } from "../lib/store.ts";
+import { scaled, useApp, viewportWidth } from "../lib/store.ts";
 import { modelLabel, providerLabels, shortPath, threadActivity } from "../lib/format.ts";
 import { currentLocale, useI18n } from "../lib/i18n.ts";
 import { ProviderIcon } from "./ProviderIcon.tsx";
@@ -33,15 +33,15 @@ export function ThreadPreview({ id, thread, anchor, onClose, onPointerEnter, onP
       const scale = uiScale / 100;
       const bounds = anchor.getBoundingClientRect();
       const width = Math.min(300, viewportWidth() - 24);
-      element.style.width = `${width}px`;
-      const height = element.offsetHeight;
+      element.style.width = `${scaled(width)}px`;
+      const height = element.offsetHeight / scale;
       const viewportHeight = innerHeight / scale;
       const beside = bounds.right / scale + width + 20 <= viewportWidth();
       const left = beside ? bounds.right / scale + 8 : bounds.left / scale;
       const top = beside ? bounds.top / scale
         : bounds.bottom / scale + height + 20 <= viewportHeight ? bounds.bottom / scale + 8 : bounds.top / scale - height - 8;
-      element.style.left = `${Math.max(12, Math.min(left, viewportWidth() - width - 12))}px`;
-      element.style.top = `${Math.max(12, Math.min(top, viewportHeight - height - 12))}px`;
+      element.style.left = `${scaled(Math.max(12, Math.min(left, viewportWidth() - width - 12)))}px`;
+      element.style.top = `${scaled(Math.max(12, Math.min(top, viewportHeight - height - 12)))}px`;
     };
     position();
     const resize = new ResizeObserver(position);

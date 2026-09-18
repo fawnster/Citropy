@@ -8,6 +8,7 @@ import { useDisclosure } from "../lib/use-disclosure.ts";
 import { FileIcon } from "./FileIcon.tsx";
 import { MessageSquarePlus } from "lucide-react";
 import type { FilePatch, PatchLine } from "../../../shared/protocol.ts";
+import { scaled } from "../lib/store.ts";
 
 interface Props {
   patch: FilePatch;
@@ -75,7 +76,7 @@ export function DiffView({ patch, limit = 26, showHeader = true, partId, expande
     count: visible.length,
     getScrollElement: () => viewport.current,
     getItemKey,
-    estimateSize: () => 22,
+    estimateSize: () => scaled(22),
     overscan: 5,
     measureElement: (element) => element.offsetHeight,
   });

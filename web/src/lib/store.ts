@@ -942,6 +942,10 @@ export function markTextPresented(id: string): void {
   });
 }
 
+export function scaled(value: number): number {
+  return Math.round((value * useApp.getState().uiScale) / 100);
+}
+
 export function viewportWidth(): number {
   return window.innerWidth / (useApp.getState().uiScale / 100);
 }

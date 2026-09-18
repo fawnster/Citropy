@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from "react";
+import { memo, useMemo, useState, type CSSProperties } from "react";
 import { useApp } from "../lib/store.ts";
 import { clock, modelLabel } from "../lib/format.ts";
 import type { TimelineRow } from "../lib/timeline.ts";
@@ -30,7 +30,7 @@ export const MessageNavigator = memo(function MessageNavigator({
     >
       <div
         className="message-nav-track"
-        style={{ height: Math.min(480, messages.length * 16) }}
+        style={{ "--count": messages.length } as CSSProperties}
         onBlur={(event) => {
           if (!event.currentTarget.contains(event.relatedTarget))
             setPreview(undefined);
@@ -81,9 +81,7 @@ export const MessageNavigator = memo(function MessageNavigator({
             className="message-nav-preview"
             id="message-nav-preview"
             role="tooltip"
-            style={{
-              top: `clamp(0px, ${((previewIndex + 0.5) / messages.length) * 100}%, calc(100% - 100px))`,
-            }}
+            style={{ "--position": `${((previewIndex + 0.5) / messages.length) * 100}%` } as CSSProperties}
           >
             <MessagePreview messageId={preview} index={previewIndex} />
           </div>

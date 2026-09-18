@@ -572,7 +572,7 @@ app.whenReady().then(() => {
     await page.locator('[data-part-id="greeting-text"] p').waitFor();
     const padding = await page.locator("#message-greeting .user-card").evaluate((node) => {
       const p = node.querySelector("p");
-      return node.offsetHeight - p.offsetHeight;
+      return (node.offsetHeight - p.offsetHeight) / 1.2;
     });
     assert.ok(padding <= 26, `Short user messages have ${padding}px of vertical space beyond their text.`);
     await page.locator("#message-reply .turn-heading strong").getByText("Claude Sonnet 5", { exact: true }).waitFor();

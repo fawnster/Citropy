@@ -1,7 +1,7 @@
 :root {
   --ui-scale: 1.2;
-  --viewport-width: calc(100vw / var(--ui-scale));
-  --viewport-height: calc(100dvh / var(--ui-scale));
+  --viewport-width: 100vw;
+  --viewport-height: 100dvh;
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
   --dur-instant: 90ms;

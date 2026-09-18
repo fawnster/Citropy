@@ -4,6 +4,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useHighlightedLines } from "../lib/use-highlighted-lines.ts";
 import { escapeHtml } from "../lib/highlight.ts";
 import { langFor } from "../lib/format.ts";
+import { scaled } from "../lib/store.ts";
 
 export function SourceView({ text, path }: { text: string; path: string }) {
   const t = useI18n();
@@ -13,7 +14,7 @@ export function SourceView({ text, path }: { text: string; path: string }) {
   const list = useVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: lines.length,
     getScrollElement: () => viewport.current,
-    estimateSize: () => 22,
+    estimateSize: () => scaled(22),
     overscan: 8,
     measureElement: (element) => element.offsetHeight,
   });

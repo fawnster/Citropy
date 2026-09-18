@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "re
 import { AnimatePresence, motion } from "motion/react";
 import { Check, Copy, ExternalLink, Square, Terminal, X } from "lucide-react";
 import type { NotificationTarget, ShellProcess } from "../../../shared/protocol.ts";
-import { selectPanel, useApp, viewportWidth } from "../lib/store.ts";
+import { scaled, selectPanel, useApp, viewportWidth } from "../lib/store.ts";
 import { api } from "../lib/api.ts";
 import { useI18n } from "../lib/i18n.ts";
 import { useReducedMotion } from "../lib/use-reduced-motion.ts";
@@ -65,10 +65,10 @@ function ShellsPanel({ id, trigger, onClose, onOpen }: {
       if (!anchor) return;
       const scale = uiScale / 100;
       const width = Math.min(420, viewportWidth() - 24);
-      element.style.width = `${width}px`;
-      element.style.left = `${Math.max(12, Math.min(anchor.right / scale - width, viewportWidth() - width - 12))}px`;
-      element.style.top = `${anchor.bottom / scale + 10}px`;
-      element.style.maxHeight = `${Math.max(0, (innerHeight - anchor.bottom) / scale - 22)}px`;
+      element.style.width = `${scaled(width)}px`;
+      element.style.left = `${scaled(Math.max(12, Math.min(anchor.right / scale - width, viewportWidth() - width - 12)))}px`;
+      element.style.top = `${scaled(anchor.bottom / scale + 10)}px`;
+      element.style.maxHeight = `${scaled(Math.max(0, (innerHeight - anchor.bottom) / scale - 22))}px`;
     };
     position();
     const resize = new ResizeObserver(position);

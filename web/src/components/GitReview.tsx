@@ -6,6 +6,7 @@ import { fetchDiff, manageGit } from "../lib/actions.ts";
 import { DiffView } from "./DiffView.tsx";
 import type { FilePatch } from "../../../shared/protocol.ts";
 import { useI18n } from "../lib/i18n.ts";
+import { scaled } from "../lib/store.ts";
 
 export type GitSelection =
   | { kind: "file"; path: string; staged: boolean }
@@ -36,7 +37,7 @@ export function GitReview({
     count: selection.kind === "file" ? 0 : patches.length + Number(Boolean(body)),
     getScrollElement: () => viewport.current,
     getItemKey,
-    estimateSize: () => 600,
+    estimateSize: () => scaled(600),
     overscan: 1,
     measureElement: (element) => element.offsetHeight,
   });

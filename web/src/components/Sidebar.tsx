@@ -35,7 +35,7 @@ import {
   removeThread,
   finishThread,
 } from "../lib/actions.ts";
-import { selectProject, selectThread, useApp } from "../lib/store.ts";
+import { scaled, selectProject, selectThread, useApp } from "../lib/store.ts";
 import { modelLabel, threadActivity } from "../lib/format.ts";
 import { currentLocale, useI18n } from "../lib/i18n.ts";
 
@@ -185,7 +185,7 @@ export function Sidebar({
     enabled: virtualized,
     getScrollElement: () => viewport.current,
     getItemKey,
-    estimateSize: (index) => rows[index]?.thread ? 96 : 40,
+    estimateSize: (index) => scaled(rows[index]?.thread ? 96 : 40),
     measureElement: (element) => element.offsetHeight,
     overscan: 3,
     rangeExtractor: useCallback((range: Range) => [...new Set([
@@ -253,7 +253,6 @@ export function Sidebar({
     const sourceIndex = indices.get(thread.id)!;
     const pointerId = event.pointerId;
     const startX = event.clientX, startY = event.clientY, startScroll = scroll.scrollTop;
-    const scale = uiScale / 100;
     dragHeight.current = element.parentElement!.offsetHeight;
     let x = startX, y = startY, active = false, frame = 0, lastTime = performance.now();
     let drop: typeof dropTarget;
@@ -274,12 +273,12 @@ export function Sidebar({
       const before = scroll.scrollTop;
       if (inside && distance) {
         const step = Math.max(-16, Math.min(16, distance * 0.4)) * Math.min(32, now - lastTime) / 16;
-        const minimum = first ? Math.min(0, (first.rect.top - bounds.top) / scale) : -Infinity;
-        const maximum = last ? Math.max(0, (last.rect.bottom - bounds.bottom) / scale) : Infinity;
+        const minimum = first ? Math.min(0, first.rect.top - bounds.top) : -Infinity;
+        const maximum = last ? Math.max(0, last.rect.bottom - bounds.bottom) : Infinity;
         scroll.scrollTop += Math.max(minimum, Math.min(maximum, step));
       }
       lastTime = now;
-      const scrolled = (scroll.scrollTop - before) * scale;
+      const scrolled = scroll.scrollTop - before;
       let next: typeof dropTarget;
       if (inside) {
         for (const { id, index, rect } of entries) {
@@ -296,9 +295,9 @@ export function Sidebar({
       const sourceTop = source.rect.top - scrolled;
       const minimum = Math.max(bounds.top, first ? first.rect.top - scrolled : -Infinity);
       const maximum = Math.max(minimum, Math.min(bounds.bottom, last ? last.rect.bottom - scrolled : Infinity) - source.rect.height);
-      const top = sourceTop + y - startY + (scroll.scrollTop - startScroll) * scale;
+      const top = sourceTop + y - startY + scroll.scrollTop - startScroll;
       const clamped = Math.max(minimum, Math.min(maximum, top));
-      element.style.setProperty("--thread-drag-y", `${(clamped - sourceTop) / scale}px`);
+      element.style.setProperty("--thread-drag-y", `${clamped - sourceTop}px`);
       if (drop?.id !== next?.id || drop?.edge !== next?.edge) {
         drop = next;
         setDropTarget(next);

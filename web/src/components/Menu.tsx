@@ -12,7 +12,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "../lib/use-reduced-motion.ts";
 import { Check, ChevronRight } from "./icons.ts";
 
-import { useApp, viewportWidth } from "../lib/store.ts";
+import { scaled, useApp, viewportWidth } from "../lib/store.ts";
 
 export interface MenuItem {
   id: string;
@@ -103,16 +103,16 @@ export function Menu({
       const anchorLeft = bounds.left / scale;
       const menuWidth = Math.min(width, viewportWidth() - 24);
       const preferred = align === "end" ? bounds.right / scale - menuWidth : anchorLeft;
-      element.style.width = `${menuWidth}px`;
+      element.style.width = `${scaled(menuWidth)}px`;
       element.style.maxHeight = "";
-      const height = element.offsetHeight;
+      const height = element.offsetHeight / scale;
       const above = Math.max(0, bounds.top / scale - 18);
       const below = Math.max(0, (innerHeight - bounds.bottom) / scale - 18);
       const upwards = height > below && above > below;
       const available = upwards ? above : below;
-      element.style.maxHeight = `${available}px`;
-      element.style.left = `${Math.max(12, Math.min(preferred, viewportWidth() - menuWidth - 12))}px`;
-      element.style.top = `${upwards ? bounds.top / scale - Math.min(height, available) - 6 : bounds.bottom / scale + 6}px`;
+      element.style.maxHeight = `${scaled(available)}px`;
+      element.style.left = `${scaled(Math.max(12, Math.min(preferred, viewportWidth() - menuWidth - 12)))}px`;
+      element.style.top = `${scaled(upwards ? bounds.top / scale - Math.min(height, available) - 6 : bounds.bottom / scale + 6)}px`;
     };
     position();
     if (searchable) {
@@ -191,10 +191,7 @@ export function Menu({
             className={`menu ${className}`}
             popover="manual"
             data-align={align}
-            style={{
-              width,
-              maxWidth: "calc(var(--viewport-width) - 24px)",
-            }}
+            style={{ width: scaled(width) }}
             role="menu"
             aria-labelledby={anchor ? undefined : id}
             aria-label={anchor ? header : undefined}

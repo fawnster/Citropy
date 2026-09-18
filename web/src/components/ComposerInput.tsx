@@ -11,7 +11,7 @@ import type { ThreadMeta } from "../../../shared/protocol.ts";
 import type { ProviderCommand, SkillInfo } from "../../../shared/features.ts";
 import { api } from "../lib/api.ts";
 import { providerLabels } from "../lib/format.ts";
-import { useApp } from "../lib/store.ts";
+import { scaled, useApp } from "../lib/store.ts";
 import { useI18n } from "../lib/i18n.ts";
 
 export function ComposerInput({
@@ -56,7 +56,7 @@ export function ComposerInput({
     const node = box.current;
     if (!node) return;
     node.style.height = "0px";
-    node.style.height = `${Math.min(node.scrollHeight, 320)}px`;
+    node.style.height = `${Math.min(node.scrollHeight, scaled(320))}px`;
     if (highlights.current) highlights.current.scrollTop = node.scrollTop;
   }, [value]);
   useEffect(() => {

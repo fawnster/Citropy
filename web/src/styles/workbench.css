@@ -394,7 +394,6 @@
   flex: 1;
   min-width: 0;
   min-height: 0;
-  zoom: calc(1 / var(--ui-scale));
 }
 .subagents-pane,
 .tools-pane {

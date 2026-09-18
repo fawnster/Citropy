@@ -68,6 +68,7 @@
   transition: opacity 220ms var(--ease-out);
 }
 .composer-shell:focus-within .composer-focus-ring { opacity: 1; }
+.composer-focus-ring rect { rx: 14px; }
 .composer-focus-track {
   stroke: var(--text-3);
   stroke-opacity: 0.12;
@@ -176,6 +177,7 @@
   flex-direction: column;
   overflow: hidden;
   z-index: 60;
+  max-width: calc(var(--viewport-width) - 24px);
   padding: 8px;
   border-radius: var(--r-md);
   border: 0;

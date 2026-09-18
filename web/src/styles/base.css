@@ -12,8 +12,11 @@ body,
   height: 100%;
 }
 
+html {
+  font-size: calc(1rem * var(--ui-scale));
+}
+
 #root {
-  zoom: var(--ui-scale, 1.2);
   height: var(--viewport-height);
   container: application / inline-size;
 }
@@ -33,6 +36,28 @@ body {
   overscroll-behavior: none;
   user-select: none;
 }
+
+:where(svg, img)[width="11"] { width: 11px; height: 11px; }
+:where(svg, img)[width="12"] { width: 12px; height: 12px; }
+:where(svg, img)[width="13"] { width: 13px; height: 13px; }
+:where(svg, img)[width="14"] { width: 14px; height: 14px; }
+:where(svg, img)[width="15"] { width: 15px; height: 15px; }
+:where(svg, img)[width="16"] { width: 16px; height: 16px; }
+:where(svg, img)[width="17"] { width: 17px; height: 17px; }
+:where(svg, img)[width="18"] { width: 18px; height: 18px; }
+:where(svg, img)[width="19"] { width: 19px; height: 19px; }
+:where(svg, img)[width="20"] { width: 20px; height: 20px; }
+:where(svg, img)[width="21"] { width: 21px; height: 21px; }
+:where(svg, img)[width="22"] { width: 22px; height: 22px; }
+:where(svg, img)[width="24"] { width: 24px; height: 24px; }
+:where(svg, img)[width="25"] { width: 25px; height: 25px; }
+:where(svg, img)[width="26"] { width: 26px; height: 26px; }
+:where(svg, img)[width="27"] { width: 27px; height: 27px; }
+:where(svg, img)[width="28"] { width: 28px; height: 28px; }
+:where(svg, img)[width="30"] { width: 30px; height: 30px; }
+:where(svg, img)[width="34"] { width: 34px; height: 34px; }
+:where(svg, img)[width="36"] { width: 36px; height: 36px; }
+:where(svg, img)[width="38"] { width: 38px; height: 38px; }
 
 .sliding-selection { position: relative; isolation: isolate; }
 .selection-highlight {

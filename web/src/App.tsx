@@ -73,6 +73,7 @@ export function App() {
   const sidebarOpen = useApp((state) => state.sidebarOpen);
   const inspectorOpen = useApp((state) => state.inspectorOpen);
   const panelWidths = useApp((state) => state.panelWidths);
+  const uiScale = useApp((state) => state.uiScale);
   const activeThreadId = useApp((state) => state.activeThreadId);
   const activeProjectId = useApp((state) => state.activeProjectId);
   const githubStatus = useGitHub("status", {
@@ -222,7 +223,7 @@ export function App() {
         Object.fromEntries(
           Object.entries(panelWidths).map(([panel, width]) => [
             `--${panel}-width`,
-            `${width}px`,
+            `${Math.round((width * uiScale) / 100)}px`,
           ]),
         ) as CSSProperties
       }

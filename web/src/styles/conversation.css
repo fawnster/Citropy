@@ -68,6 +68,7 @@
   display: flex;
   flex-direction: column;
   width: 100%;
+  height: min(480px, calc(var(--count) * 16px));
   max-height: 85%;
 }
 .message-nav-stop {
@@ -103,6 +104,7 @@
 }
 .message-nav-preview {
   position: absolute;
+  top: clamp(0px, var(--position), calc(100% - 100px));
   left: calc(100% + 6px);
   width: min(280px, calc(100cqw - 60px));
   padding: 12px 14px;
@@ -653,8 +655,6 @@
   grid-template-rows: repeat(3, 4px);
   flex: none;
   gap: 2px;
-  width: 16px;
-  height: 16px;
 }
 
 .working-grid i {

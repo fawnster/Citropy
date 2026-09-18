@@ -1,5 +1,5 @@
 import { useI18n } from "../lib/i18n.ts";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { ChevronRight, Folder, FolderOpen } from "./icons.ts";
 import { FileIcon } from "./FileIcon.tsx";
 import { fetchTree } from "../lib/actions.ts";
@@ -41,7 +41,7 @@ function Node({ entry, depth, projectId, onOpen }: NodeProps) {
       <button
         type="button"
         className="tree-row"
-        style={{ paddingLeft: 8 + depth * 13 }}
+        style={{ "--depth": depth } as CSSProperties}
         onClick={() => onOpen(entry.path)}
       >
         <span className="tree-spacer" />
@@ -56,7 +56,7 @@ function Node({ entry, depth, projectId, onOpen }: NodeProps) {
       <button
         type="button"
         className="tree-row"
-        style={{ paddingLeft: 8 + depth * 13 }}
+        style={{ "--depth": depth } as CSSProperties}
         onClick={() => setOpen((value) => !value)}
       >
         <ChevronRight size={11} className="tree-chevron" data-open={open} />

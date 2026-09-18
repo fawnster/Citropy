@@ -6,7 +6,7 @@ import { DiffView } from "./DiffView.tsx";
 import { FileIcon } from "./FileIcon.tsx";
 import { groupGitFiles } from "../lib/git-files.ts";
 import { commitAll, discardFile, fetchDiff, refreshGit } from "../lib/actions.ts";
-import { useApp } from "../lib/store.ts";
+import { scaled, useApp } from "../lib/store.ts";
 import { useI18n } from "../lib/i18n.ts";
 import type { FilePatch, GitFile } from "../../../shared/protocol.ts";
 
@@ -104,7 +104,7 @@ export function Changes() {
     count: rows.length,
     getScrollElement: () => viewport.current,
     getItemKey,
-    estimateSize: () => 34,
+    estimateSize: () => scaled(34),
     overscan: 4,
     measureElement: (element) => element.offsetHeight,
   });

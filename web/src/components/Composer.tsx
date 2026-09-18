@@ -389,8 +389,8 @@ export function Composer({
         }}
       >
         <svg className="composer-focus-ring" aria-hidden="true">
-          <rect className="composer-focus-track" x="0.5" y="0.5" width="calc(100% - 1px)" height="calc(100% - 1px)" rx="14" />
-          <rect className="composer-focus-trace" x="0.5" y="0.5" width="calc(100% - 1px)" height="calc(100% - 1px)" rx="14" pathLength="100" />
+          <rect className="composer-focus-track" x="0.5" y="0.5" width="calc(100% - 1px)" height="calc(100% - 1px)" />
+          <rect className="composer-focus-trace" x="0.5" y="0.5" width="calc(100% - 1px)" height="calc(100% - 1px)" pathLength="100" />
         </svg>
         {thread.finished && !running && (
           <div className="composer-finished" role="status">
