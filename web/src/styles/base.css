@@ -358,6 +358,20 @@ kbd {
 .file-type-icon[data-tone="pink"] { color: light-dark(#aa438b, #dd90c7); }
 .file-type-icon[data-tone="neutral"] { color: var(--text-3); }
 
+.experimental-tag {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 1px 5px;
+  border-radius: var(--r-xs);
+  background: var(--raised-2);
+  color: var(--text-3);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

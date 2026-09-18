@@ -28,6 +28,7 @@ import { ComputerSettings } from "./ComputerSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
 import { AssistanceSettings } from "./AssistanceSettings.tsx";
 import { AppUpdateControl } from "./AppUpdateControl.tsx";
+import { ExperimentalTag } from "./ExperimentalTag.tsx";
 import { SectionSidebar } from "./SectionSidebar.tsx";
 import {
   setTheme,
@@ -260,7 +261,7 @@ export function Settings({
               <div className="settings-group">
                 <label className="setting-row">
                   <span>
-                    <strong>{t("Language")}</strong>
+                    <strong>{t("Language")} <ExperimentalTag /></strong>
                     <small>{t("Choose the language used in Citropy.")}</small>
                   </span>
                   <select value={language} onChange={(event) => setLanguage(event.target.value as "en" | "es")}>

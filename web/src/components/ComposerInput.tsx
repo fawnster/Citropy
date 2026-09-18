@@ -52,9 +52,6 @@ export function ComposerInput({
   const catalogMode = mode === "commands"
     ? "commands"
     : mode === "skills" || hasMentions ? "skills" : undefined;
-  useEffect(() => {
-    box.current?.focus();
-  }, [thread.id]);
   useLayoutEffect(() => {
     const node = box.current;
     if (!node) return;

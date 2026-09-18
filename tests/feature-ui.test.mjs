@@ -244,6 +244,12 @@ test(
       .getByRole("button", { name: "Create conversation", exact: true })
       .click();
     await page.getByLabel("Message", { exact: true }).waitFor();
+    assert.equal(
+      await page
+        .getByLabel("Message", { exact: true })
+        .evaluate((node) => node === document.activeElement),
+      false,
+    );
     const thread = [...store.threads.values()][0];
     assert.equal(thread.workspaceBranch, "feature/attachments");
     const png = Buffer.from(
@@ -502,6 +508,7 @@ test(
     assert.equal(await folder.getByLabel("Use global model and effort", { exact: true }).isChecked(), true);
     await page.screenshot({ path: "/tmp/citropy-project-settings-overview.png", animations: "disabled" });
     await page.getByRole("button", { name: "General", exact: true }).click();
+    assert.equal(await page.getByText("Experimental", { exact: true }).count(), 1);
     await page.locator(".setting-row select").first().selectOption("es");
     await page.locator('.section-link[data-settings-section="projects"]').click();
     await page.getByRole("heading", { name: "Valores globales", exact: true }).waitFor();
