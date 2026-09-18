@@ -18,6 +18,9 @@ test("navigation stays bounded and motion releases its resources", { timeout: 12
   await server.listen();
   const browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); await server.close(); await rm(cacheDir, { recursive: true, force: true }); });
+  const warmup = await browser.newPage();
+  await warmup.goto(server.resolvedUrls.local[0], { timeout: 120_000 });
+  await warmup.close();
   const threads = Array.from({ length: 1000 }, (_, index) => ({
     id: `thread-${index}`, projectId: "workspace", provider: "claude", model: "sample",
     title: index === 0 ? "Review navigation and improve the conversation list" : `Conversation ${index}`,

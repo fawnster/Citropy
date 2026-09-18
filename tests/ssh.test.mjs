@@ -209,7 +209,7 @@ test("real SSH launch, remote tasks, disconnect, reconnect, and cleanup", { time
   await writeFile(command, `#!/bin/sh\nexport HOME=${shellQuote(home)}\nexport PATH=/usr/bin:/bin\nexport SHELL=/bin/bash\nexec /bin/sh -c "$SSH_ORIGINAL_COMMAND"\n`, { mode: 0o700 });
   const config = join(directory, "sshd_config");
   await writeFile(config, `ListenAddress 127.0.0.1\nPort ${port}\nHostKey ${directory}/host\nPidFile ${directory}/pid\nAuthorizedKeysFile ${directory}/client.pub\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowUsers ${userInfo().username}\nAllowTcpForwarding yes\nForceCommand ${command}\n`);
-  daemon = spawn("/usr/bin/sshd", ["-D", "-e", "-f", config], { stdio: ["ignore", "ignore", "pipe"] });
+  daemon = spawn("/usr/sbin/sshd", ["-D", "-e", "-f", config], { stdio: ["ignore", "ignore", "pipe"] });
   let daemonOutput = "";
   daemon.stderr.on("data", chunk => { daemonOutput += chunk; });
   await pause(250);

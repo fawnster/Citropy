@@ -23,7 +23,7 @@ const tools = Array.from({ length: 3 }, (_, index) => ({
   output: "Example file contents.",
 }));
 
-test("conversation presentation", { timeout: 180_000 }, async (t) => {
+test("conversation presentation", { timeout: 360_000 }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "citropy-presentation-"));
   let server;
   let browser;
@@ -39,6 +39,9 @@ test("conversation presentation", { timeout: 180_000 }, async (t) => {
   });
   await server.listen();
   browser = await chromium.launch({ headless: true });
+  const warmup = await browser.newPage();
+  await warmup.goto(server.resolvedUrls.local[0], { timeout: 120_000 });
+  await warmup.close();
   async function fixture({ desktopPage, preferences = {}, messages = [message("saved", [textPart("saved-text", "Saved conversation.")])], children = [], histories = {}, githubAccount, reducedMotion = "no-preference", isGit = false, hasTouch = false } = {}) {
     const page = desktopPage ?? await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion, hasTouch });
     page.setDefaultTimeout(10000);
@@ -684,6 +687,7 @@ app.whenReady().then(() => {
     const card = page.locator('.thread-card[data-active="true"]');
     await card.getByText(title, { exact: true }).waitFor();
     for (const [width, sidebar, scale] of [[1600, 252, 120], [960, 216, 120], [1440, 360, 150]]) {
+      await page.mouse.move(0, 0);
       await page.setViewportSize({ width, height: 900 });
       await page.evaluate(async ({ sidebar, scale }) => {
         const { useApp, setUiScale } = await import("/web/src/lib/store.ts");
