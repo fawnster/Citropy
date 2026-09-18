@@ -19,7 +19,7 @@ import { WebSocketServer, type WebSocket } from "ws";
 import { bus } from "./bus.ts";
 import { eventJournal } from "./event-journal.ts";
 import { randomUUID } from "node:crypto";
-import { dev, setDevelopment, host, origin, port } from "./config.ts";
+import { dev, developmentOrigin, host, origin, port } from "./config.ts";
 import { chooseFolder } from "./folder-picker.ts";
 import * as files from "./files.ts";
 import * as git from "./git.ts";
@@ -80,6 +80,7 @@ async function restartDevelopmentServer(): Promise<void> {
 }
 
 function startDevelopment(): Promise<void> {
+  if (!dev) return Promise.reject(new Error("Start Citropy with --dev to use development tools."));
   if (development) return development;
   development = new Promise<void>((resolve, reject) => {
     const vite = spawn(
@@ -87,7 +88,7 @@ function startDevelopment(): Promise<void> {
       [join(here, "../node_modules/vite/bin/vite.js"), "--host", "127.0.0.1"],
       {
         cwd: join(here, ".."),
-        env: { ...process.env, NO_COLOR: "1" },
+        env: { ...process.env, CITROPY_PORT: String(port), CITROPY_DEVELOPMENT: "1", NO_COLOR: "1" },
         stdio: ["ignore", "pipe", "pipe"],
       },
     );
@@ -100,9 +101,8 @@ function startDevelopment(): Promise<void> {
     process.once("exit", clean);
     vite.stdout.on("data", (chunk) => {
       output = `${output}${chunk}`.slice(-2000);
-      if (output.includes("http://127.0.0.1:5177")) {
+      if (output.includes(`${developmentOrigin}/`)) {
         clearTimeout(timer);
-        setDevelopment(true);
         resolve();
       }
     });
@@ -113,14 +113,12 @@ function startDevelopment(): Promise<void> {
       clearTimeout(timer);
       process.off("exit", clean);
       development = null;
-      setDevelopment(false);
       reject(error);
     });
     vite.on("exit", () => {
       clearTimeout(timer);
       process.off("exit", clean);
       development = null;
-      setDevelopment(false);
       reject(new Error(output || "The live interface stopped."));
     });
   });
@@ -624,10 +622,14 @@ const server = createServer(async (req, res) => {
     ["/api/desktop", "/api/desktop?development=1"].includes(url) &&
     req.method === "POST"
   ) {
+    if (url.endsWith("development=1") && !dev) {
+      res.writeHead(403, { "content-type": "text/plain" }).end("Development tools are unavailable in this build. Run npm run desktop:dev from a source checkout.");
+      return;
+    }
     if (
       req.headers.origin &&
       req.headers.origin !== origin &&
-      !(dev && req.headers.origin === "http://127.0.0.1:5177")
+      !(dev && req.headers.origin === developmentOrigin)
     ) {
       res.writeHead(403).end();
       return;
@@ -635,7 +637,6 @@ const server = createServer(async (req, res) => {
     try {
       if (url.endsWith("development=1")) await startDevelopment();
       await openDesktop();
-      if (dev) await desktopRequest("ui.development");
       res.writeHead(204).end();
     } catch (error) {
       res
@@ -648,7 +649,7 @@ const server = createServer(async (req, res) => {
   if (dev && !url.startsWith("/api/")) {
     res
       .writeHead(302, {
-        location: `http://127.0.0.1:5177${url.startsWith("/") && !url.startsWith("//") ? url : "/"}`,
+        location: `${developmentOrigin}${url.startsWith("/") && !url.startsWith("//") ? url : "/"}`,
       })
       .end();
     return;
@@ -671,7 +672,7 @@ const wss = new WebSocketServer({
     const address = server.address();
     const localPort = typeof address === "object" && address ? address.port : port;
     const allowed = new Set([origin, `http://127.0.0.1:${localPort}`, `http://localhost:${localPort}`]);
-    if (dev) allowed.add("http://127.0.0.1:5177");
+    if (dev) allowed.add(developmentOrigin);
     return allowed.has(requestOrigin) && Boolean(req.headers.host);
   },
 });
@@ -762,10 +763,14 @@ const gitTimer = setInterval(() => {
 gitTimer.unref();
 
 server.listen(port, host, async () => {
-  if (dev)
-    await startDevelopment().catch((error) =>
-      process.stderr.write(`${error.message}\n`),
-    );
+  if (dev) {
+    try {
+      await startDevelopment();
+    } catch (error) {
+      process.stderr.write(`${(error as Error).message}\n`);
+      process.exit(1);
+    }
+  }
   await terminals.restore();
   await refreshProviders();
   stopProviderUpdateChecks = startProviderUpdateChecks();
@@ -774,7 +779,7 @@ server.listen(port, host, async () => {
   process.stdout.write(`\n  Citropy listening on ${origin}\n`);
   process.stdout.write(`  providers: ${available.join(", ") || "none detected"}\n`);
   if (dev) {
-    process.stdout.write(`  ui (dev): http://127.0.0.1:5177\n\n`);
+    process.stdout.write(`  ui (dev): ${developmentOrigin}\n\n`);
   } else {
     process.stdout.write(`  open ${origin} in a browser\n\n`);
   }

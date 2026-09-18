@@ -7,6 +7,7 @@ import {
   rename,
   mkdir,
 } from "node:fs/promises";
+import { dataRoot } from "./paths.ts";
 import { homedir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { workspacePath } from "./workspaces.ts";
@@ -294,8 +295,7 @@ export async function changeSkill(
     );
   if (action === "delete") {
     const trash = join(
-      homedir(),
-      ".citropy",
+      dataRoot,
       "deleted-skills",
       `${Date.now()}-${id}`,
     );

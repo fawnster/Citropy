@@ -24,10 +24,12 @@ import { join, resolve, sep } from "node:path";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { migrateDesktopData } from "./migrate-data.mjs";
 
-app.setName("Citropy");
+const development = !app.isPackaged && process.env.CITROPY_DEVELOPMENT === "1";
+const appName = development ? "Citropy Dev" : "Citropy";
+app.setName(appName);
 app.setPath(
   "userData",
-  migrateDesktopData(app.getPath("appData"), process.env.CITROPY_DESKTOP_DATA),
+  migrateDesktopData(app.getPath("appData"), process.env.CITROPY_DESKTOP_DATA || (development ? join(app.getPath("appData"), appName) : undefined)),
 );
 if (!app.requestSingleInstanceLock()) app.exit(0);
 app.on("second-instance", () => {
@@ -37,8 +39,9 @@ app.on("second-instance", () => {
     window.focus();
   }
 });
-if (process.platform === "linux") app.setDesktopName("citropy.desktop");
+if (process.platform === "linux") app.setDesktopName(development ? "citropy-dev.desktop" : "citropy.desktop");
 if (app.isPackaged) {
+  process.env.CITROPY_DEVELOPMENT = "0";
   process.env.CITROPY_PORT ||= "4177";
   process.env.CITROPY_HOST = "127.0.0.1";
   process.env.CITROPY_URL = `http://127.0.0.1:${process.env.CITROPY_PORT}`;
@@ -618,29 +621,6 @@ async function request(method, params) {
     params = { ...params, language: language === "es" ? "es" : "en" };
   }
   if (method.startsWith("computer.")) return computerRequest(method, params);
-  if (method === "ui.development") {
-    if (ui.port === "5177") return;
-    await frontendReady;
-    const preferences = await window.webContents.executeJavaScript(
-      "Object.entries(localStorage).filter(([key]) => key.startsWith('citropy.'))",
-    );
-    for (const tab of tabs.values()) {
-      tab.visible = false;
-      tab.view.setBounds({
-        ...tab.view.getBounds(),
-        x: window.getContentSize()[0] + 20,
-      });
-    }
-    ui.port = "5177";
-    if (environments) environments.origin = ui.origin;
-    process.env.CITROPY_UI_URL = ui.href;
-    await window.loadURL(ui.href);
-    await window.webContents.executeJavaScript(
-      `for (const [key, value] of ${JSON.stringify(preferences)}) localStorage.setItem(key, value)`,
-    );
-    window.webContents.reload();
-    return;
-  }
   if (method === "notification") {
     if (!Notification.isSupported() || window.isFocused()) return;
     const notification = new Notification({
@@ -738,7 +718,7 @@ app
       y: workArea.y + Math.round((workArea.height - height) / 2),
       minWidth,
       minHeight,
-      title: "Citropy",
+      title: appName,
       icon: fileURLToPath(new URL("./assets/citropy.png", import.meta.url)),
       frame: false,
       ...(process.platform === "darwin"
@@ -855,7 +835,7 @@ app
       maximized: window.isMaximized(),
       fullscreen: window.isFullScreen(),
       platform: process.platform,
-      development: ui.origin !== base.origin,
+      development,
       version,
       notifications: Notification.isSupported(),
       electron: process.versions.electron,

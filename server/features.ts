@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { store } from "./store.ts";
 import { answerQuestion } from "./questions.ts";
 import { stopShell } from "./shells.ts";
-import { dev } from "./config.ts";
+import { dev, developmentOrigin } from "./config.ts";
 import { desktopRequest } from "./desktop.ts";
 import { reloadProviderSessions, providerBusy, runtimeFor, disposeRuntime } from "./runtime.ts";
 import { assertWorkspaceIdle, restoreCheckpoint, redoCheckpoint, forkConversation, reviewChanges } from "./checkpoints.ts";
@@ -127,7 +127,7 @@ export async function handleFeatures(
         (!local.includes(requestOrigin.hostname) ||
           requestOrigin.protocol !== "http:" ||
           (requestOrigin.port !== host.port &&
-            !(dev && requestOrigin.port === "5177")))) ||
+            !(dev && requestOrigin.port === new URL(developmentOrigin).port)))) ||
       req.headers["sec-fetch-site"] === "cross-site"
     )
       throw new Error("Invalid origin");

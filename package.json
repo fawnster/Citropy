@@ -23,7 +23,8 @@
     "setup:desktop": "node node_modules/electron/install.js",
     "desktop:dev": "node desktop/start.mjs --dev",
     "desktop:install": "node desktop/install.mjs",
-    "desktop:package": "node desktop/package.mjs"
+    "desktop:package": "node desktop/package.mjs",
+    "desktop:smoke": "node desktop/smoke.mjs"
   },
   "dependencies": {
     "@fontsource-variable/geist-mono": "5.3.0",

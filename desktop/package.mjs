@@ -29,6 +29,7 @@ for (const name of [
   "dist",
   "package.json",
   "package-lock.json",
+  "LICENSE",
 ])
   await cp(join(root, name), join(staging, name), { recursive: true });
 await cp(join(root, "package-lock.json"), join(staging, "desktop/remote-package-lock.json"));

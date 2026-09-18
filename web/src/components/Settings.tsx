@@ -113,7 +113,7 @@ const sections = [
     name: "Application",
     group: "Application",
     icon: Monitor,
-    description: "Manage the desktop app and live updates.",
+    description: "Manage the desktop app and updates.",
   },
 ];
 
@@ -172,7 +172,7 @@ export function Settings({
     send({ t: "server.restart" });
   };
   const applicationAction = async (
-    action: "reload" | "restart" | "development",
+    action: "reload" | "restart",
   ) => {
     setApplicationError("");
     if (
@@ -187,12 +187,7 @@ export function Settings({
       return;
     setUpdating(true);
     try {
-      if (action === "development") {
-        const response = await fetch("/api/desktop?development=1", {
-          method: "POST",
-        });
-        if (!response.ok) throw new Error(await response.text());
-      } else await window.citropyDesktop?.windowCommand(action);
+      await window.citropyDesktop?.windowCommand(action);
     } catch (error) {
       setApplicationError((error as Error).message);
     } finally {
@@ -440,10 +435,12 @@ export function Settings({
                   <Monitor size={24} />
                 </span>
                 <div>
-                  <h2>{t("Citropy desktop")}</h2>
+                  <h2>{t(development ? "Citropy development" : "Citropy desktop")}</h2>
                   <p>
                     {desktop
-                      ? t("Version {version} · Electron {electron}", { version: desktop.version, electron: desktop.electron })
+                      ? development
+                        ? t("Version {version} · Electron {electron}", { version: desktop.version, electron: desktop.electron })
+                        : t("Version {version}", { version: desktop.version })
                       : t("Open the desktop app to use the embedded browser and window controls.")}
                   </p>
                 </div>
@@ -457,29 +454,15 @@ export function Settings({
                   </span>
                   <AppUpdateControl variant="settings" />
                 </div>
-                <div className="setting-row">
-                  <span>
-                    <strong>{t("Live interface updates")}</strong>
-                    <small>
-                      {desktop?.development
-                        ? "Connected. Interface changes appear as you save."
-                        : t("Enable live updates while developing Citropy.")}
-                    </small>
-                  </span>
-                  <button
-                    type="button"
-                    className="btn"
-                    disabled={
-                      !connected || updating || desktop?.development || running
-                    }
-                    onClick={() => void applicationAction("development")}
-                  >
-                    <RefreshCw size={14} />
-                    {desktop?.development
-                      ? t("Live updates on")
-                      : t("Enable live updates")}
-                  </button>
-                </div>
+                {development && !isRemote() && (
+                  <div className="setting-row">
+                    <span>
+                      <strong>{t("Live interface updates")}</strong>
+                      <small>{t("Interface changes appear as you save. Development data is stored separately.")}</small>
+                    </span>
+                    <span>{t("Live updates on")}</span>
+                  </div>
+                )}
                 {development && !isRemote() && (
                   <div className="setting-row">
                     <span>
@@ -522,7 +505,7 @@ export function Settings({
                         <small>
                           {running
                             ? t("Available when active conversations have finished.")
-                            : t("Apply desktop changes and reopen your browser tabs.")}
+                            : t("Restart the app and reopen your browser tabs.")}
                         </small>
                       </span>
                       <button
@@ -555,7 +538,7 @@ export function Settings({
                   {applicationError}
                 </p>
               )}
-              <p className="settings-note">{" "}{t("Interface edits update live. Restart the desktop after changing its native code. Server changes require restarting the local server after active work has finished.")}{" "}</p>
+              {development && !isRemote() && <p className="settings-note">{t("Interface edits update live. Restart the desktop after changing its native code. Server changes require restarting the local server after active work has finished.")}</p>}
             </>
           )}
           {section === "Appearance" && (

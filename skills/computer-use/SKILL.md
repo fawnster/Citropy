@@ -5,7 +5,7 @@ description: Operate native desktop applications through Citropy's computer MCP 
 
 # Computer use
 
-Use Citropy's `computer_*` MCP tools for the user's desktop. These tools act on the real shared screen. Use the existing browser tools for Citropy browser tabs and file or terminal tools when they directly suit the requested work.
+Load the computer tool schemas with `tool_help({category: "computer"})`, then invoke each `computer_*` tool through `run_tool({name, arguments})` for the user's desktop. These tools act on the real shared screen. Use the existing browser tools for Citropy browser tabs and file or terminal tools when they directly suit the requested work.
 
 Call `computer_status` to check availability and session ownership. Enablement is controlled in Settings > Computer use. Start a session with `computer_start`. On Wayland the desktop presents its own screen-sharing dialog; the user selects the screen and grants control. A session belongs to one conversation. Do not stop another conversation's session to take control.
 

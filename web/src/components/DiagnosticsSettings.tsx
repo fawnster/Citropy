@@ -12,6 +12,7 @@ const memory = (bytes: number) =>
 
 export function DiagnosticsSettings() {
   const t = useI18n();
+  const development = useApp(state => state.development);
   const providers = useApp(state => state.providers);
   const [data, setData] = useState<DiagnosticReport>();
   const [history, setHistory] = useState<
@@ -74,11 +75,11 @@ export function DiagnosticsSettings() {
       {data ? (
         <>
           <details className="feature-section"><summary>{t("Provider capabilities")}</summary><div className="feature-table-wrap scroll"><table className="feature-table"><thead><tr><th>{t("Provider")}</th><th>{t("Transport")}</th><th>{t("Steering")}</th><th>{t("Compaction")}</th><th>{t("Stop individual shell")}</th></tr></thead><tbody>{providers.map(provider => <tr key={provider.id}><td>{provider.label}</td><td>{provider.capabilities?.transport ?? t("Unknown")}</td>{["steer", "compact", "stopShell"].map(key => <td key={key}>{provider.capabilities ? t(provider.capabilities[key as "steer" | "compact" | "stopShell"] ? "Supported" : "Unavailable") : t("Unknown")}</td>)}</tr>)}</tbody></table></div></details>
-          <details className="feature-section">
+          {development && <details className="feature-section">
             <summary>{t("Provider events")} · {data.protocol?.length ?? 0}</summary>
             <p className="feature-note">{t("Recent event types and validation errors. Message content and credentials are not recorded here.")}</p>
             <div className="feature-table-wrap scroll"><table className="feature-table"><thead><tr><th>{t("Provider")}</th><th>{t("Event")}</th><th>{t("Status")}</th></tr></thead><tbody>{data.protocol?.slice().reverse().map((entry, index) => <tr key={`${entry.at}-${index}`}><td>{entry.provider}</td><td>{entry.type}</td><td>{entry.issue || t("Accepted")}</td></tr>)}</tbody></table></div>
-          </details>
+          </details>}
           <div className="metric-grid">
             <div>
               <MemoryStick size={20} />

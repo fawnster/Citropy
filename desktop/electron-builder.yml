@@ -11,10 +11,12 @@ files:
   - skills/**
   - dist/**
   - package.json
+  - LICENSE
   - '!desktop/package.mjs'
   - '!desktop/electron-builder.yml'
   - '!desktop/install.mjs'
   - '!desktop/start.mjs'
+  - '!desktop/smoke.mjs'
 linux:
   target: AppImage
   category: Development

@@ -16,6 +16,7 @@ export function packagedBackend(env) {
       [
         "--experimental-strip-types",
         fileURLToPath(new URL("../server/main.ts", import.meta.url)),
+        "--packaged",
       ],
       {
         cwd: fileURLToPath(new URL("..", import.meta.url)),

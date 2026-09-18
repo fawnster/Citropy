@@ -1,9 +1,9 @@
 import { mkdir, readFile, writeFile, rm } from "node:fs/promises";
-import { homedir } from "node:os";
+import { dataRoot } from "./paths.ts";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 
-export const builtinSkillRoot = () => join(homedir(), ".citropy", "skills");
+export const builtinSkillRoot = () => join(dataRoot, "skills");
 let installing: Promise<void> | undefined;
 
 export function computerInstructions() {

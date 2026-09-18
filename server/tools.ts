@@ -32,7 +32,11 @@ function folder(path: string, root: string): string | undefined {
 }
 
 export function describeTool(name: string, rawInput: unknown, root = ""): ToolDescription {
-  const input = (rawInput ?? {}) as Record<string, unknown>;
+  let input = (rawInput ?? {}) as Record<string, unknown>;
+  if (["run_tool", "citropy_run_tool", "mcp__citropy__run_tool"].includes(name) && typeof input.name === "string" && input.arguments && typeof input.arguments === "object" && !Array.isArray(input.arguments)) {
+    name = `mcp__citropy__${input.name}`;
+    input = input.arguments as Record<string, unknown>;
+  }
   const path =
     str(input.file_path) ||
     str(input.filePath) ||

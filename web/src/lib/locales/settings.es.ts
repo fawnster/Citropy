@@ -1,4 +1,9 @@
 export const settingsEs: Record<string, string> = {
+  "Citropy development": "Citropy desarrollo",
+  "Version {version}": "Versión {version}",
+  "Restart the app and reopen your browser tabs.": "Reinicia la aplicación y vuelve a abrir las pestañas del navegador.",
+  "Manage the desktop app and updates.": "Gestiona la aplicación de escritorio y las actualizaciones.",
+  "Interface changes appear as you save. Development data is stored separately.": "Los cambios de la interfaz aparecen al guardar. Los datos de desarrollo se guardan por separado.",
   "Citropy is controlling this screen": "Citropy controla esta pantalla",
   "Citropy is viewing this screen": "Citropy ve esta pantalla",
   "Computer use paused": "Uso del ordenador en pausa",

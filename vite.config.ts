@@ -23,12 +23,12 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5177,
+    port: Number(process.env.CITROPY_UI_PORT ?? 5177),
     strictPort: true,
     proxy: {
-      "/api": `http://127.0.0.1:${process.env.CITROPY_PORT ?? 4177}`,
+      "/api": `http://127.0.0.1:${process.env.CITROPY_PORT ?? (process.env.CITROPY_DEVELOPMENT === "1" ? 4178 : 4177)}`,
       "/socket": {
-        target: `ws://127.0.0.1:${process.env.CITROPY_PORT ?? 4177}`,
+        target: `ws://127.0.0.1:${process.env.CITROPY_PORT ?? (process.env.CITROPY_DEVELOPMENT === "1" ? 4178 : 4177)}`,
         ws: true,
       },
     },

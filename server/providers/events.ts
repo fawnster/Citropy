@@ -1,3 +1,4 @@
+import { dev } from "../config.ts";
 import { normalizeTodos } from "../../shared/todos.ts";
 import type { ProviderId } from "../../shared/protocol.ts";
 import type { AgentEvent } from "./types.ts";
@@ -62,7 +63,7 @@ export function receiveAgentEvent(provider: ProviderId, threadId: string, raw: u
   let event: AgentEvent | null = null;
   let issue: string | undefined;
   try { event = validateAgentEvent(raw); } catch (error) { issue = (error as Error).message; }
-  if (issue || !["block.delta", "tool.output", "usage"].includes(type)) {
+  if (dev && (issue || !["block.delta", "tool.output", "usage"].includes(type))) {
     entries.push({ at: Date.now(), provider, threadId, type, ...(issue ? { issue } : {}) });
     if (entries.length > 300) entries.splice(0, entries.length - 300);
   }

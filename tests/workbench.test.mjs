@@ -10,8 +10,14 @@ import { chromium } from "playwright";
 import { once } from "node:events";
 import { WebSocketServer } from "ws";
 import { syncBuiltinESMExports } from "node:module";
+import { describeTool } from "../server/tools.ts";
 
 const originalSpawn = spawn;
+
+test("deferred computer tools keep their activity description", () => {
+  assert.deepEqual(describeTool("mcp__citropy__run_tool", { name: "computer_action", arguments: { action: "type", text: "Hello" } }), { shape: "computer", headline: "Type 5 characters" });
+  assert.deepEqual(describeTool("citropy_run_tool", { name: "computer_screenshot", arguments: {} }), { shape: "computer", headline: "Inspect the desktop" });
+});
 
 async function waitFor(check) {
   for (let i = 0; i < 300; i++) {
@@ -181,7 +187,7 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
   async function tool(name, args = {}, id = parent.id) {
     const result = await rpc(
       "tools/call",
-      { name, arguments: args },
+      { name: "run_tool", arguments: { name, arguments: args } },
       connectTools(id).headers,
       id,
     );
@@ -228,10 +234,26 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
           .protocolVersion,
         "2025-06-18",
       );
-      assert.equal(
-        (await rpc("tools/list")).body.result.tools.length,
-        workspaceTools.length + 1,
-      );
+      const tools = (await rpc("tools/list")).body.result.tools;
+      assert.deepEqual(tools.map(tool => tool.name), ["ask_user", "tool_help", "run_tool"]);
+      const before = Buffer.byteLength(JSON.stringify(workspaceTools));
+      const after = Buffer.byteLength(JSON.stringify(tools));
+      t.diagnostic(`MCP initial schemas: ${before} -> ${after} bytes`);
+      assert.ok(after < before * 0.3, `Initial schemas: ${before} -> ${after} bytes`);
+      const help = (await rpc("tools/call", { name: "tool_help", arguments: { category: "workspace" } })).body.result;
+      assert.deepEqual(JSON.parse(help.content[0].text).map(tool => tool.name), ["workspace_tree", "workspace_read", "open_panel"]);
+      assert.equal((await rpc("tools/call", { name: "workspace_read", arguments: { path: "hello.txt" } })).body.result.content[0].text, "Workspace file");
+      for (const name of ["approve", "run_tool", "tool_help"])
+        assert.equal((await tool(name)).isError, true);
+      for (const args of [null, [], "invalid"])
+        assert.equal((await rpc("tools/call", { name: "run_tool", arguments: { name: "workspace_read", arguments: args } })).body.result.isError, true);
+      project.settings = { browserAccess: false };
+      assert.deepEqual(JSON.parse((await rpc("tools/call", { name: "tool_help", arguments: { category: "browser" } })).body.result.content[0].text), []);
+      assert.equal((await tool("browser_open")).isError, true);
+      project.settings = {};
+      parent.provider = "claude";
+      assert.ok((await rpc("tools/list")).body.result.tools.some(tool => tool.name === "approve"));
+      parent.provider = "codex";
       assert.equal((await rpc("tools/list", {}, {})).status, 401);
       assert.equal(
         (await rpc("tools/list", {}, credentials.headers, other.id)).status,

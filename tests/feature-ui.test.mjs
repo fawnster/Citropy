@@ -469,7 +469,11 @@ test(
       animations: "disabled",
       path: "/tmp/citropy-feature-skills.png",
     });
+    await page.getByRole("button", { name: "Application", exact: true }).click();
+    assert.equal(await page.getByText("Live interface updates", { exact: true }).count(), 0);
+    assert.equal(await page.getByRole("button", { name: "Restart server", exact: true }).count(), 0);
     await page.getByRole("button", { name: "Resources", exact: true }).click();
+    assert.equal(await page.getByText(/Provider events/).count(), 0);
     await page
       .getByRole("heading", { name: "Citropy processes", exact: true })
       .waitFor();

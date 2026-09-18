@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 
 const directory = mkdtempSync(join(tmpdir(), "citropy-journal-test-"));
 process.env.CITROPY_DATA_DIR = directory;
+process.env.CITROPY_DEVELOPMENT = "1";
 const { EventJournal, eventJournal } = await import("../server/event-journal.ts");
 const { emptyUsage } = await import("../shared/protocol.ts");
 const { validateAgentEvent, receiveAgentEvent, protocolLog } = await import("../server/providers/events.ts");

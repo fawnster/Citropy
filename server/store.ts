@@ -1,4 +1,5 @@
 import { dataRoot } from "./paths.ts";
+import { dev } from "./config.ts";
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, existsSync, renameSync } from "node:fs";
 import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
@@ -24,7 +25,7 @@ import type {
 
 const root = dataRoot;
 const previousRoot = join(homedir(), ".loom");
-if (!process.env.CITROPY_DATA_DIR && !existsSync(root) && existsSync(previousRoot)) renameSync(previousRoot, root);
+if (!dev && !process.env.CITROPY_DATA_DIR && !existsSync(root) && existsSync(previousRoot)) renameSync(previousRoot, root);
 const threadsDir = join(root, "threads");
 const settingsFile = join(root, "settings.json");
 const projectsFile = join(root, "projects.json");

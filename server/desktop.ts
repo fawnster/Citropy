@@ -5,7 +5,7 @@ import { EventEmitter } from "node:events";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import type { WebSocket } from "ws";
-import { dev, origin } from "./config.ts";
+import { dev, developmentOrigin, origin } from "./config.ts";
 
 const token = process.env.CITROPY_DESKTOP_TOKEN || randomBytes(32).toString("hex");
 const require = createRequire(import.meta.url);
@@ -111,7 +111,8 @@ export function openDesktop(): Promise<void> {
     const env: NodeJS.ProcessEnv = {
       ...process.env,
       CITROPY_URL: origin,
-      CITROPY_UI_URL: dev ? "http://127.0.0.1:5177" : origin,
+      CITROPY_UI_URL: dev ? developmentOrigin : origin,
+      CITROPY_DEVELOPMENT: dev ? "1" : "0",
       CITROPY_DESKTOP_TOKEN: token,
     };
     delete env.ELECTRON_RUN_AS_NODE;

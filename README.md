@@ -111,7 +111,11 @@ npm test              # test suite
 npm run build         # production web bundle
 ```
 
-`npm run desktop:install` adds Citropy to the application menu with live updates. `npm run desktop:package` builds a Linux AppImage and its update manifest in `release/`. The packaged app starts and stops its own local server.
+`npm run desktop:dev` uses separate data in `~/.citropy-dev`, a **Citropy Dev** desktop profile, and backend port 4178. The live interface runs on port 5177. Development controls stay out of normal builds.
+
+`npm run desktop:install` adds the normal source build to the application menu; pass `-- --dev` for a separate development launcher. `npm run desktop:package` builds a Linux AppImage and its update manifest in `release/`. The packaged app starts and stops its own local server. `npm run desktop:smoke` checks the packaged app without running a model.
+
+[Development and release instructions](docs/release.md) cover isolation, system dependencies, GitHub checks, and draft releases.
 
 ## Documentation
 

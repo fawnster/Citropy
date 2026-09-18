@@ -93,10 +93,10 @@ test("computer sessions enforce ownership, consent, coordinates and cleanup", { 
     assert.ok(saved.disabledProviders.has("opencode"));
     await computer.startComputer(thread.id);
     await assert.rejects(computer.startComputer(other.id), /already open/);
-    await assert.rejects(callWorkspaceTool(other.id, "computer_screenshot", {}), /does not own/);
-    await assert.rejects(callWorkspaceTool(other.id, "computer_stop", {}), /does not own/);
+    await assert.rejects(callWorkspaceTool(other.id, "run_tool", { name: "computer_screenshot", arguments: {} }), /does not own/);
+    await assert.rejects(callWorkspaceTool(other.id, "run_tool", { name: "computer_stop", arguments: {} }), /does not own/);
     const auth = connectTools(thread.id);
-    const response = await fetch(`${url}/mcp/${thread.id}`, { method: "POST", headers: auth.headers, body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "computer_screenshot", arguments: {} } }) });
+    const response = await fetch(`${url}/mcp/${thread.id}`, { method: "POST", headers: auth.headers, body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "run_tool", arguments: { name: "computer_screenshot", arguments: {} } } }) });
     const result = (await response.json()).result;
     assert.equal(result.content[1].type, "image");
     assert.equal(result.content[1].mimeType, "image/jpeg");

@@ -1,3 +1,4 @@
+import { dev } from "./config.ts";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { cpus, freemem, totalmem, loadavg } from "node:os";
@@ -66,7 +67,7 @@ export async function diagnostics(): Promise<DiagnosticReport> {
     });
   processes = [...allProcesses.values()].sort((a, b) => b.cpu - a.cpu);
   return {
-    protocol: protocolLog(),
+    ...(dev ? { protocol: protocolLog() } : {}),
     sampledAt: Date.now(),
     uptime: process.uptime(),
     system: {
