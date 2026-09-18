@@ -29,13 +29,13 @@ export function assistanceBusy(): boolean {
 }
 
 export function configureAssistance(input: Record<string, unknown>, available: ProviderInfo[]): AssistanceSettings {
-  if (Object.keys(input).some((key) => !["automaticTitles", "titleModel", "commitModel"].includes(key))) throw new Error("Invalid AI assistance setting.");
+  if (Object.keys(input).some((key) => !["automaticTitles", "titleModel", "commitModel", "reviewModel"].includes(key))) throw new Error("Invalid AI assistance setting.");
   const next = { ...store.assistance };
   if (input.automaticTitles !== undefined) {
     if (typeof input.automaticTitles !== "boolean") throw new Error("Choose whether to generate titles automatically.");
     next.automaticTitles = input.automaticTitles;
   }
-  for (const key of ["titleModel", "commitModel"] as const) {
+  for (const key of ["titleModel", "commitModel", "reviewModel"] as const) {
     if (input[key] === undefined) continue;
     if (input[key] === null) { next[key] = null; continue; }
     const value = input[key] as WritingModel;
@@ -47,7 +47,7 @@ export function configureAssistance(input: Record<string, unknown>, available: P
   return next;
 }
 
-function writingModel(thread: Thread, kind: "titleModel" | "commitModel"): WritingModel {
+export function writingModel(thread: Thread, kind: "titleModel" | "commitModel" | "reviewModel"): WritingModel {
   const configured = store.assistance[kind];
   if (configured) return configured;
   const models = providers[thread.provider].models;

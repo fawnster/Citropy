@@ -103,6 +103,20 @@ test("AI commit context preserves full paths, renames, and binary changes", asyn
   }, () => {}, () => {});
 });
 
+test("change sets with more hunks than the excerpt can hold still commit with every file named", async (t) => {
+  const lines = Array.from({ length: 1600 }, (_, i) => `line ${i}`);
+  const names = Array.from({ length: 20 }, (_, i) => `module-${i}.txt`);
+  const repo = await repository(t, Object.fromEntries(names.map(name => [name, lines.join("\n") + "\n"])));
+  for (const name of names) await repo.write(name, lines.map((line, i) => i % 10 === 0 ? `${line} changed` : line).join("\n") + "\n");
+  await assistedCommit(repo.cwd, "all", false, async (context) => {
+    assert.equal(context.truncated, true);
+    assert.ok(context.diff.length <= 60000);
+    for (const name of names) assert.ok(context.diff.includes(`diff --git a/${name} b/${name}`), name);
+    return "Mark every tenth line as changed";
+  }, () => {}, () => {});
+  assert.equal((await repo.git("log", "-1", "--format=%s")).trim(), "Mark every tenth line as changed");
+});
+
 test("change sets that cannot fit their inventory fail before generation or staging", async (t) => {
   const repo = await repository(t, { "original.txt": "unchanged\n" });
   const head = await repo.git("rev-parse", "HEAD");

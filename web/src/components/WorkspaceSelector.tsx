@@ -1,6 +1,8 @@
+import { AnimatedText } from "./AnimatedText.tsx";
 import { useState } from "react";
 import { AnimatePresence } from "motion/react";
-import { ChevronDown, FolderOpen, FolderPlus, GitFork, LoaderCircle, LogOut, Monitor, Server } from "lucide-react";
+import { Box, ChevronDown, FolderOpen, FolderPlus, GitFork, LoaderCircle, LogOut, Monitor, Server } from "lucide-react";
+import { ContainerEnvironment } from "./ContainerEnvironment.tsx";
 import { NewSshConnection } from "./EnvironmentSettings.tsx";
 import { selectEnvironment, useEnvironments, useWorkspaceCatalog, environmentName, isRemote } from "../lib/environment.ts";
 import { reportError } from "../lib/api.ts";
@@ -10,11 +12,12 @@ import { shortPath } from "../lib/format.ts";
 import { selectProject, useApp } from "../lib/store.ts";
 import { Menu, type MenuItem } from "./Menu.tsx";
 
-export function WorkspaceSelector({ disabled = false, onSelect }: { disabled?: boolean; onSelect?: () => void }) {
+export function WorkspaceSelector({ disabled = false }: { disabled?: boolean }) {
   const t = useI18n();
   const environments = useEnvironments();
   const catalog = useWorkspaceCatalog();
   const [adding, setAdding] = useState(false);
+  const [container, setContainer] = useState(false);
   const projects = useApp(state => state.projects);
   const activeProjectId = useApp(state => state.activeProjectId);
   const home = useApp(state => state.home);
@@ -31,8 +34,8 @@ export function WorkspaceSelector({ disabled = false, onSelect }: { disabled?: b
         selected: current && entry.id === activeProjectId,
         icon: <FolderOpen size={17} className="workspace-folder-icon" />,
         onSelect: () => {
-          if (current) { if (entry.id !== activeProjectId) selectProject(entry.id); onSelect?.(); }
-          else void selectEnvironment(id, entry.id).then(() => onSelect?.()).catch(reportError);
+          if (current) { if (entry.id !== activeProjectId) selectProject(entry.id); }
+          else void selectEnvironment(id, entry.id).catch(reportError);
         },
       })),
       ...(!current && !catalog[id] ? [{ id: `${id}:load`, label: t("Load workspaces"), icon: <Server size={17} />, onSelect: () => { void selectEnvironment(id).catch(reportError); } }] : []),
@@ -40,12 +43,13 @@ export function WorkspaceSelector({ disabled = false, onSelect }: { disabled?: b
     ];
   };
   const items: MenuItem[] = desktop ? [
-    { id: "environment:local", label: t("Local"), icon: <Monitor size={17} />, children: group("local") },
+    { id: "environment:local", label: t("Local"), hint: t("This computer"), icon: <Monitor size={17} />, children: group("local") },
     ...environments.connections.map(entry => ({
       id: `environment:${entry.id}`, label: entry.name, hint: entry.target,
-      icon: entry.status === "connecting" ? <LoaderCircle size={17} className="spin" /> : <Server size={17} />,
+      icon: entry.status === "connecting" ? <LoaderCircle size={17} className="spin" /> : entry.kind === "container" ? <Box size={17} /> : <Server size={17} />,
       children: group(entry.id),
     })),
+    { id: "environment:container", label: t("Add container…"), section: t("Workspace actions"), icon: <Box size={17} />, onSelect: () => setContainer(true) },
     { id: "environment:add", label: t("Connect over SSH…"), section: t("Workspace actions"), icon: <Server size={17} />, onSelect: () => setAdding(true) },
   ] : group("local");
   if (project?.isGit) items.push({ id: "new-worktree", label: t("New thread with workspace options…"), section: t("Workspace actions"), icon: <GitFork size={17} />, onSelect: () => { void createThread(undefined, true); } });
@@ -57,10 +61,10 @@ export function WorkspaceSelector({ disabled = false, onSelect }: { disabled?: b
         aria-haspopup="menu" aria-expanded={open} onClick={toggle} disabled={disabled || choosing}
         title={isRemote() ? `${environmentName()}: ${project?.path ?? ""}` : project?.path}>
         {isRemote() ? <Server size={18} /> : <FolderOpen size={18} />}
-        <span className="truncate">{choosing ? t("Choosing folder…") : project?.name ?? t("Open a workspace")}</span>
+        <AnimatedText className="truncate" text={choosing ? t("Choosing folder…") : project?.name ?? t("Open a workspace")} />
         <ChevronDown size={14} />
       </button>}
     />
-    <AnimatePresence>{adding && <NewSshConnection onClose={() => setAdding(false)} />}</AnimatePresence>
+    <AnimatePresence>{container && <ContainerEnvironment onClose={() => setContainer(false)} />}{adding && <NewSshConnection onClose={() => setAdding(false)} />}</AnimatePresence>
   </>;
 }

@@ -3,6 +3,8 @@ export interface ComputerDisplay {
   name: string;
   width: number;
   height: number;
+  x?: number;
+  y?: number;
 }
 
 export interface ComputerCapabilities {

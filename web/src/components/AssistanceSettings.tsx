@@ -23,8 +23,8 @@ export function AssistanceSettings() {
     } catch (error) { setError((error as Error).message); }
     finally { setSaving(false); }
   };
-  const selector = (key: "commitModel" | "titleModel", label: string) => {
-    return <ModelPicker label={label} value={draft[key]} allowConversation disabled={!connected || saving} onChange={(value) => void save({ [key]: value })} />;
+  const selector = (key: "commitModel" | "titleModel" | "reviewModel", label: string) => {
+    return <ModelPicker label={label} value={draft[key] ?? null} allowConversation disabled={!connected || saving} onChange={(value) => void save({ [key]: value })} />;
   };
   return <>
     <h2 className="settings-group-heading">{t("Conversation titles")}</h2>
@@ -45,7 +45,9 @@ export function AssistanceSettings() {
         {selector("commitModel", t("Commit model"))}
       </div>
     </div>
-    <p className="settings-note">{t("Titles and commit messages use separate requests on your provider accounts. Git actions run only when you click them in chat.")}</p>
+    <h2 className="settings-group-heading settings-group-spaced">{t("Code review")}</h2>
+    <div className="settings-group"><div className="setting-row assistance-model-row"><span><strong>{t("Review model")}</strong><small>{t("Review changes on demand. Repository guidance can be placed in .citropy/review.md.")}</small></span>{selector("reviewModel", t("Review model"))}</div></div>
+    <p className="settings-note">{t("AI assistance uses separate requests on your provider accounts. Reviews and Git actions run when you click them.")}</p>
     {error && <p className="feature-error" role="alert">{error}</p>}
   </>;
 }

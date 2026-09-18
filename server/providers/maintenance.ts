@@ -271,7 +271,7 @@ export async function providerMaintenance(
       const plan = await updatePlan(provider.id, fresh);
       const [version, latest] = await Promise.all([
         installationVersion(provider.id, fresh),
-        plan.executable ? latestVersion(provider.id, plan, fresh) : undefined,
+        plan.binaryPath ? latestVersion(provider.id, plan, fresh) : undefined,
       ]);
       const current = versionNumber(version);
       const target = versionNumber(latest);
@@ -299,6 +299,23 @@ export async function providerMaintenance(
       } satisfies ProviderMaintenance;
     }),
   );
+}
+
+export function startProviderUpdateChecks(): () => void {
+  let checking = false;
+  const check = async () => {
+    if (checking) return;
+    checking = true;
+    try {
+      await providerMaintenance(true);
+    } catch {} finally {
+      checking = false;
+    }
+  };
+  void check();
+  const timer = setInterval(() => void check(), 5 * 60 * 1000);
+  timer.unref();
+  return () => clearInterval(timer);
 }
 
 async function runUpdate(

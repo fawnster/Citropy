@@ -22,9 +22,9 @@ import type { GlobalInstructions } from "../../shared/provider-settings.ts";
 
 const MAX_BYTES = 64 * 1024;
 
-export function readGlobalInstructions(
+export function globalInstructionLocation(
   provider: ProviderId,
-): GlobalInstructions {
+): { path: string; note?: string } {
   let path: string;
   let note: string | undefined;
   if (provider === "claude") {
@@ -50,7 +50,13 @@ export function readGlobalInstructions(
   } else {
     throw new Error("Unknown provider.");
   }
-  path = resolve(path);
+  return { path: resolve(path), note };
+}
+
+export function readGlobalInstructions(
+  provider: ProviderId,
+): GlobalInstructions {
+  const { path, note } = globalInstructionLocation(provider);
   let content = "";
   let exists = false;
   let target = path;

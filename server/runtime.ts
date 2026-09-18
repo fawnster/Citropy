@@ -4,6 +4,7 @@ import { stopTextGeneration, textGenerationBusy } from "./text-generation.ts";
 import { basename } from "node:path";
 import { diffLines } from "./diff.ts";
 import { uid } from "./ids.ts";
+import { cancelQuestions, hasPendingQuestion } from "./questions.ts";
 import { cancelThread } from "./permissions.ts";
 import { store } from "./store.ts";
 import { removeAttachment, validateAttachments } from "./assets.ts";
@@ -12,8 +13,12 @@ import { listSkills } from "./skills.ts";
 import { expandCommand } from "./commands.ts";
 import { describeTool } from "./tools.ts";
 import { providers } from "./providers/index.ts";
+import { receiveAgentEvent } from "./providers/events.ts";
+import { beginCheckpoint, finishCheckpoint, checkpointBusy, historyPrompt } from "./checkpoints.ts";
+import { prepareContext, prepareTransferContext, transferPrompt } from "./context.ts";
 import { assertProviderReady } from "./providers/maintenance.ts";
-import { modelSettings } from "../shared/model-options.ts";
+import { modelSettings, selectedModel } from "../shared/model-options.ts";
+import { emptyUsage } from "../shared/protocol.ts";
 import { connectTools, disconnectTools } from "./mcp-access.ts";
 import type { AgentEvent } from "./providers/types.ts";
 import type { AgentSession } from "./providers/types.ts";
@@ -25,9 +30,9 @@ import type {
   Thread,
   ToolPart,
   TodoPart,
-  Usage,
   Attachment,
   QueuedMessage,
+  ProviderInfo,
 } from "../shared/protocol.ts";
 
 const MAX_OUTPUT = 24_000;
@@ -45,6 +50,8 @@ interface PartRef {
 }
 
 interface Prepared {
+  messageId: string;
+  contextSources: import("../shared/context.ts").ContextSource[];
   generation: number;
   text: string;
   attachments: Attachment[];
@@ -64,6 +71,7 @@ export class ThreadRuntime {
   #running = new Set<string>();
   #pendingModel: string | undefined;
   #preparing = false;
+  #checkpointCompletion: Promise<void> | null = null;
   #enqueuing: Promise<void> | undefined;
   #stopGeneration = 0;
   #resume = false;
@@ -83,7 +91,7 @@ export class ThreadRuntime {
   }
 
   get busy(): boolean {
-    return this.#preparing || Boolean(this.#enqueuing) || Boolean(this.#stopping) || this.#thread.running || this.#thread.status === "awaiting" || shellList().some(shell => shell.threadId === this.id && !shell.panelId && (shell.status === "running" || shell.status === "stopping"));
+    return this.#preparing || Boolean(this.#enqueuing) || Boolean(this.#stopping) || Boolean(this.#checkpointCompletion) || this.#thread.running || this.#thread.status === "awaiting" || shellList().some(shell => shell.threadId === this.id && !shell.panelId && (shell.status === "running" || shell.status === "stopping"));
   }
 
   async send(text: string, files: Attachment[] = []): Promise<void> {
@@ -94,6 +102,75 @@ export class ThreadRuntime {
     this.#resume = false;
     try { await this.#deliver(await this.#prepare(text, files)); }
     finally { this.#preparing = false; this.#pump(); }
+  }
+
+  async transfer(provider: ProviderInfo, modelId: string): Promise<void> {
+    assertApplicationReady();
+    assertProviderReady(provider.id);
+    const thread = this.#thread;
+    if (this.#disposed || this.busy || thread.compacting || thread.queue?.length)
+      throw new Error("Wait for this conversation and its queued messages to finish before transferring.");
+    if (thread.parentThreadId || thread.nativeAgentId || !thread.messages.length)
+      throw new Error("Transfer is only available in an existing chat.");
+    if ([...store.threads.values()].some(child => child.parentThreadId === this.id && (child.running || child.status === "awaiting")))
+      throw new Error("Wait for this conversation's subagents to finish before transferring.");
+    if (!provider.available || !provider.enabled || store.disabledProviders.has(provider.id))
+      throw new Error("Select an enabled, installed provider.");
+    const model = selectedModel(provider.models, modelId);
+    if (!model) throw new Error("This model is no longer available. Refresh the model list.");
+    if (provider.id === thread.provider && model.id === selectedModel(provider.models, thread.model)?.id)
+      throw new Error("Choose another model for the transfer.");
+    if (workspaceGitBusy(this.#cwd) || checkpointBusy(this.#cwd))
+      throw new Error("Wait for workspace changes to finish before transferring.");
+    this.#preparing = true;
+    this.#resume = false;
+    const generation = this.#stopGeneration;
+    try {
+      const context = await prepareTransferContext(thread);
+      this.#checkSession(generation);
+      assertApplicationReady();
+      assertProviderReady(provider.id);
+      if (store.disabledProviders.has(provider.id)) throw new Error("Enable this provider before transferring.");
+      const previous = { provider: thread.provider, model: thread.model, externalId: thread.externalId, usage: { ...thread.usage }, at: Date.now() };
+      this.#sessionGeneration += 1;
+      this.#session?.dispose();
+      this.#session = null;
+      this.#pendingModel = undefined;
+      this.#messageId = null;
+      this.#blocks.clear();
+      this.#tools.clear();
+      this.#running.clear();
+      this.#todo = null;
+      cancelThread(this.id);
+      cancelQuestions(this.id);
+      disconnectTools(this.id);
+      await waitForStoppedProcesses();
+      this.#checkSession(generation);
+      assertApplicationReady();
+      assertProviderReady(provider.id);
+      if (store.disabledProviders.has(provider.id)) throw new Error("Enable this provider before transferring.");
+      store.replaceMessages(this.id, thread.messages.map(message => message.role === "assistant" ? { ...message, provider: message.provider ?? previous.provider, model: message.model ?? previous.model } : message));
+      store.patchThread(this.id, {
+        provider: provider.id,
+        ...modelSettings(provider.models, { model: model.id }),
+        externalId: undefined,
+        usage: emptyUsage(),
+        transfers: [...(thread.transfers ?? []), previous],
+        transferContext: context,
+        rebuildContext: false,
+        contextSources: [],
+        canRedo: false,
+        compactedAt: undefined,
+        error: undefined,
+        status: "idle",
+        activeTool: undefined,
+      });
+      const prepared = await this.#prepare(`Transfer to ${model.label} (${provider.label}) and continue the conversation.`, []);
+      await this.#deliver(prepared);
+    } finally {
+      this.#preparing = false;
+      this.#pump();
+    }
   }
 
   async sendNow(id: string): Promise<void> {
@@ -179,31 +256,39 @@ export class ThreadRuntime {
     assertApplicationReady();
     assertProviderReady(this.#thread.provider);
     const generation = this.#stopGeneration;
+    if (this.#checkpointCompletion) await this.#checkpointCompletion;
     this.#checkSession(generation);
+    if (checkpointBusy(this.#cwd)) throw new Error("Wait for workspace review or recovery to finish.");
     if (workspaceGitBusy(this.#cwd)) throw new Error("Wait for the Git action to finish before sending a message.");
     this.#check(text, files);
     if (this.#thread.compacting) throw new Error("Wait for context compaction to finish.");
     const attachments = await validateAttachments(this.id, files);
-    const prompt = await expandCommand(this.#thread.provider, text);
+    let prompt = await expandCommand(this.#thread.provider, text);
+    const context = await prepareContext(this.#thread, prompt);
+    prompt = context.prompt;
+    if (this.#thread.transferContext) prompt = `${await transferPrompt(this.#thread.transferContext)}\n\nCurrent request:\n${prompt}`;
+    else if (this.#thread.rebuildContext && !this.#thread.externalId) prompt = historyPrompt(this.#thread.messages, prompt);
     const names = new Set([...text.matchAll(/(?:^|\s)[@$]([\w.:-]+)(?![\w./:-])/g)].map((match) => match[1]));
     const skills = names.size ? (await listSkills(this.#thread.projectId, this.id)).filter((skill) => skill.enabled && skill.provider === this.#thread.provider && names.has(skill.name)).sort((a, b) => Number(b.scope === "project") - Number(a.scope === "project")).filter((skill, index, entries) => entries.findIndex((entry) => entry.name === skill.name) === index) : [];
     this.#checkSession(generation);
     if (store.disabledProviders.has(this.#thread.provider)) throw new Error("This provider is disabled. Enable it in Settings > Providers.");
     assertApplicationReady();
     assertProviderReady(this.#thread.provider);
-    return { generation, text, attachments, prompt, skills };
+    return { messageId: uid("msg"), contextSources: context.sources, generation, text, attachments, prompt, skills };
   }
 
-  #addUserMessage({ text, attachments }: Prepared): void {
+  #addUserMessage({ messageId, text, attachments, contextSources }: Prepared): void {
     if (this.#thread.finished) store.setThreadFinished(this.#thread.id, false);
     const message: Message = {
-      id: uid("msg"),
+      id: messageId,
       role: "user",
       parts: [{ id: uid("prt"), kind: "text", text }],
       ts: Date.now(),
       attachments,
+      contextSources,
     };
     store.addMessage(this.#thread.id, message);
+    store.patchThread(this.id, { contextSources });
     if (!this.#thread.title || this.#thread.title === "New thread") {
       const title = (text.trim().split("\n")[0] || attachments.map((file) => file.label).join(", ")).slice(0, 64);
       store.patchThread(this.#thread.id, { title: title || "New thread" });
@@ -225,7 +310,10 @@ export class ThreadRuntime {
       if (queued) this.#requeue(queued.item, queued.index);
       throw new Error("Wait for the Git action to finish before sending a message.");
     }
+    await beginCheckpoint(this.#thread, prepared.messageId);
+    this.#checkSession(prepared.generation);
     this.#addUserMessage(prepared);
+    if (this.#thread.canRedo) store.patchThread(this.id, { canRedo: false });
     store.patchThread(this.#thread.id, { status: "queued", running: true, runStartedAt: Date.now(), error: undefined, archived: false, snoozedUntil: undefined });
     try { await this.#ensureSession().send(prepared.prompt, prepared.attachments, prepared.skills); }
     catch (error) {
@@ -238,7 +326,7 @@ export class ThreadRuntime {
   }
 
   #pump(): void {
-    if (!this.#resume || this.#preparing || this.#thread.running || this.#disposed) return;
+    if (!this.#resume || this.#preparing || this.#checkpointCompletion || this.#thread.running || this.#disposed) return;
     const [next, ...rest] = this.#thread.queue ?? [];
     if (!next) return;
     store.patchThread(this.id, { queue: rest });
@@ -301,6 +389,7 @@ export class ThreadRuntime {
     this.#resume = false;
     stopChildren(this.#thread.id);
     cancelThread(this.#thread.id);
+    cancelQuestions(this.#thread.id);
     const active = this.#thread.running || this.#thread.compacting;
     store.patchThread(this.#thread.id, { status: "stopped", running: false, compacting: false, activeTool: undefined });
     if (this.#session && active && !this.#stopping) this.#waitForStop(this.#session);
@@ -343,6 +432,7 @@ export class ThreadRuntime {
     disconnectTools(this.#thread.id);
     if (!preserveStatus) store.patchThread(this.#thread.id, { status: "stopped", running: false, compacting: false, activeTool: undefined });
     cancelThread(this.#thread.id);
+    cancelQuestions(this.#thread.id);
     this.#session?.dispose();
     this.#session = null;
   }
@@ -370,7 +460,9 @@ export class ThreadRuntime {
       externalId: this.#thread.externalId,
       usage: { ...this.#thread.usage },
       emit: (event) => {
-        if (generation === this.#sessionGeneration) this.#consume(event);
+        if (generation !== this.#sessionGeneration) return;
+        const validated = receiveAgentEvent(this.#thread.provider, this.id, event);
+        if (validated) this.#consume(validated);
       },
     });
     return this.#session;
@@ -428,6 +520,8 @@ export class ThreadRuntime {
 
   #consume(event: AgentEvent): void {
     if (this.#disposed) return;
+    if (this.#thread.transferContext && this.#thread.externalId && (event.type === "block.start" || event.type === "tool.start" || (event.type === "turn.end" && !event.error)))
+      store.patchThread(this.id, { transferContext: undefined });
     if (this.#thread.status === "queued" && (event.type === "block.start" || event.type === "tool.start")) store.patchThread(this.id, { status: "thinking" });
     switch (event.type) {
       case "shell.background":
@@ -463,8 +557,8 @@ export class ThreadRuntime {
       case "status": {
         if (this.#thread.status === "stopped") return;
         store.patchThread(this.#thread.id, {
-          status: event.status,
-          activeTool: event.tool,
+          status: hasPendingQuestion(this.#thread.id) ? "awaiting" : event.status,
+          activeTool: hasPendingQuestion(this.#thread.id) ? undefined : event.tool,
           ...(event.status === "thinking" ||
           event.status === "working" ||
           event.status === "awaiting"
@@ -564,6 +658,8 @@ export class ThreadRuntime {
         return;
       }
       case "turn.end": {
+        if (!this.#thread.running && !this.#stopping) return;
+        cancelQuestions(this.#thread.id);
         this.#stopping?.ended();
         clearTimeout(this.#compactionTimer);
         const stopped = this.#thread.status === "stopped";
@@ -599,6 +695,10 @@ export class ThreadRuntime {
             },
           });
         this.#resume = completed && !event.error;
+        this.#checkpointCompletion = finishCheckpoint(this.#thread).catch(() => {}).finally(() => {
+          this.#checkpointCompletion = null;
+          this.#pump();
+        });
         this.#pump();
         return;
       }
@@ -628,6 +728,7 @@ export class ThreadRuntime {
         disconnectTools(this.#thread.id);
         stopChildren(this.#thread.id);
         cancelThread(this.#thread.id);
+        cancelQuestions(this.#thread.id);
         const session = this.#session;
         this.#session = null;
         this.#sessionGeneration += 1;

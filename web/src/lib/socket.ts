@@ -15,6 +15,8 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 let backoff = 400;
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 const outbox: ClientEvent[] = [];
+let sequence = 0;
+let epoch = "";
 
 function flush(): void {
   if (frame) cancelAnimationFrame(frame);
@@ -88,6 +90,8 @@ export function send(event: ClientEvent): void {
       "panel.open",
       "panel.close",
       "term.data",
+      "term.ack",
+      "term.unsubscribe",
     ].includes(event.t)
   )
     return;
@@ -104,6 +108,7 @@ export function connect(): void {
   if (reconnectTimer) clearTimeout(reconnectTimer);
   reconnectTimer = null;
   const url = new URL(serverUrl("/socket"), `${location.protocol}//${location.host}`);
+  if (epoch) { url.searchParams.set("epoch", epoch); url.searchParams.set("after", String(sequence)); }
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
   const current = new WebSocket(url);
   socket = current;
@@ -120,6 +125,18 @@ export function connect(): void {
   current.onmessage = (message) => {
     if (socket !== current) return;
     const event = JSON.parse(message.data as string) as ServerEvent;
+    if (event.t === "hello") { epoch = event.epoch ?? ""; sequence = event.sequence ?? 0; }
+    else if (event.t === "reconnected") {
+      flush();
+      epoch = event.epoch;
+      sequence = event.sequence ?? sequence;
+      useApp.setState({ connected: true, ...(event.shells ? { shells: Object.fromEntries(event.shells.map(shell => [shell.id, shell])) } : {}), ...(event.browsers ? { browsers: Object.fromEntries(event.browsers.map(browser => [browser.id, browser])) } : {}), ...(event.computer ? { computer: event.computer } : {}) });
+      return;
+    } else if (event.sequence !== undefined) {
+      if (event.sequence <= sequence) return;
+      if (sequence && event.sequence !== sequence + 1) { epoch = ""; current.close(); return; }
+      sequence = event.sequence;
+    }
     if (event.t === "term.data" || event.t === "term.exit") {
       for (const listener of termListeners) listener(event);
       return;
@@ -155,6 +172,8 @@ export function disconnect(switching = false): void {
   }
   outbox.length = 0;
   termListeners.clear();
+  epoch = "";
+  sequence = 0;
   rejectResponses(switching);
   useApp.setState({ connected: false });
 }
@@ -178,8 +197,4 @@ export function waitUntilConnected(signal: AbortSignal): Promise<void> {
 
 if (import.meta.hot) import.meta.hot.dispose(() => disconnect());
 
-let counter = 0;
-export function requestId(): string {
-  counter += 1;
-  return `req${counter}_${Date.now().toString(36)}`;
-}
+export function requestId(): string { return `req_${crypto.randomUUID()}`; }

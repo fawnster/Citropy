@@ -11,7 +11,8 @@ test("the local connection recovers without replaying GitHub actions", { timeout
     static CONNECTING = 0;
     readyState = 0;
     sent = [];
-    constructor() {
+    constructor(url) {
+      this.url = new URL(url);
       sockets.push(this);
     }
     open() {
@@ -135,6 +136,32 @@ test("the local connection recovers without replaying GitHub actions", { timeout
       assert.deepEqual(current.sent, []);
     },
   );
+
+  await t.test("reconnect resumes its cursor, ignores duplicates and requests a snapshot after a gap", () => {
+    current.message({ ...hello, epoch: "server-a", sequence: 10 });
+    const project = { id: "project", path: "/project", name: "Before reconnect", lastOpened: 1 };
+    current.message({ t: "project.upsert", project, sequence: 11 });
+    current.close();
+    t.mock.timers.tick(400);
+    current = sockets.at(-1);
+    assert.equal(current.url.searchParams.get("epoch"), "server-a");
+    assert.equal(current.url.searchParams.get("after"), "11");
+    current.open();
+    current.message({ t: "project.upsert", project: { ...project, name: "Duplicate" }, sequence: 11 });
+    current.message({ t: "project.upsert", project: { ...project, name: "Recovered" }, sequence: 12 });
+    current.message({ t: "reconnected", epoch: "server-a", sequence: 12, shells: [], browsers: [] });
+    assert.equal(useApp.getState().connected, true);
+    assert.equal(useApp.getState().projects[0].name, "Recovered");
+    current.message({ t: "project.upsert", project: { ...project, name: "Gap" }, sequence: 14 });
+    assert.equal(current.readyState, 3);
+    t.mock.timers.tick(400);
+    current = sockets.at(-1);
+    assert.equal(current.url.searchParams.has("epoch"), false);
+    current.open();
+    current.message({ ...hello, epoch: "server-b", sequence: 1 });
+    flush();
+    assert.deepEqual(useApp.getState().projects, []);
+  });
 
   await t.test("disconnect releases every request type and explicit cleanup never reconnects", async () => {
     current.message(hello);

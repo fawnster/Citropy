@@ -215,11 +215,6 @@ export function NewConversation() {
               </label>
             </div>
           )}
-          {project.settings?.actions?.some((action) => action.setup) && (
-            <p className="feature-note">
-              {t("The project's setup actions will run in the new worktree.")}
-            </p>
-          )}
         </>
       )}
       {kind === "existing" && (

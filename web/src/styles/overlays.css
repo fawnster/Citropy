@@ -1,79 +1,13 @@
-.scrim {
-  position: fixed;
-  inset: 0;
-  z-index: 90;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: color-mix(in oklab, var(--canvas-deep) 68%, transparent);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
-}
-
-.scrim[data-align="top"] {
-  align-items: start;
-  padding-top: calc(var(--viewport-height) * 0.12);
-}
-
-.ask {
-  width: min(640px, 100%);
-  max-height: calc(var(--viewport-height) * 0.78);
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
-  gap: 12px;
-  padding: 16px;
-  border-radius: var(--r-xl);
-  border: 1px solid var(--line-bright);
-  background: var(--overlay);
-  box-shadow: var(--shadow-lg);
-}
-
-.ask-head {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-}
-
-.ask-icon {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--r-md);
-  background: var(--warn-soft);
-  color: var(--warn);
-  flex: none;
-}
-
-.ask-title {
-  display: grid;
-  gap: 1px;
-  min-width: 0;
-  flex: 1;
-}
-
-.ask-title h2 {
-  font-size: 15px;
-  font-family: var(--font-mono);
-  letter-spacing: -0.01em;
-}
-
-.ask-lede {
-  margin: 0;
-  color: var(--text-2);
-  font-size: 13px;
-}
-
 .ask-code,
 .ask-diff {
   margin: 0;
   padding: 11px 13px;
   border-radius: var(--r-md);
-  border: 1px solid var(--line);
+  border: 0;
   background: var(--code-bg);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
@@ -88,12 +22,6 @@
 .ask-diff .diff-line {
   grid-template-columns: 20px minmax(0, 1fr);
   padding: 0 10px;
-}
-
-.ask-actions {
-  display: flex;
-  align-items: center;
-  gap: 7px;
 }
 
 .toasts {
@@ -114,22 +42,22 @@
   max-width: min(420px, calc(var(--viewport-width) - 32px));
   padding: 8px 8px 8px 13px;
   border-radius: var(--r-md);
-  border: 1px solid var(--line-strong);
+  border: 0;
   background: var(--overlay);
   box-shadow: var(--shadow-md);
   color: var(--text-2);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   pointer-events: auto;
 }
 
 .toast[data-level="error"] {
-  border-color: color-mix(in oklab, var(--bad) 40%, transparent);
   color: var(--bad);
+  background: color-mix(in srgb, var(--bad) 10%, var(--overlay));
 }
 
 .toast[data-level="success"] {
-  border-color: color-mix(in oklab, var(--ok) 36%, transparent);
   color: var(--ok);
+  background: color-mix(in srgb, var(--ok) 10%, var(--overlay));
 }
 
 .toast-text {
@@ -137,11 +65,12 @@
 }
 
 .citropy-dialog {
+  pointer-events: auto;
   width: min(480px, calc(var(--viewport-width) - 48px));
   max-height: calc(var(--viewport-height) - 48px);
   padding: 0;
-  border: 1px solid var(--line-bright);
-  border-radius: 16px;
+  border: 0;
+  border-radius: var(--r-xl);
   background: var(--overlay);
   color: var(--text);
   box-shadow: var(--shadow-lg);
@@ -175,7 +104,7 @@
 .dialog-heading p {
   margin: 8px 0 0;
   color: var(--text-3);
-  font-size: 13px;
+  font-size: var(--text-base);
   line-height: 1.65;
 }
 .dialog-heading > .icon-btn {
@@ -187,15 +116,14 @@
   place-items: center;
   width: 40px;
   height: 40px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
+  border: 0;
+  border-radius: var(--r-lg);
   background: var(--raised);
   color: var(--file-icon);
   flex: none;
 }
 .dialog-symbol[data-danger="true"] {
   background: var(--bad-soft);
-  border-color: transparent;
   color: var(--bad);
 }
 .dialog-content {
@@ -206,17 +134,15 @@
   justify-content: flex-end;
   gap: 9px;
   padding: 16px 24px;
-  border-top: 1px solid var(--line);
   background: var(--panel);
 }
 .citropy-dialog .btn {
   min-height: 34px;
   padding: 7px 13px;
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 .citropy-dialog .btn[data-variant="danger"] {
   background: var(--bad);
-  border-color: var(--bad);
   color: #fff;
 }
 .citropy-dialog .btn[data-variant="danger"]:hover {
@@ -225,15 +151,15 @@
 .confirmation-context {
   padding: 12px 14px;
   background: var(--canvas);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 8px;
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 500;
   overflow-wrap: anywhere;
 }
 .dialog-error {
   color: var(--bad);
-  font-size: 12px;
+  font-size: var(--text-sm);
   margin-top: 12px;
 }
 .citropy-dialog.permission-dialog {
@@ -248,7 +174,7 @@
   gap: 8px;
   align-items: center;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   margin-bottom: 14px;
 }
 .permission-dialog .permission-context .provider-icon {
@@ -280,11 +206,11 @@
 }
 .notification-center {
   position: absolute;
-  right: 0;
+  left: 0;
   top: calc(100% + 12px);
   z-index: 85;
   width: min(380px, calc(var(--viewport-width) - 24px));
-  border: 1px solid var(--line-bright);
+  border: 0;
   border-radius: 13px;
   background: var(--overlay);
   box-shadow: var(--shadow-lg);
@@ -306,25 +232,24 @@
 }
 .notification-center header span {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 .notification-filters {
   display: flex;
   gap: 5px;
   padding: 0 16px 12px;
-  border-bottom: 1px solid var(--line);
+  background: var(--panel);
 }
 .notification-filters button {
   padding: 6px 10px;
   border-radius: 6px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-3);
 }
 .notification-filters button[aria-pressed="true"] {
-  background: var(--raised-2);
   color: var(--text);
 }
-.notification-filters span {
+.notification-filters button span {
   font-variant-numeric: tabular-nums;
   padding-left: 3px;
 }
@@ -336,7 +261,9 @@
   align-items: start;
   padding: 16px;
   gap: 12px;
-  border-bottom: 1px solid var(--line);
+}
+.notification-row:nth-child(even) {
+  background: var(--panel);
 }
 .notification-row[data-unread="true"] {
   background: var(--accent-soft);
@@ -345,7 +272,7 @@
 .toast-symbol {
   width: 30px;
   height: 30px;
-  border-radius: 9px;
+  border-radius: var(--r-md);
   display: grid;
   place-items: center;
   flex: none;
@@ -370,11 +297,11 @@
   text-align: left;
 }
 .notification-copy strong {
-  font-size: 12px;
-  font-weight: 550;
+  font-size: var(--text-sm);
+  font-weight: 500;
 }
 .notification-copy > span {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-3);
   line-height: 1.5;
   overflow-wrap: anywhere;
@@ -384,7 +311,7 @@
   overflow: hidden;
 }
 .notification-copy time {
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-3);
   margin-top: 2px;
 }
@@ -403,11 +330,11 @@
   margin-bottom: 6px;
 }
 .notification-empty strong {
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 .notification-empty p {
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
 }
 .notification-center footer {
@@ -415,14 +342,14 @@
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  font-size: 10px;
+  font-size: var(--text-xs);
   color: var(--text-3);
 }
 .notification-center footer button {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 .toasts {
   bottom: 20px;
@@ -435,8 +362,7 @@
   align-items: flex-start;
   width: 350px;
   padding: 14px;
-  border-radius: 12px;
-  border-color: var(--line-bright);
+  border-radius: var(--r-lg);
   color: var(--text);
 }
 .toast-copy {
@@ -446,13 +372,13 @@
   min-width: 0;
 }
 .toast-copy strong {
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   font-weight: 600;
 }
 .toast-text {
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.5;
   display: -webkit-box;
   -webkit-line-clamp: 3;
@@ -466,7 +392,7 @@
 .toast-open {
   color: var(--text);
   text-align: left;
-  font-size: 11px;
+  font-size: var(--text-xs);
   text-decoration: underline;
   text-underline-offset: 4px;
   padding-top: 4px;
@@ -479,7 +405,7 @@
   margin: 0;
 }
 .citropy-dialog .dialog-content p {
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
 }
 .shell:has(.notification-center) .toasts {
@@ -490,14 +416,14 @@
 }
 .shells-wrap:empty { display: none; }
 .icon-btn.shells-trigger { display: inline-flex; align-items: center; gap: 6px; width: auto; padding-inline: 8px; }
-.shells-trigger > span { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--text-2); }
-.shells-panel { position: fixed; inset: auto; margin: 0; padding: 0; overflow: auto; border: 1px solid var(--line-strong); border-radius: var(--r-lg); background: var(--overlay); color: var(--text); font-size: 12px; }
-.shells-panel > header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
-.shells-panel h2 { margin: 0; font-size: 13px; font-weight: 600; flex: 1; }
-.shells-panel header > span { color: var(--text-3); font-size: 11px; }
+.shells-trigger > span { font-size: var(--text-xs); font-variant-numeric: tabular-nums; color: var(--text-2); }
+.shells-panel { position: fixed; inset: auto; margin: 0; padding: 0; overflow: auto; border: 0; border-radius: var(--r-lg); background: var(--overlay); color: var(--text); font-size: var(--text-sm); box-shadow: var(--shadow-lg); }
+.shells-panel > header { display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--raised); }
+.shells-panel h2 { margin: 0; font-size: var(--text-base); font-weight: 600; flex: 1; }
+.shells-panel header > span { color: var(--text-3); font-size: var(--text-xs); }
 .shells-panel .icon-btn { flex-shrink: 0; }
 .shells-list { max-height: 200px; overflow: auto; padding: 6px; overscroll-behavior: contain; }
-.shells-list h3 { margin: 9px 8px 5px; color: var(--text-3); font-size: 10px; font-weight: 500; }
+.shells-list h3 { margin: 9px 8px 5px; color: var(--text-3); font-size: var(--text-xs); font-weight: 500; }
 .shell-row { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 48px; padding: 8px; border: 0; border-radius: var(--r-sm); text-align: left; background: transparent; transition: background var(--dur-fast); }
 .shell-row:hover { background: var(--raised); }
 .shell-row[data-selected="true"] { background: var(--raised-2); }
@@ -506,15 +432,15 @@
 .shell-status-dot[data-status="stopping"] { background: var(--heat); }
 .shell-status-dot[data-status="failed"] { background: var(--bad); }
 .shell-row-copy { min-width: 0; flex: 1; display: grid; gap: 3px; }
-.shell-row-copy code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
-.shell-row-copy small { color: var(--text-3); font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.shell-status { flex-shrink: 0; color: var(--text-3); font-size: 10px; }
+.shell-row-copy code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); }
+.shell-row-copy small { color: var(--text-3); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.shell-status { flex-shrink: 0; color: var(--text-3); font-size: var(--text-xs); }
 .shell-status[data-status="failed"] { color: var(--bad); }
-.shell-detail { border-top: 1px solid var(--line); padding: 12px 14px 14px; }
-.shell-command { display: block; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 80px; overflow: auto; font-size: 12px; user-select: text; }
-.shell-directory { margin-top: 5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; user-select: text; }
+.shell-detail { padding: 12px 14px 14px; background: var(--panel); }
+.shell-command { display: block; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 80px; overflow: auto; font-size: var(--text-sm); user-select: text; }
+.shell-directory { margin-top: 5px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); user-select: text; }
 .shell-actions { display: flex; gap: 8px; margin-top: 12px; }
-.shell-stop-hint, .shell-output-empty { margin: 9px 0 0; color: var(--text-3); font-size: 11px; line-height: 1.5; }
-.shell-error { color: var(--bad); font-size: 11px; }
-.shell-output-heading { display: flex; align-items: center; justify-content: space-between; min-height: 28px; margin-top: 12px; color: var(--text-3); font-size: 10px; }
+.shell-stop-hint, .shell-output-empty { margin: 9px 0 0; color: var(--text-3); font-size: var(--text-xs); line-height: 1.5; }
+.shell-error { color: var(--bad); font-size: var(--text-xs); }
+.shell-output-heading { display: flex; align-items: center; justify-content: space-between; min-height: 28px; margin-top: 12px; color: var(--text-3); font-size: var(--text-xs); }
 .shell-output { margin: 0; padding: 10px; max-height: 220px; overflow: auto; background: var(--canvas); border-radius: var(--r-sm); font: 11px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; overscroll-behavior: contain; }

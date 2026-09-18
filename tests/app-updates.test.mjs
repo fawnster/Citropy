@@ -292,7 +292,7 @@ createRoot(root).render(React.createElement('aside', {className:'rail', style:{w
       .evaluateAll((nodes) =>
         nodes.map((node) => getComputedStyle(node).color),
       );
-    assert.equal(new Set(colors).size, 4);
+    assert.equal(new Set(colors).size, 1);
     assert.equal(
       await page
         .locator(".navigation-handle svg, .navigation-handle span")

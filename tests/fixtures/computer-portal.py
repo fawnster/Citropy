@@ -104,7 +104,7 @@ class Desktop(ScreenCast):
         return self.start(session, parent, options, sender)
 
     def start(self, session, parent, options, sender):
-        streams = dbus.Array([dbus.Struct((dbus.UInt32(42), dbus.Dictionary({"size": dbus.Struct((800, 600), signature="ii"), "logical_size": dbus.Struct((400, 300), signature="ii")}, signature="sv")), signature="ua{sv}")], signature="(ua{sv})")
+        streams = dbus.Array([dbus.Struct((dbus.UInt32(42), dbus.Dictionary({"size": dbus.Struct((800, 600), signature="ii"), "logical_size": dbus.Struct((400, 300), signature="ii"), "position": dbus.Struct((1920, 0), signature="ii")}, signature="sv")), signature="ua{sv}")], signature="(ua{sv})")
         return self.request(sender, options, {"devices": dbus.UInt32(3), "streams": streams})
 
     @dbus.service.method(CAST, in_signature="oa{sv}", out_signature="h")
@@ -183,7 +183,7 @@ class PortalTests(unittest.TestCase):
         before = len(self.desktop.signatures)
         try:
             displays = portal.start(True)
-            self.assertEqual(displays, [{"id": "42", "name": "Screen 1", "width": 400, "height": 300}])
+            self.assertEqual(displays, [{"id": "42", "name": "Screen 1", "width": 400, "height": 300, "x": 1920, "y": 0}])
             self.assertEqual(int(next(call[1]["types"] for call in self.desktop.calls if call[0] == "devices")), 3)
             image = portal.screenshot("42", 400)
             self.assertEqual((image["width"], image["height"]), (400, 300))

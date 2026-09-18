@@ -19,7 +19,7 @@ export async function remoteProxy(allowedOrigin) {
     const cors = { "access-control-allow-origin": origin(), vary: "Origin" };
     if (!req.url?.startsWith("/api/") || req.url.startsWith("/api/remote/shutdown") || req.url.startsWith("/api/desktop") || req.url.startsWith("/api/updates/")) { res.writeHead(404, cors).end(); return; }
     if (req.method === "OPTIONS") { res.writeHead(204, { ...cors, "access-control-allow-methods": "GET, POST, PATCH, PUT, DELETE", "access-control-allow-headers": "Content-Type" }).end(); return; }
-    if (!target) { res.writeHead(503, { ...cors, "content-type": "application/json" }).end(JSON.stringify({ error: "The SSH connection is disconnected. Reconnect or switch to Local." })); return; }
+    if (!target) { res.writeHead(503, { ...cors, "content-type": "application/json" }).end(JSON.stringify({ error: "The environment connection is disconnected. Reconnect or switch to Local." })); return; }
     const headers = headersFor(req);
     delete headers.cookie;
     const upstream = request({ hostname: "127.0.0.1", port: target.port, method: req.method, path: req.url, headers }, response => {
@@ -33,7 +33,7 @@ export async function remoteProxy(allowedOrigin) {
     requests.add(active);
     upstream.on("error", () => {
       if (res.writableEnded) return;
-      if (!res.headersSent) res.writeHead(502, { ...cors, "content-type": "application/json" }).end(JSON.stringify({ error: "The SSH backend could not be reached. Reconnect and try again." }));
+      if (!res.headersSent) res.writeHead(502, { ...cors, "content-type": "application/json" }).end(JSON.stringify({ error: "The environment backend could not be reached. Reconnect and try again." }));
       else res.destroy();
     });
     upstream.setTimeout(300000, () => upstream.destroy());
@@ -42,12 +42,12 @@ export async function remoteProxy(allowedOrigin) {
   });
   server.on("connection", socket => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });
   server.on("upgrade", (req, client, head) => {
-    if (!trusted(req) || req.url !== "/socket" || !target) { client.destroy(); return; }
+    if (!trusted(req) || req.url?.split("?")[0] !== "/socket" || !target) { client.destroy(); return; }
     streams.add(client);
     client.on("close", () => streams.delete(client));
     const headers = headersFor(req);
     delete headers.cookie;
-    const upstream = request({ hostname: "127.0.0.1", port: target.port, path: "/socket", headers });
+    const upstream = request({ hostname: "127.0.0.1", port: target.port, path: req.url, headers });
     upstream.on("upgrade", (response, socket, buffered) => {
       socket.setTimeout(0);
       sockets.add(socket);
@@ -76,7 +76,7 @@ export async function remoteProxy(allowedOrigin) {
         if (res.writableEnded) continue;
         req.unpipe(upstream);
         req.resume();
-        if (!res.headersSent) res.writeHead(503, { ...cors, "content-type": "application/json" }).end(JSON.stringify({ error: "The SSH connection changed. Try again after reconnecting." }));
+        if (!res.headersSent) res.writeHead(503, { ...cors, "content-type": "application/json" }).end(JSON.stringify({ error: "The environment connection changed. Try again after reconnecting." }));
         else res.destroy();
         upstream.destroy();
       }

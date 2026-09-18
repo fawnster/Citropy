@@ -124,7 +124,8 @@ export function ComputerPane({ active }: { active: boolean }) {
             <button className="icon-btn" data-active={live} title={live ? t("Pause preview updates") : t("Resume preview updates")} aria-label={t("Live preview")} aria-pressed={live} onClick={() => setLive(!live)}>{live ? <Pause size={15} /> : <Play size={15} />}</button>
             <button className="icon-btn" title={expanded ? t("Reduce preview") : t("Enlarge preview")} aria-label={t("Enlarge computer preview")} aria-pressed={expanded} onClick={() => { setInteractive(false); setExpanded(!expanded); }}><Maximize2 size={16} /></button>
           </div>
-          <div className="computer-preview" data-interactive={interactive} tabIndex={interactive ? 0 : -1} role="group" aria-label={interactive ? t("Interactive desktop preview. Escape leaves interaction mode.") : t("Shared desktop preview")}
+          <div className="computer-sharing-status" role="status" data-paused={state.status === "paused"}><span aria-hidden="true" /><div><strong>{t(state.status === "paused" ? "Computer use paused" : state.control ? "Citropy is controlling this screen" : "Citropy is viewing this screen")}</strong><small>{t("A screen indicator keeps Pause and Stop available outside Citropy.")}</small></div></div>
+          <div className="computer-preview" data-interactive={interactive} data-paused={state.status === "paused"} tabIndex={interactive ? 0 : -1} role="group" aria-label={interactive ? t("Interactive desktop preview. Escape leaves interaction mode.") : t("Shared desktop preview")}
             onKeyDown={(event) => {
               if (!interactive) return;
               if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); setInteractive(false); }
@@ -154,7 +155,7 @@ export function ComputerPane({ active }: { active: boolean }) {
             <button className="btn" onClick={() => void operation("computer/pause", { paused: state.status !== "paused" })}>{state.status === "paused" ? <Play size={15} /> : <Pause size={15} />}{state.status === "paused" ? t("Resume control") : t("Pause control")}</button>
             <button className="btn computer-stop" onClick={() => void operation("computer/stop")}><Square size={14} />{" "}{t("Stop sharing")}</button>
           </div>
-          <p className="computer-session-note">{state.shortcut ? t("Ctrl+Alt+Escape stops control from any app.") : t("Use Stop sharing here or in your desktop's sharing indicator.")}{" "}{t("Automatically stops after five minutes without actions.")}</p>
+          <p className="computer-session-note">{state.control && <>{t("Computer use shares your mouse and keyboard.")}{" "}</>}{state.shortcut ? t("Ctrl+Alt+Escape stops control from any app.") : t("Use Stop sharing here or in your desktop's sharing indicator.")}{" "}{t("Automatically stops after five minutes without actions.")}</p>
         </>
       )}
       <AnimatePresence>{expanded && <Modal title={t("Computer preview")} description={owner?.title} icon={<Monitor size={20} className="panel-icon-computer" />} className="computer-preview-dialog" onClose={() => setExpanded(false)} footer={<><button type="button" className="btn" data-cancel onClick={() => setExpanded(false)}>{t("Close preview")}</button><button type="button" className="btn computer-stop" onClick={() => void operation("computer/stop")}><Square size={14} />{" "}{t("Stop sharing")}</button></>}>

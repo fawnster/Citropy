@@ -3,37 +3,11 @@ import { useI18n } from "../../lib/i18n.ts";
 import { useDisclosure } from "../../lib/use-disclosure.ts";
 import { Collapsible } from "../Collapsible.tsx";
 import { AlertTriangle, Ban, Check, ChevronRight, ExternalLink, shapeIcon } from "../icons.ts";
+import { toolLabel } from "../../lib/group.ts";
 import { DiffView } from "../DiffView.tsx";
 import { ansiToHtml, stripAnsi } from "../../lib/ansi.ts";
 import { duration } from "../../lib/format.ts";
 import type { ToolPart } from "../../../../shared/protocol.ts";
-
-const VERBS: Record<string, [string, string]> = {
-  Bash: ["Running", "Ran"],
-  Read: ["Reading", "Read"],
-  Write: ["Writing", "Wrote"],
-  Edit: ["Editing", "Edited"],
-  MultiEdit: ["Editing", "Edited"],
-  NotebookEdit: ["Editing", "Edited"],
-  Glob: ["Finding", "Found"],
-  Grep: ["Searching", "Searched"],
-  WebSearch: ["Searching the web for", "Searched the web for"],
-  WebFetch: ["Fetching", "Fetched"],
-  Task: ["Delegating", "Delegated"],
-  Agent: ["Delegating", "Delegated"],
-};
-
-function label(name: string, status: ToolPart["status"], t: ReturnType<typeof useI18n>): string {
-  const pair = VERBS[name];
-  if (!pair) {
-    const short = name.startsWith("mcp__") ? (name.split("__")[1] ?? "tool") : name;
-    return status === "running" ? `${t("Running")} ${short}` : short;
-  }
-  if (status === "denied") return `${t("Blocked")} ${t(pair[1]).toLowerCase()}`;
-  return status === "running"
-    ? t(pair[0])
-    : t(pair[1], undefined, "past");
-}
 
 export function ToolCard({ part }: { part: ToolPart }) {
   const t = useI18n();
@@ -54,13 +28,13 @@ export function ToolCard({ part }: { part: ToolPart }) {
   const url = part.shape === "web" ? part.headline : null;
 
   return (
-    <div className="tool" data-shape={part.shape} data-status={part.status} data-open={open}>
+    <div id={`tool-${part.id}`} className="tool" data-shape={part.shape} data-status={part.status} data-open={open}>
       <button className="tool-head" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
         <ChevronRight size={12} className="tool-chevron" />
         <span className="tool-icon">
           <Icon size={13} />
         </span>
-        <span className="tool-name">{label(part.name, part.status, t)}</span>
+        <span className="tool-name">{toolLabel(part.name, part.status, t)}</span>
         <span className="tool-headline mono truncate">{part.headline}</span>
         <span className="tool-meta">
           {part.detail && <span className="tool-detail truncate">{part.detail}</span>}

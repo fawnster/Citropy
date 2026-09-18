@@ -135,11 +135,6 @@ export async function closeBrowser(id: string): Promise<void> {
   closePanel(id);
 }
 
-export async function closeProjectBrowsers(projectId: string): Promise<void> {
-  for (const state of sessions.values())
-    if (state.projectId === projectId) await closeBrowser(state.id);
-}
-
 export async function closeBrowsers(): Promise<void> {
   sessions.clear();
   queues.clear();

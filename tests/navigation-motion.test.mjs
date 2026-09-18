@@ -8,7 +8,7 @@ import { createServer } from "vite";
 import react from "@vitejs/plugin-react";
 import { chromium } from "playwright";
 
-test("navigation stays bounded and motion releases its resources", { timeout: 90_000 }, async (t) => {
+test("navigation stays bounded and motion releases its resources", { timeout: 120_000 }, async (t) => {
   const cacheDir = await mkdtemp(join(tmpdir(), "citropy-navigation-motion-"));
   const server = await createServer({
     configFile: false, cacheDir,
@@ -78,7 +78,7 @@ test("navigation stays bounded and motion releases its resources", { timeout: 90
     await page.goto(server.resolvedUrls.local[0]);
     await page.locator(".thread-card").first().waitFor();
     await page.evaluate(() => document.fonts.ready);
-    const settle = () => page.waitForFunction(() => document.getAnimations().every((animation) => animation.playState !== "running"));
+    const settle = () => page.waitForFunction(() => document.getAnimations().every((animation) => animation.playState !== "running" || animation.effect.getTiming().iterations === Infinity));
     await settle();
     return { page, settle, requests, emit: event => connection.send(JSON.stringify(event)) };
   }
@@ -92,7 +92,9 @@ test("navigation stays bounded and motion releases its resources", { timeout: 90
     await page.mouse.move(bounds.x + 80, bounds.y + 40, { steps: 4 });
     await page.locator('.thread-entry[data-thread-id="thread-2"][data-dragging="true"]').waitFor();
     emit({ t: "thread.upsert", thread: { ...threads[2], changedFiles: 1 } });
-    await entry.locator(".thread-row-details").getByText("1 file", { exact: true }).waitFor();
+    await page.waitForFunction(async () => (await import("/web/src/lib/store.ts")).useApp.getState().threads["thread-2"].changedFiles === 1);
+    assert.equal(await entry.getByText("1 file", { exact: true }).count(), 0);
+    assert.ok(Math.abs((await entry.boundingBox()).height - bounds.height) < 1);
     assert.equal(await entry.getAttribute("data-dragging"), "true");
     emit({ t: "thread.remove", id: "thread-2" });
     await entry.waitFor({ state: "detached" });
@@ -115,11 +117,84 @@ test("navigation stays bounded and motion releases its resources", { timeout: 90
     assert.equal(requests.some(event => event.t === "reorder"), false);
   });
 
+  await t.test("thread rows omit passive metadata and show compact, named activity without changing height", async test => {
+    const { page, emit } = await fixture(test, { count: 6 });
+    const card = page.locator('.thread-entry[data-thread-id="thread-2"] .thread-card');
+    const height = (await card.boundingBox()).height;
+    for (const [status, label] of [["idle", null], ["stopped", null], ["working", "Working"], ["thinking", "Thinking"], ["queued", "Queued"], ["awaiting", "Needs input"], ["error", "Failed"]]) {
+      emit({ t: "thread.upsert", thread: { ...threads[2], status, running: status === "working" || status === "thinking", changedFiles: 19 } });
+      await page.waitForFunction(async status => (await import("/web/src/lib/store.ts")).useApp.getState().threads["thread-2"].status === status, status);
+      if (label) await card.getByRole("img", { name: label, exact: true }).waitFor();
+      else assert.equal(await card.locator(".thread-status").count(), 0);
+      assert.doesNotMatch(await card.innerText(), /19 files|stopped|working|thinking|queued|Needs input|Failed/);
+      assert.ok(Math.abs((await card.boundingBox()).height - height) < 1, status);
+    }
+  });
+
+  await t.test("thread previews reveal details without moving rows, blocking clicks, or surviving navigation", async test => {
+    const { page, emit, requests } = await fixture(test);
+    const details = { ...threads[2], status: "stopped", changedFiles: 12, workspacePath: "/example/a-long-workspace-folder", workspaceBranch: "feature/improve-the-workspace-navigation" };
+    emit({ t: "thread.upsert", thread: details });
+    const row = page.locator('.thread-entry[data-thread-id="thread-2"] .thread-row');
+    const preview = page.locator('.thread-preview[role="tooltip"]');
+    for (const [width, scale] of [[1440, 120], [600, 150]]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate(async scale => (await import("/web/src/lib/store.ts")).setUiScale(scale), scale);
+      await page.mouse.move(width - 10, 10);
+      const before = await row.boundingBox();
+      await row.hover({ position: { x: 70, y: 15 } });
+      await page.waitForTimeout(150);
+      assert.equal(await preview.count(), 0);
+      await preview.waitFor();
+      await preview.getByText("Stopped", { exact: true }).waitFor();
+      assert.match(await preview.innerText(), /Claude Sonnet 5\s+Claude Code/);
+      assert.match(await preview.innerText(), /12 files/);
+      assert.match(await preview.innerText(), /a-long-workspace-folder/);
+      assert.match(await preview.innerText(), /feature\/improve-the-workspace-navigation/);
+      assert.equal(await row.getAttribute("aria-describedby"), await preview.getAttribute("id"));
+      assert.deepEqual(await row.boundingBox(), before);
+      const bounds = await preview.boundingBox();
+      assert.ok(bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= width && bounds.y + bounds.height <= 900, JSON.stringify(bounds));
+      await preview.hover();
+      await page.waitForTimeout(200);
+      assert.equal(await preview.isVisible(), true);
+      await page.screenshot({ path: `/tmp/citropy-thread-hover-${width}.png`, animations: "disabled" });
+      await page.keyboard.press("Escape");
+      await preview.waitFor({ state: "detached" });
+    }
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.evaluate(async () => (await import("/web/src/lib/store.ts")).setUiScale(120));
+    await page.mouse.move(1400, 80);
+    await row.hover({ position: { x: 70, y: 15 } });
+    await page.waitForTimeout(100);
+    await page.locator(".rail-list").evaluate(node => node.scrollTop += 30);
+    await page.waitForTimeout(550);
+    assert.equal(await preview.count(), 0);
+    await page.locator(".rail-list").evaluate(node => node.scrollTop = 0);
+    await page.mouse.move(1400, 80);
+    await row.hover({ position: { x: 70, y: 15 } });
+    await preview.waitFor();
+    const bounds = await row.boundingBox();
+    await page.mouse.move(bounds.x + 70, bounds.y + 15);
+    await page.mouse.down();
+    await preview.waitFor({ state: "detached" });
+    await page.mouse.up();
+    await page.keyboard.press("Tab");
+    await row.focus();
+    await preview.waitFor();
+    await page.keyboard.press("Escape");
+    await preview.waitFor({ state: "detached" });
+    await page.keyboard.press("Enter");
+    assert.equal(await row.getAttribute("aria-current"), "page");
+    assert.ok(requests.some(event => event.t === "thread.load" && event.id === "thread-2"));
+    assert.equal(await preview.count(), 0);
+  });
+
   await t.test("the whole thread card opens its conversation while actions stay independent", async test => {
     const { page, requests } = await fixture(test, { count: 6 });
     const card = page.locator('.thread-entry[data-thread-id="thread-1"] .thread-card');
     const reset = () => page.locator('.thread-entry[data-thread-id="thread-0"] .thread-row').click();
-    for (const target of [".thread-row-title", ".thread-provider", "time"]) {
+    for (const target of [".thread-row-title", ".thread-provider", ".thread-row-footer"]) {
       await reset();
       await card.locator(target).click();
       assert.equal(await card.locator(".thread-row").getAttribute("aria-current"), "page", target);
@@ -133,12 +208,19 @@ test("navigation stays bounded and motion releases its resources", { timeout: 90
     await reset();
     const loads = () => requests.filter(event => event.t === "thread.load" && event.id === "thread-1").length;
     const before = loads();
+    await page.locator(".canvas").hover();
+    assert.equal(await card.locator(".thread-row-actions").evaluate(node => getComputedStyle(node).pointerEvents), "none");
+    const summary = await card.locator(".thread-row-summary").boundingBox();
     await card.hover();
+    const visibleSummary = await card.locator(".thread-row-summary").boundingBox();
+    assert.ok(Math.abs(summary.width - visibleSummary.width) < 1);
+    assert.ok(Math.abs(summary.x - visibleSummary.x) < 1);
     await card.locator('.thread-row-actions [aria-haspopup="menu"]').click();
     await page.getByRole("menuitem", { name: "Rename…", exact: true }).click();
     await page.getByRole("dialog", { name: "Rename conversation" }).waitFor();
     await page.getByRole("button", { name: "Cancel", exact: true }).click();
     await page.getByRole("dialog").waitFor({ state: "detached" });
+    await card.hover();
     await card.locator(".thread-row-finish").click();
     assert.ok(requests.some(event => event.t === "thread.finish" && event.id === "thread-1"));
     await card.locator(".thread-row-kill").click();
@@ -160,18 +242,18 @@ test("navigation stays bounded and motion releases its resources", { timeout: 90
     const { page, requests } = await fixture(test);
     assert.ok(await page.locator(".thread-card").count() < 25);
     await page.locator(".rail-list").evaluate((node) => { node.scrollTop = node.scrollHeight; });
-    const last = page.locator('.thread-row[title="Conversation 999"]');
+    const last = page.locator('.thread-row[aria-label="Conversation 999"]');
     await last.waitFor();
     await last.focus();
     await page.locator(".rail-list").evaluate((node) => { node.scrollTop = 0; });
-    await page.locator('.thread-row[title="Conversation 1"]').waitFor();
+    await page.locator('.thread-row[aria-label="Conversation 1"]').waitFor();
     assert.equal(await last.evaluate((node) => node === document.activeElement), true);
     assert.ok(await page.locator(".thread-card").count() < 25);
     await page.getByRole("textbox", { name: "Find a conversation", exact: true }).fill("oldest");
     await page.getByText("Search result from the oldest conversation", { exact: true }).waitFor();
     assert.equal(await page.locator(".thread-card").count(), 1);
     await last.click();
-    await page.locator('.thread-row[title="Conversation 999"][aria-current="page"]').waitFor();
+    await page.locator('.thread-row[aria-label="Conversation 999"][aria-current="page"]').waitFor();
     assert.ok(requests.some((event) => event.t === "thread.load" && event.id === "thread-999"));
     await page.getByRole("textbox", { name: "Find a conversation", exact: true }).fill("");
     await last.waitFor();
@@ -323,7 +405,7 @@ test("navigation stays bounded and motion releases its resources", { timeout: 90
         if (count === 3) assert.equal(requests.filter(event => event.t === "reorder").length, 0);
         else assert.equal(requests.filter(event => event.t === "reorder").at(-1).ids[2], `thread-${id}`);
         await begin();
-        if (count > 40) await page.locator(".rail-list").evaluate(node => { node.scrollTop = node.scrollHeight; });
+        await page.locator(".rail-list").evaluate(node => { node.scrollTop = node.scrollHeight; });
         await entry(count - 1).waitFor();
         const last = await entry(count - 1).locator("..").boundingBox();
         const viewport = await page.locator(".rail-list").boundingBox();
@@ -433,6 +515,53 @@ test("navigation stays bounded and motion releases its resources", { timeout: 90
     });
     assert.equal(await page.locator("html").getAttribute("data-page-hidden"), "");
     assert.equal(await page.locator(".rail").evaluate((node) => getComputedStyle(node).animationPlayState), "paused");
+  });
+
+  await t.test("selection highlights slide, follow resizing, and release their observer", async test => {
+    const { page, settle } = await fixture(test, { count: 6 });
+    await page.evaluate(async () => {
+      const { useApp } = await import("/web/src/lib/store.ts");
+      useApp.setState({ inspectorOpen: true, activePanels: { workspace: "changes" }, panels: ["changes", "tools", "subagents"].map(kind => ({ id: kind, kind, projectId: "workspace", title: kind[0].toUpperCase() + kind.slice(1) })) });
+    });
+    const strip = page.getByRole("tablist", { name: "Open workspace panels", exact: true });
+    const pill = strip.locator(".selection-highlight");
+    await strip.waitFor();
+    await settle();
+    const aligned = async () => {
+      const bounds = await strip.evaluate(node => {
+        const pill = node.querySelector(".selection-highlight");
+        const active = node.querySelector('.workbench-tab[data-active="true"]');
+        return { hidden: pill.hidden, pill: pill.getBoundingClientRect().toJSON(), active: active.getBoundingClientRect().toJSON() };
+      });
+      assert.equal(bounds.hidden, false);
+      for (const key of ["x", "y", "width", "height"]) assert.ok(Math.abs(bounds.pill[key] - bounds.active[key]) < 1.6, JSON.stringify(bounds));
+    };
+    await aligned();
+    assert.equal(await pill.evaluate(node => node.getAnimations().length), 0);
+    for (const name of ["Tools", "Changes", "Subagents"]) {
+      await strip.getByRole("tab", { name, exact: true }).evaluate(node => node.click());
+      await page.waitForFunction(() => document.querySelector(".workbench-tabs .selection-highlight").getAnimations().some(animation => animation.playState === "running" && animation.currentTime >= 32));
+    }
+    await settle();
+    await aligned();
+    for (const [width, scale] of [[1440, 90], [620, 150], [1440, 120]]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate(async scale => (await import("/web/src/lib/store.ts")).setUiScale(scale), scale);
+      await settle();
+      await aligned();
+    }
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await strip.getByRole("tab", { name: "Changes", exact: true }).click();
+    await aligned();
+    assert.equal(await pill.evaluate(node => node.getAnimations().length), 0);
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    const navigation = page.locator(".section-nav");
+    await navigation.waitFor();
+    await settle();
+    assert.equal(await navigation.locator(".selection-highlight").evaluate(node => node.hidden), false);
+    await page.getByRole("button", { name: "Back to chat", exact: true }).click();
+    await navigation.waitFor({ state: "detached" });
+    assert.equal(await page.evaluate(() => [...window.navigationResources.observers].some(observer => [...observer.targets].some(node => !node.isConnected))), false);
   });
 
   await t.test("the thinking timer sleeps while hidden and resumes from the original start time", async (test) => {

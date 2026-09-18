@@ -118,7 +118,7 @@ test("grouped workspaces switch hosts without reloading and use the system folde
   for (const width of [1440, 620]) {
     await page.setViewportSize({ width, height: 900 });
     const box = await dialog.boundingBox();
-    assert.ok(box.x >= 0 && box.x + box.width <= width + 1);
+    assert.ok(box.x >= 0 && box.x + box.width <= width + 1, JSON.stringify({ width, box }));
     assert.ok(box.y >= 0 && box.y + box.height <= 900);
     await page.screenshot({ path: `/tmp/citropy-ssh-connect-${width}.png`, animations: "disabled" });
   }
@@ -159,17 +159,18 @@ test("grouped workspaces switch hosts without reloading and use the system folde
   const workspaceMenu = page.locator(".workspace-menu");
   assert.equal(await workspaceMenu.getByRole("menuitem", { name: /^Local project/ }).count(), 1);
   assert.equal(await workspaceMenu.getByRole("menuitem", { name: /^Remote project/ }).count(), 1);
-  await workspaceMenu.getByRole("menuitem", { name: "Local", exact: true }).click();
+  await workspaceMenu.getByRole("menuitem", { name: "Local This computer", exact: true }).click();
   assert.equal(await workspaceMenu.getByRole("menuitem", { name: /^Local project/ }).count(), 0);
   await workspaceMenu.getByRole("textbox").fill("Local project");
   assert.equal(await workspaceMenu.getByRole("menuitem", { name: /^Local project/ }).count(), 1);
   await workspaceMenu.getByRole("textbox").fill("");
-  await workspaceMenu.getByRole("menuitem", { name: "Local", exact: true }).click();
+  await workspaceMenu.getByRole("menuitem", { name: "Local This computer", exact: true }).click();
   for (const width of [1440, 620]) {
     await page.setViewportSize({ width, height: 900 });
-    const box = await workspaceMenu.boundingBox();
-    assert.ok(box.x >= 0 && box.x + box.width <= width + 1);
-    assert.ok(box.y >= 0 && box.y + box.height <= 900);
+    await page.waitForFunction(width => {
+      const box = document.querySelector(".workspace-menu").getBoundingClientRect();
+      return box.x >= 0 && box.right <= width + 1 && box.y >= 0 && box.bottom <= 900;
+    }, width);
     await page.screenshot({ path: `/tmp/citropy-grouped-workspaces-${width}.png`, animations: "disabled" });
   }
   await page.setViewportSize({ width: 1440, height: 900 });

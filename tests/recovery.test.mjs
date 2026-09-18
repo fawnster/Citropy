@@ -6,7 +6,7 @@ import http from "node:http";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { syncBuiltinESMExports } from "node:module";
-import { once } from "node:events";
+import { EventEmitter, once } from "node:events";
 import { WebSocket } from "ws";
 
 async function waitFor(check) {
@@ -96,6 +96,25 @@ test("conversation persistence and lifecycle recovery", async (t) => {
     assert.equal(new Store().threads.get(thread.id).title, "Updated");
   });
 
+  await t.test("saved provider plans recover their text and statuses on reload", () => {
+    const entry = store.createThread({ projectId: project.id, provider: "opencode", title: "Saved plan", permissionMode: "plan" });
+    store.addMessage(entry.id, { id: "saved-plan-message", role: "assistant", ts: 1, parts: [
+      { id: "saved-plan", kind: "todo", items: [
+        { content: "Inspect the service", status: "completed", priority: "high" },
+        { content: "Verify the result", status: "in_progress", priority: "high" },
+        { content: "Replace the service", status: "cancelled" },
+        { content: " ", status: "pending" },
+      ] },
+    ] });
+    store.flush();
+    const loaded = new Store().threads.get(entry.id);
+    assert.deepEqual(loaded.messages[0].parts[0].items, [
+      { text: "Inspect the service", status: "completed" },
+      { text: "Verify the result", status: "in_progress" },
+      { text: "Replace the service", status: "cancelled" },
+    ]);
+  });
+
   await t.test("malformed conversation files survive startup while valid files load", () => {
     const damagedPath = join(directory, ".citropy", "threads", "damaged.json");
     fs.writeFileSync(damagedPath, '{"messages":');
@@ -180,6 +199,41 @@ test("conversation persistence and lifecycle recovery", async (t) => {
     return { socket, events };
   }
   const first = await connect();
+  await t.test("browser panels load the chosen link and reject non-web destinations before creating a panel", async test => {
+    const { attachDesktop } = await import("../server/desktop.ts");
+    const { closeBrowser } = await import("../server/browser.ts");
+    const { panelList, closePanel } = await import("../server/panels.ts");
+    const calls = [];
+    const bridge = Object.assign(new EventEmitter(), {
+      OPEN: 1, readyState: 1,
+      send(raw) {
+        const request = JSON.parse(raw);
+        calls.push(request);
+        queueMicrotask(() => bridge.emit("message", JSON.stringify({ id: request.id, result: request.method === "browser.open" ? { ...request.params, title: "Linked page" } : null })));
+      },
+      close() { bridge.emit("close"); },
+    });
+    attachDesktop(bridge);
+    test.after(async () => {
+      await closeBrowser("linked-browser");
+      closePanel("linked-browser");
+      bridge.close();
+    });
+    const destination = "https://example.test/guide?q=one#section";
+    first.socket.send(JSON.stringify({ t: "panel.open", id: "linked-browser", kind: "browser", projectId: project.id, threadId: thread.id, url: destination }));
+    const opened = await waitFor(() => first.events.find(event => event.t === "browser.state" && event.browser.id === "linked-browser"));
+    assert.equal(opened.browser.url, destination);
+    assert.equal(opened.browser.threadId, thread.id);
+    assert.equal(calls.find(request => request.method === "browser.open").params.url, destination);
+    const count = calls.length;
+    for (const [kind, url] of [["browser", "file:///tmp/private.txt"], ["browser", "javascript:alert(1)"], ["browser", "not a url"], ["terminal", destination]]) {
+      const start = first.events.length;
+      first.socket.send(JSON.stringify({ t: "panel.open", id: "invalid-link", kind, projectId: project.id, url }));
+      await waitFor(() => first.events.slice(start).some(event => event.t === "toast" && event.level === "error"));
+      assert.equal(panelList().some(panel => panel.id === "invalid-link"), false);
+    }
+    assert.equal(calls.length, count);
+  });
   await t.test("a folder selected by the desktop opens without launching another picker", async () => {
     const selected = join(directory, "Selected folder # ✓");
     const bin = join(directory, "picker-bin");

@@ -1,3 +1,4 @@
+import type { QuestionRequest } from "../../../shared/questions.ts";
 import { environmentStorage } from "./environment.ts";
 import { resolveResponse } from "./requests.ts";
 import type { ComputerState } from "../../../shared/computer.ts";
@@ -30,6 +31,7 @@ import type {
 } from "../../../shared/protocol.ts";
 
 export interface MessageShell {
+  provider?: Message["provider"];
   id: string;
   role: Message["role"];
   ts: number;
@@ -60,7 +62,7 @@ export type PanelId = "sidebar" | "inspector" | "git" | "github";
 
 export interface AppState {
   shells: Record<string, ShellProcess>;
-  projectDefaults: Omit<ProjectSettings, "actions">;
+  projectDefaults: ProjectSettings;
   assistance: AssistanceSettings;
   activeView: "chat" | "git" | "github" | "settings" | "usage";
   newThreadProvider: import("../../../shared/protocol.ts").ProviderId | null;
@@ -76,7 +78,9 @@ export interface AppState {
     results: Array<{ threadId: string; messageId?: string; snippet: string }>;
   } | null;
   searchMessageId: string | null;
+  searchShellId: string | null;
   connected: boolean;
+  development: boolean;
   githubAccount: GitHubUser | null;
   showGitHubIdentity: boolean;
   offline: Record<string, QueuedMessage[]>;
@@ -95,6 +99,8 @@ export interface AppState {
   disclosures: Record<string, Record<string, boolean>>;
   git: Record<string, GitStatus>;
   permissions: PermissionRequest[];
+  questions: QuestionRequest[];
+  questionDrafts: Record<string, { index: number; choices: Record<string, string[]>; text: Record<string, string> }>;
   toasts: Toast[];
   activeProjectId: string | null;
   activeThreadId: string | null;
@@ -195,7 +201,9 @@ export const useApp = create<AppState>(() => ({
   confirmation: null,
   searchResult: null,
   searchMessageId: null,
+  searchShellId: null,
   connected: false,
+  development: false,
   githubAccount: null,
   showGitHubIdentity: readFlag("citropy.showGitHubIdentity", true),
   offline: readOffline(),
@@ -214,6 +222,8 @@ export const useApp = create<AppState>(() => ({
   disclosures: {},
   git: {},
   permissions: [],
+  questions: [],
+  questionDrafts: {},
   toasts: [],
   activeProjectId: typeof localStorage === "undefined" ? null : environmentStorage.getItem("citropy.project"),
   activeThreadId: typeof localStorage === "undefined" ? null : environmentStorage.getItem("citropy.thread"),
@@ -263,7 +273,9 @@ export function resetEnvironment(projects: Project[], home: string): void {
     confirmation: null,
     searchResult: null,
     searchMessageId: null,
+    searchShellId: null,
     connected: false,
+  development: false,
     githubAccount: null,
     offline: readOffline(),
     choosingWorkspace: false,
@@ -281,6 +293,8 @@ export function resetEnvironment(projects: Project[], home: string): void {
     disclosures: {},
     git: {},
     permissions: [],
+    questions: [],
+    questionDrafts: {},
     toasts: [],
     activeProjectId: environmentStorage.getItem("citropy.project"),
     activeThreadId: environmentStorage.getItem("citropy.thread"),
@@ -336,6 +350,7 @@ function normalize(
       role: message.role,
       ts: message.ts,
       model: message.model,
+      provider: message.provider,
       attachments: message.attachments,
       partIds,
     };
@@ -598,6 +613,9 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
       state.connected = true;
       state.choosingWorkspace = false;
       state.permissions = event.snapshot.permissions;
+      state.questions = event.snapshot.questions ?? [];
+      state.development = event.snapshot.development === true;
+      state.questionDrafts = Object.fromEntries(Object.entries(state.questionDrafts).filter(([id]) => state.questions.some(question => question.id === id)));
       state.home = event.snapshot.home;
       state.projects = event.snapshot.projects;
       state.providers = event.snapshot.providers;
@@ -706,6 +724,7 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
         role: event.message.role,
         ts: event.message.ts,
         model: event.message.model,
+        provider: event.message.provider,
         attachments: event.message.attachments,
         partIds,
       };
@@ -741,6 +760,15 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
       const updated = { ...part, ...event.patch } as Part;
       state.historyBytes[event.threadId] = (state.historyBytes[event.threadId] ?? 0) + contentBytes(updated) - contentBytes(part);
       state.parts[event.partId] = updated;
+      return;
+    }
+    case "question.request": {
+      state.questions = [...state.questions.filter(question => question.id !== event.request.id), event.request];
+      return;
+    }
+    case "question.close": {
+      state.questions = state.questions.filter(question => question.id !== event.id);
+      state.questionDrafts = Object.fromEntries(Object.entries(state.questionDrafts).filter(([id]) => id !== event.id));
       return;
     }
     case "permission.request": {
@@ -801,7 +829,7 @@ export function selectThread(id: string | null): void {
     const git = { ...state.git };
     const projectId = id ? state.threads[id]?.projectId : state.activeProjectId;
     if (projectId) delete git[projectId];
-    const next = { ...state, activeThreadId: id, git };
+    const next = { ...state, activeThreadId: id, searchShellId: null, git };
     if (id && state.loaded[id]) {
       next.loaded = { ...state.loaded };
       delete next.loaded[id];

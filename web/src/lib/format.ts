@@ -3,6 +3,8 @@ import type {
   ModelOption,
   ProviderId,
   ProviderInfo,
+  ThreadMeta,
+  ThreadStatus,
 } from "../../../shared/protocol.ts";
 import { selectedModel } from "../../../shared/model-options.ts";
 
@@ -38,6 +40,13 @@ export function modelSource(
     azure: "Azure",
   };
   return names[source] ?? source;
+}
+
+export function threadActivity(thread: ThreadMeta): { status: ThreadStatus; label: string } {
+  const status = thread.running && ["idle", "stopped"].includes(thread.status) ? "working" : thread.status;
+  const label = status === "idle" ? "Ready" : status === "error" ? "Failed" : status === "awaiting" ? "Needs input"
+    : status.charAt(0).toUpperCase() + status.slice(1);
+  return { status, label };
 }
 
 export function effortLabel(effort: string): string {

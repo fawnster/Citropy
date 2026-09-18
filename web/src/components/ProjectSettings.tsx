@@ -1,17 +1,16 @@
 import { useState } from "react";
-import { ChevronDown, Folder, Globe2, Plus, Trash2, Play, Save } from "lucide-react";
-import { api, reportError } from "../lib/api.ts";
-import { selectPanel, selectProject, useApp } from "../lib/store.ts";
+import { ChevronDown, Folder, Globe2, Save } from "lucide-react";
+import { api } from "../lib/api.ts";
+import { useApp } from "../lib/store.ts";
 import { effortLabel } from "../lib/format.ts";
 import { resolveProjectSettings } from "../../../shared/project-settings.ts";
 import { selectedModel } from "../../../shared/model-options.ts";
 import type { Project, ProjectSettings as Preferences } from "../../../shared/protocol.ts";
-import type { PanelTab } from "../../../shared/workbench.ts";
 import { useI18n } from "../lib/i18n.ts";
 import { Menu } from "./Menu.tsx";
 import { ModelPicker } from "./ModelPicker.tsx";
 
-export function ProjectSettings({ onRun }: { onRun: () => void }) {
+export function ProjectSettings() {
   const t = useI18n();
   const projects = useApp((state) => state.projects);
   const activeProjectId = useApp((state) => state.activeProjectId);
@@ -25,7 +24,7 @@ export function ProjectSettings({ onRun }: { onRun: () => void }) {
           <Folder size={19} />
           <div>
             <h2 id="folder-configuration-heading">{t("Folder configuration")}</h2>
-            <p className="feature-note">{t("Override global defaults for a folder and manage its terminal actions.")}</p>
+            <p className="feature-note">{t("Override global defaults for a folder.")}</p>
           </div>
         </div>
         {project ? <>
@@ -48,7 +47,7 @@ export function ProjectSettings({ onRun }: { onRun: () => void }) {
               <ChevronDown size={15} />
             </button>}
           />
-          <ProjectForm key={project.id} project={project} onRun={onRun} />
+          <ProjectForm key={project.id} project={project} />
         </> : <p className="feature-note">{t("Open a folder to add overrides. Global defaults apply to every folder you open.")}</p>}
       </section>
     </div>
@@ -186,7 +185,7 @@ function DefaultsFields({ settings, globalDefaults, update, disabled }: {
   </fieldset>;
 }
 
-function ProjectForm({ project, onRun }: { project: Project; onRun: () => void }) {
+function ProjectForm({ project }: { project: Project }) {
   const t = useI18n();
   const globalDefaults = useApp((state) => state.projectDefaults);
   const [name, setName] = useState(project.name);
@@ -214,18 +213,6 @@ function ProjectForm({ project, onRun }: { project: Project; onRun: () => void }
       setBusy(false);
     }
   };
-  const run = async (id: string) => {
-    try {
-      const panel = await api<PanelTab>(`projects/action?projectId=${project.id}`, {
-        method: "POST", body: JSON.stringify({ id }),
-      });
-      selectProject(project.id);
-      selectPanel(panel.id);
-      onRun();
-    } catch (error) {
-      reportError(error);
-    }
-  };
   return <div className="feature-stack">
     <section className="settings-group project-scope" aria-label={t("Folder defaults")}>
       <label className="feature-field project-name-field">
@@ -234,101 +221,6 @@ function ProjectForm({ project, onRun }: { project: Project; onRun: () => void }
       </label>
       <DefaultsFields settings={settings} globalDefaults={globalDefaults} update={update} disabled={busy} />
     </section>
-      <section className="settings-group">
-        <div className="feature-section-heading">
-        <h2>{t("Project actions")}</h2>
-          <button
-            className="btn"
-            type="button"
-            onClick={() =>
-              update({
-                actions: [
-                  ...(settings.actions ?? []),
-                  { id: crypto.randomUUID(), name: "", command: "" },
-                ],
-              })
-            }
-          >
-            <Plus size={15} />{" "}{t("Add action")}{" "}</button>
-        </div>
-        <p className="feature-note">{" "}{t("Save commands for your terminal. Setup actions run when you create a worktree.")}{" "}</p>
-        {(settings.actions ?? []).map((action, index) => (
-          <div className="project-action-editor" key={action.id}>
-            <div className="feature-form-grid">
-              <label className="feature-field">{" "}{t("Name")}{" "}<input
-                  value={action.name}
-                  onChange={(event) =>
-                    update({
-                      actions: settings.actions?.map((entry, i) =>
-                        i === index
-                          ? { ...entry, name: event.target.value }
-                          : entry,
-                      ),
-                    })
-                  }
-                  placeholder={t("Run tests")}
-                />
-              </label>
-              <label className="feature-field">{" "}{t("Command")}{" "}<input
-                  className="mono"
-                  value={action.command}
-                  onChange={(event) =>
-                    update({
-                      actions: settings.actions?.map((entry, i) =>
-                        i === index
-                          ? { ...entry, command: event.target.value }
-                          : entry,
-                      ),
-                    })
-                  }
-                  placeholder="npm test"
-                />
-              </label>
-            </div>
-            <div className="feature-inline">
-              <label>
-                <input
-                  type="checkbox"
-                  checked={Boolean(action.setup)}
-                  onChange={(event) =>
-                    update({
-                      actions: settings.actions?.map((entry, i) =>
-                        i === index
-                          ? { ...entry, setup: event.target.checked }
-                          : entry,
-                      ),
-                    })
-                  }
-                />{" "}{t("Run on worktree creation")}{" "}</label>
-              <button
-                className="icon-btn"
-                type="button"
-                aria-label={t("Run {name}", { name: action.name || t("action") })}
-                disabled={
-                  !project.settings?.actions?.some(
-                    (entry) => entry.id === action.id,
-                  )
-                }
-                onClick={() => run(action.id)}
-              >
-                <Play size={15} />
-              </button>
-              <button
-                className="icon-btn"
-                type="button"
-                aria-label={t("Remove {name}", { name: action.name || t("action") })}
-                onClick={() =>
-                  update({
-                    actions: settings.actions?.filter((_, i) => i !== index),
-                  })
-                }
-              >
-                <Trash2 size={15} />
-              </button>
-            </div>
-          </div>
-        ))}
-      </section>
       {error && (
         <p className="feature-error" role="alert">
           {error}

@@ -6,6 +6,7 @@ import { langFor } from "../lib/format.ts";
 import { useHighlightedLines } from "../lib/use-highlighted-lines.ts";
 import { useDisclosure } from "../lib/use-disclosure.ts";
 import { FileIcon } from "./FileIcon.tsx";
+import { MessageSquarePlus } from "lucide-react";
 import type { FilePatch, PatchLine } from "../../../shared/protocol.ts";
 
 interface Props {
@@ -15,19 +16,25 @@ interface Props {
   partId?: string;
   expanded?: boolean;
   onExpand?: () => void;
+  onComment?: (line: number, side: "old" | "new") => void;
+  onHunk?: (index: number, operation: "stage" | "unstage" | "revert") => void;
+  staged?: boolean;
+  busy?: boolean;
 }
 
 interface Row extends PatchLine {
   key: string;
   side: "old" | "new" | "both";
   index: number;
+  hunk?: number;
 }
 
-function rows(patch: FilePatch): Row[] {
+function rows(patch: FilePatch, interactive = false): Row[] {
   const out: Row[] = [];
   let oldIndex = 0;
   let newIndex = 0;
   patch.hunks.forEach((hunk, h) => {
+    if (interactive) out.push({ key: `hunk-${h}`, type: "ctx", text: hunk.header, side: "both", index: -1, hunk: h });
     hunk.lines.forEach((line, l) => {
       if (line.text === "…" && line.oldNo === undefined && line.newNo === undefined) {
         out.push({ ...line, key: `${h}-${l}`, side: "both", index: -1 });
@@ -49,13 +56,13 @@ function rows(patch: FilePatch): Row[] {
   return out;
 }
 
-export function DiffView({ patch, limit = 26, showHeader = true, partId, expanded: controlledExpanded, onExpand }: Props) {
+export function DiffView({ patch, limit = 26, showHeader = true, partId, expanded: controlledExpanded, onExpand, onComment, onHunk, staged, busy }: Props) {
   const t = useI18n();
   const [disclosed, setDisclosed] = useDisclosure(partId, "diff");
   const expanded = controlledExpanded ?? disclosed;
   const viewport = useRef<HTMLDivElement>(null);
 
-  const all = useMemo(() => rows(patch), [patch]);
+  const all = useMemo(() => rows(patch, Boolean(onHunk)), [patch, Boolean(onHunk)]);
   const visible = useMemo(() => expanded ? all : all.slice(0, limit), [all, expanded, limit]);
   const lang = langFor(patch.path);
 
@@ -99,12 +106,14 @@ export function DiffView({ patch, limit = 26, showHeader = true, partId, expande
         <div className="diff-lines" style={{ height: lines.getTotalSize() }}>
           {lines.getVirtualItems().map((item) => {
             const row = visible[item.index]!;
+            if (row.hunk !== undefined) return <div className="diff-hunk" key={item.key} data-index={item.index} ref={lines.measureElement} style={{ transform: `translateY(${item.start}px)` }}><span>{row.text || t("Change {number}", { number: row.hunk + 1 })}</span><button type="button" disabled={busy} onClick={() => onHunk?.(row.hunk!, staged ? "unstage" : "stage")}>{t(staged ? "Unstage hunk" : "Stage hunk")}</button>{!staged && <button type="button" disabled={busy} onClick={() => onHunk?.(row.hunk!, "revert")}>{t("Revert hunk")}</button>}</div>;
             return (
-              <div className="diff-line" data-type={row.type} data-index={item.index} key={item.key} ref={lines.measureElement} style={{ transform: `translateY(${item.start}px)` }}>
+              <div className="diff-line" data-interactive={Boolean(onComment) || undefined} data-type={row.type} data-index={item.index} key={item.key} ref={lines.measureElement} style={{ transform: `translateY(${item.start}px)` }}>
                 <span className="diff-no">{row.oldNo ?? ""}</span>
                 <span className="diff-no">{row.newNo ?? ""}</span>
                 <span className="diff-sign">{row.type === "add" ? "+" : row.type === "del" ? "-" : " "}</span>
                 <span className="diff-code" dangerouslySetInnerHTML={{ __html: render(row) }} />
+                {onComment && (row.newNo ?? row.oldNo) !== undefined && <button className="diff-comment" type="button" aria-label={t("Comment on line {number}", { number: row.newNo ?? row.oldNo! })} onClick={() => onComment(row.type === "del" ? row.oldNo! : row.newNo!, row.type === "del" ? "old" : "new")}><MessageSquarePlus size={13} /></button>}
               </div>
             );
           })}

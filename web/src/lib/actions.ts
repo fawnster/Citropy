@@ -21,7 +21,7 @@ import type {
 } from "../../../shared/protocol.ts";
 import type { PanelKind } from "../../../shared/workbench.ts";
 
-export function openWorkbenchPanel(kind: PanelKind): void {
+export function openWorkbenchPanel(kind: PanelKind, url?: string): void {
   const state = useApp.getState();
   if (!state.activeProjectId || !state.connected) return;
   const existing =
@@ -45,6 +45,7 @@ export function openWorkbenchPanel(kind: PanelKind): void {
     projectId: state.activeProjectId,
     kind,
     threadId: state.activeThreadId ?? undefined,
+    ...(kind === "browser" && url ? { url } : {}),
   });
 }
 
@@ -252,14 +253,6 @@ export function fetchDiff(
   const promise = awaitResponse<FilePatch | null>(id);
   send({ t: "git.diff", requestId: id, projectId, path, staged });
   return promise;
-}
-
-export function stageFile(
-  projectId: string,
-  path: string,
-  staged: boolean,
-): void {
-  send({ t: "git.stage", projectId, path, staged });
 }
 
 export function discardFile(projectId: string, path: string): void {

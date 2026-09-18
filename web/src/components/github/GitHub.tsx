@@ -22,7 +22,6 @@ import {
   UserRound,
 } from "lucide-react";
 import { SectionSidebar } from "../SectionSidebar.tsx";
-import { WorkspaceSelector } from "../WorkspaceSelector.tsx";
 import { useApp, selectProject, viewportWidth } from "../../lib/store.ts";
 import { useI18n } from "../../lib/i18n.ts";
 import { useGitHub } from "../../lib/use-github.ts";
@@ -96,7 +95,7 @@ export function GitHub({
     sections.find((entry) => entry.name === section)?.global;
   return (
     <section className="section-view github-view" aria-label={t("GitHub")}>
-      <SectionSidebar open={sidebarOpen} title="GitHub" onBack={onBack} navigation={navigation} workspace={<WorkspaceSelector />}>
+      <SectionSidebar activeItem={section} open={sidebarOpen} title="GitHub" onBack={onBack} navigation={navigation}>
           {sections.map(({ name, icon: Icon, global }) => (
             <button
               className="section-link"

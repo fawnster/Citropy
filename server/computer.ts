@@ -45,6 +45,7 @@ function reset(reason?: string) {
 
 desktopEvents.on("event", (event) => {
   if (event.t === "computer.stopped") reset(event.error ? event.reason : undefined);
+  if (event.t === "computer.paused" && typeof event.paused === "boolean" && ["active", "paused"].includes(state.status)) setPaused(event.paused);
 });
 desktopEvents.on("disconnected", () => reset());
 bus.subscribe((event) => {
@@ -121,14 +122,19 @@ export async function stopComputer(reason?: string) {
   return computerState();
 }
 
-export async function pauseComputer(paused: boolean) {
-  if (!["active", "paused"].includes(state.status)) throw new Error("There is no active computer session.");
+function setPaused(paused: boolean) {
+  if (state.status === (paused ? "paused" : "active")) return;
   revision++;
   if (state.threadId) cancelTool(state.threadId, "mcp__citropy__computer_action");
   frames.clear();
   state.status = paused ? "paused" : "active";
   touch();
   publish();
+}
+
+export async function pauseComputer(paused: boolean) {
+  if (!["active", "paused"].includes(state.status)) throw new Error("There is no active computer session.");
+  setPaused(paused);
   try { await desktopRequest("computer.pause", { paused }); }
   catch (error) { await stopComputer("Computer control could not be paused safely."); throw error; }
   return computerState();

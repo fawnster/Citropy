@@ -131,6 +131,8 @@ test("workspace features persist and use conversation boundaries", async (t) => 
         },
       );
       assert.equal(configured.status, 200);
+      assert.equal(configured.data.settings.actions, undefined);
+      store.updateProject(project.id, { settings: { ...project.settings, actions: [{ id: "legacy", name: "Legacy setup", command: "printf ready > setup-ready", setup: true }] } });
       const created = await request("threads", "POST", {
         projectId: project.id,
         provider: "claude",
@@ -153,16 +155,7 @@ test("workspace features persist and use conversation boundaries", async (t) => 
         fs.readFileSync(join(repo, "example.txt"), "utf8"),
         "Original checkout",
       );
-      for (
-        let i = 0;
-        i < 100 && !fs.existsSync(join(thread.workspacePath, "setup-ready"));
-        i++
-      )
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      assert.equal(
-        fs.readFileSync(join(thread.workspacePath, "setup-ready"), "utf8"),
-        "ready",
-      );
+      assert.equal(fs.existsSync(join(thread.workspacePath, "setup-ready")), false);
       const choices = await request(`workspaces?projectId=${project.id}`);
       assert.equal(choices.data.worktrees.length, 2);
       const existing = await request("threads", "POST", {
@@ -182,10 +175,7 @@ test("workspace features persist and use conversation boundaries", async (t) => 
         new Store().threads.get(thread.id).workspacePath,
         thread.workspacePath,
       );
-      assert.equal(
-        new Store().projects.get(project.id).settings.actions[0].setup,
-        true,
-      );
+      assert.equal(new Store().projects.get(project.id).settings.model, "fixture");
     },
   );
   await t.test("global defaults inherit, persist, and respect folder overrides", async () => {
@@ -262,7 +252,7 @@ test("workspace features persist and use conversation boundaries", async (t) => 
       await assert.doesNotReject(callWorkspaceTool(created.data.id, "browser_tabs", {}));
       await request(`projects?projectId=${folder.id}`, "PATCH", { settings: { browserAccess: false } });
       await assert.rejects(callWorkspaceTool(created.data.id, "browser_tabs", {}), /Browser access is disabled/);
-      for (const invalid of [{ provider: "unknown" }, { provider: null, model: "fixture" }, { browserAccess: "false" }, { permissionMode: "unknown" }, { workspace: "existing" }, { actions: [] }, []]) {
+      for (const invalid of [{ provider: "unknown" }, { provider: null, model: "fixture" }, { browserAccess: "false" }, { permissionMode: "unknown" }, { workspace: "existing" }, []]) {
         const response = await request("projects/defaults", "PATCH", { settings: invalid });
         assert.equal(response.status, 400, JSON.stringify(invalid));
       }

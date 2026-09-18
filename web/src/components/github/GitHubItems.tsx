@@ -1,3 +1,4 @@
+import { SelectionHighlight } from "../SelectionHighlight.tsx";
 import { AnimatePresence } from "motion/react";
 import { ResizeHandle } from "../ResizeHandle.tsx";
 import { useState } from "react";
@@ -388,7 +389,7 @@ export function GitHubItems({
                     </p>
                   )}
                   <div
-                    className="github-tabs"
+                    className="github-tabs sliding-selection"
                     role="tablist"
                     aria-label={pull ? t("Pull request details") : t("Issue details")}
                     onKeyDown={(event) => {
@@ -422,6 +423,7 @@ export function GitHubItems({
                       buttons[next]?.focus();
                     }}
                   >
+                    <SelectionHighlight value={tab} />
                     {(pull
                       ? ["Conversation", "Files changed", "Checks"]
                       : ["Conversation"]

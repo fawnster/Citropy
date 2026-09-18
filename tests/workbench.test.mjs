@@ -190,7 +190,7 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
   }
   t.after(async () => {
     disposeAll();
-    terminals.closeAll();
+    await terminals.closeAll();
     await browser.closeBrowsers();
     await browserConnection?.close();
     store.flush();
@@ -601,7 +601,7 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
     const shell = shellList().find(shell => shell.panelId === opened.tabId);
     assert.equal(shell.threadId, parent.id);
     assert.match(shell.output, /managed-command-output/);
-    terminals.close(opened.tabId);
+    await terminals.close(opened.tabId);
     closePanel(opened.tabId);
   });
 
@@ -614,7 +614,7 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
         tabId: first.tabId,
         text: "export CITROPY_TEST_VALUE=kept\n",
       });
-      terminals.open(first.tabId, projectPath, 90, 25);
+      await terminals.open(first.tabId, projectPath, 90, 25);
       await tool("terminal_write", {
         tabId: first.tabId,
         text: "printf 'result:%s' \"$CITROPY_TEST_VALUE\"\n",
@@ -640,7 +640,7 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
         (await tool("terminal_read", { tabId: first.tabId }, other.id)).isError,
         true,
       );
-      terminals.close(first.tabId);
+      await terminals.close(first.tabId);
       closePanel(first.tabId);
       await tool("terminal_write", {
         tabId: second.tabId,
@@ -649,14 +649,14 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
       await waitFor(() => terminals.read(second.tabId).includes("still-open"));
       const third = openPanel(project.id, "terminal");
       assert.notEqual(third.title, second.title);
-      terminals.close(second.tabId);
+      await terminals.close(second.tabId);
       closePanel(second.tabId);
       closePanel(third.id);
-      terminals.open("exited", projectPath, 80, 24);
-      terminals.write("exited", "exit 0\n");
+      await terminals.open("exited", projectPath, 80, 24);
+      await terminals.write("exited", "exit 0\n");
       await waitFor(() => terminals.read("exited").includes("process exited"));
-      assert.throws(() => terminals.open("exited", otherPath, 80, 24), /another workspace/);
-      terminals.closeAll();
+      await assert.rejects(terminals.open("exited", otherPath, 80, 24), /another workspace/);
+      await terminals.closeAll();
       assert.equal(terminals.read("exited"), "");
     },
   );

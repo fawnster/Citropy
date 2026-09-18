@@ -434,17 +434,16 @@ test(
     await page.getByRole("button", { name: "Configure folder: Design workspace", exact: true }).click();
     await page.getByRole("menuitem", { name: /another-folder/ }).click();
     assert.equal(await page.getByLabel("Project name").inputValue(), "another-folder");
-    await page.getByRole("button", { name: "Add action", exact: true }).click();
-    await page.getByLabel("Name", { exact: true }).fill("Check");
-    await page.getByLabel("Command", { exact: true }).fill("npm test");
+    await folder.getByLabel("Permissions").selectOption("plan");
     await page.getByRole("button", { name: "Save folder settings", exact: true }).click();
     await page.getByText("Folder settings saved", { exact: true }).waitFor();
-    assert.equal(store.projects.get(second.id).settings.actions[0].command, "npm test");
-    assert.equal(store.projects.get(project.id).settings.actions, undefined);
+    assert.equal(store.projects.get(second.id).settings.permissionMode, "plan");
+    assert.equal(store.projects.get(project.id).settings.permissionMode, undefined);
     await page.getByRole("button", { name: "Configure folder: another-folder", exact: true }).click();
     await page.getByRole("menuitem", { name: /Design workspace/ }).click();
     assert.equal(await page.getByLabel("Project name").inputValue(), "Design workspace");
-    assert.equal(await page.getByLabel("Command", { exact: true }).count(), 0);
+    assert.equal(await folder.getByLabel("Permissions").inputValue(), "");
+    for (const name of ["Project actions", "Scoped instructions", "Reusable workflows"]) assert.equal(await page.getByRole("heading", { name, exact: true }).count(), 0);
     for (const width of [1440, 600]) {
       await page.setViewportSize({ width, height: 900 });
       if (width === 600) await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();

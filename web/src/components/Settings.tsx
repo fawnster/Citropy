@@ -1,3 +1,4 @@
+import { AnimatedText } from "./AnimatedText.tsx";
 import { EnvironmentSettings } from "./EnvironmentSettings.tsx";
 import { isRemote, useEnvironments } from "../lib/environment.ts";
 import { Fragment, useEffect, useState, type ReactNode } from "react";
@@ -157,6 +158,19 @@ export function Settings({
     void window.citropyDesktop?.windowState?.().then(setDesktop);
     return window.citropyDesktop?.onWindowState?.(setDesktop);
   }, []);
+  const development = useApp((state) => state.development);
+  const restartServer = async () => {
+    if (!(await confirmAction({
+      title: t("Restart the Citropy server?"),
+      description: desktop
+        ? t("The server and the desktop window restart and pick up code changes. Browser tabs close. Conversations are saved and terminals keep running.")
+        : t("The server restarts and picks up code changes. This page reconnects when it is back. Conversations are saved and terminals keep running."),
+      label: t("Restart server"),
+    })))
+      return;
+    setApplicationError("");
+    send({ t: "server.restart" });
+  };
   const applicationAction = async (
     action: "reload" | "restart" | "development",
   ) => {
@@ -192,7 +206,7 @@ export function Settings({
 
   return (
     <section className="section-view" aria-label={t("Settings")}>
-      <SectionSidebar open={sidebarOpen} title={t("Settings")} onBack={onBack} navigation={navigation}>
+      <SectionSidebar activeItem={section} open={sidebarOpen} title={t("Settings")} onBack={onBack} navigation={navigation}>
           {["Workspace", "Providers & tools", "Application"].map((group) => (
             <Fragment key={group}>
               <h2 className="section-nav-label">{t(group)}</h2>
@@ -224,9 +238,9 @@ export function Settings({
                 data-settings-section={section.toLowerCase()}
               >
                 <SectionIcon size={25} aria-hidden="true" />
-                {t(section)}
+                <AnimatedText text={t(section)} />
               </h1>
-              <p>{t(selectedSection.description)}</p>
+              <p><AnimatedText text={t(selectedSection.description)} /></p>
             </div>
             {section === "Providers" && (
               <button
@@ -240,7 +254,7 @@ export function Settings({
             )}
           </header>
           {section === "Environments" && <EnvironmentSettings />}
-          {section === "Projects" && <ProjectSettings onRun={onBack} />}
+          {section === "Projects" && <ProjectSettings />}
           {section === "Skills" && <SkillsSettings />}
           {section === "AI assistance" && <AssistanceSettings />}
           {section === "Browser" && <BrowserProfiles />}
@@ -466,6 +480,27 @@ export function Settings({
                       : t("Enable live updates")}
                   </button>
                 </div>
+                {development && !isRemote() && (
+                  <div className="setting-row">
+                    <span>
+                      <strong>{t("Restart server")}</strong>
+                      <small>
+                        {running
+                          ? t("Available when active conversations have finished.")
+                          : t("Development only. Stops the server and starts a fresh one with your latest code.")}
+                      </small>
+                    </span>
+                    <button
+                      type="button"
+                      className="btn"
+                      disabled={!connected || updating || running}
+                      onClick={() => void restartServer()}
+                    >
+                      <RotateCcw size={14} />
+                      {t("Restart server")}
+                    </button>
+                  </div>
+                )}
                 {desktop ? (
                   <>
                     <div className="setting-row">

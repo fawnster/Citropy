@@ -1,23 +1,32 @@
 import type { Part, ToolPart, ToolShape } from "../../../shared/protocol.ts";
+import { isQuestionTool } from "../../../shared/questions.ts";
+import { normalizeTodos } from "../../../shared/todos.ts";
 import { translate } from "./i18n.ts";
 import type { Translator } from "./translations.ts";
 
-export type Row = { kind: "part"; id: string } | { kind: "group"; ids: string[] };
+export type Row = { kind: "part"; id: string } | { kind: "group"; ids: string[] } | { kind: "thoughts"; ids: string[] };
 
 export function buildRows(parts: Array<Part | undefined>): Row[] {
   const rows: Row[] = [];
+  const hasQuestion = parts.some(part => part?.kind === "question");
   let batch: string[] = [];
+  let batchKind: "group" | "thoughts" = "group";
 
   const flush = () => {
     if (batch.length === 0) return;
-    rows.push({ kind: "group", ids: batch });
+    rows.push({ kind: batchKind, ids: batch });
     batch = [];
   };
 
   for (const part of parts) {
     if (!part) continue;
     if ((part.kind === "text" || part.kind === "reasoning") && part.text.trim() === "") continue;
-    if (part.kind === "tool") {
+    if (part.kind === "todo" && normalizeTodos(part.items).length === 0) continue;
+    if (part.kind === "tool" || part.kind === "reasoning") {
+      if (part.kind === "tool" && hasQuestion && isQuestionTool(part.name)) continue;
+      const kind = part.kind === "tool" ? "group" : "thoughts";
+      if (kind !== batchKind) flush();
+      batchKind = kind;
       batch.push(part.id);
       continue;
     }
@@ -91,4 +100,34 @@ export function groupStats(tools: ToolPart[]): { added: number; removed: number;
     if (tool.status === "running") running = true;
   }
   return { added, removed, failed, running };
+}
+
+const VERBS: Record<string, [string, string]> = {
+  Bash: ["Running", "Ran"],
+  Read: ["Reading", "Read"],
+  Write: ["Writing", "Wrote"],
+  Edit: ["Editing", "Edited"],
+  MultiEdit: ["Editing", "Edited"],
+  NotebookEdit: ["Editing", "Edited"],
+  Glob: ["Finding", "Found"],
+  Grep: ["Searching", "Searched"],
+  WebSearch: ["Searching the web for", "Searched the web for"],
+  WebFetch: ["Fetching", "Fetched"],
+  Task: ["Delegating", "Delegated"],
+  Agent: ["Delegating", "Delegated"],
+  citropy_terminal_open: ["Opening terminal", "Opened terminal"],
+  citropy_terminal_read: ["Reading terminal output", "Read terminal output"],
+  citropy_terminal_write: ["Writing to terminal", "Wrote to terminal"],
+};
+
+export function toolLabel(name: string, status: ToolPart["status"], t: Translator = translate): string {
+  const pair = VERBS[name];
+  if (!pair) {
+    const short = (name.startsWith("mcp__") ? name.split("__").slice(2).join(" ") || name : name).replaceAll("_", " ");
+    return status === "running" ? `${t("Running")} ${short}` : short;
+  }
+  if (status === "denied") return `${t("Blocked")} ${t(pair[1]).toLowerCase()}`;
+  return status === "running"
+    ? t(pair[0])
+    : t(pair[1], undefined, "past");
 }

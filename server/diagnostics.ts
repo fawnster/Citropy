@@ -5,6 +5,8 @@ import { desktopRequest } from "./desktop.ts";
 import { store } from "./store.ts";
 import { panelList } from "./panels.ts";
 import { browserStates } from "./browser.ts";
+import { servicePid } from "./terminals.ts";
+import { protocolLog } from "./providers/events.ts";
 import type { DiagnosticReport } from "../shared/features.ts";
 
 const run = promisify(execFile);
@@ -32,7 +34,8 @@ export async function diagnostics(): Promise<DiagnosticReport> {
           ]
         : [];
     });
-    const included = new Set([process.pid]);
+    const terminalPid = servicePid();
+    const included = new Set([process.pid, ...(terminalPid ? [terminalPid] : [])]);
     for (let changed = true; changed; ) {
       changed = false;
       for (const entry of all)
@@ -63,6 +66,7 @@ export async function diagnostics(): Promise<DiagnosticReport> {
     });
   processes = [...allProcesses.values()].sort((a, b) => b.cpu - a.cpu);
   return {
+    protocol: protocolLog(),
     sampledAt: Date.now(),
     uptime: process.uptime(),
     system: {

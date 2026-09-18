@@ -3,9 +3,11 @@ import { spawn, execFile, type ChildProcessWithoutNullStreams } from "node:child
 import { promisify } from "node:util";
 import { discoverModels } from "./models.ts";
 import { onJson, onLines } from "../lines.ts";
+import { askQuestion, cancelQuestions } from "../questions.ts";
 import { ask, cancelThread } from "../permissions.ts";
 import type { AgentSession, Provider, StartOptions } from "./types.ts";
 import type { Attachment, PermissionMode } from "../../shared/protocol.ts";
+import { normalizeTodos } from "../../shared/todos.ts";
 
 const run = promisify(execFile);
 
@@ -72,7 +74,7 @@ class CodexSession implements AgentSession {
   constructor(options: StartOptions) {
     this.#options = options;
     const args = ["app-server"];
-    if (options.mcp) args.push("-c", `mcp_servers.citropy.url=${JSON.stringify(options.mcp.url)}`, "-c", 'mcp_servers.citropy.bearer_token_env_var="CITROPY_MCP_TOKEN"');
+    if (options.mcp) args.push("-c", `mcp_servers.citropy.url=${JSON.stringify(options.mcp.url)}`, "-c", 'mcp_servers.citropy.bearer_token_env_var="CITROPY_MCP_TOKEN"', "-c", "mcp_servers.citropy.tool_timeout_sec=1860");
     this.#child = spawn("codex", args, {
       detached: process.platform !== "win32",
       cwd: options.cwd,
@@ -187,6 +189,7 @@ class CodexSession implements AgentSession {
     if (this.#queue.length) this.#options.emit({ type: "notice", level: "warn", text: this.#queue.length === 1 ? "Stopped before Codex started your latest message. Send it again to run it." : `Stopped before Codex started your last ${this.#queue.length} messages. Send them again to run them.` });
     this.#queue = [];
     cancelThread(this.#options.threadId);
+    cancelQuestions(this.#options.threadId);
     if (!this.#busy) return;
     this.#interruptPending = true;
     if (this.#turnId) {
@@ -211,6 +214,7 @@ class CodexSession implements AgentSession {
     clearTimeout(this.#backgroundTimer);
     this.#queue = [];
     cancelThread(this.#options.threadId);
+    cancelQuestions(this.#options.threadId);
     for (const pending of this.#requests.values()) {
       clearTimeout(pending.timer);
       pending.reject(new Error("Codex session closed"));
@@ -241,6 +245,7 @@ class CodexSession implements AgentSession {
     if ([...this.#items.values()].some(item => item.type === "commandExecution")) void this.#refreshBackground();
     this.#items.clear();
     cancelThread(this.#options.threadId, false);
+    cancelQuestions(this.#options.threadId);
     if (compacting && !error) this.#options.emit({ type: "compacted" });
     else this.#options.emit({ type: "turn.end", ...(error ? { error } : {}) });
     void this.#pump();
@@ -362,7 +367,7 @@ class CodexSession implements AgentSession {
         return;
       }
       case "turn/plan/updated":
-        emit({ type: "todos", items: (params.plan as Array<{ step: string; status: string }>).map((entry) => ({ text: entry.step, status: entry.status === "completed" ? "completed" : entry.status === "inProgress" ? "in_progress" : "pending" })) });
+        emit({ type: "todos", items: normalizeTodos(params.plan) });
         return;
       case "warning":
       case "guardianWarning":
@@ -491,6 +496,16 @@ class CodexSession implements AgentSession {
       this.#write({ id, error: { code: -32602, message: "Unknown thread" } });
       return;
     }
+    if (method === "item/tool/requestUserInput") {
+      try {
+        const input = params.questions;
+        const result = await askQuestion(this.#options.threadId, Array.isArray(input) ? input.map(question => ({ ...question, options: question.options ?? [], secret: question.isSecret === true })) : input);
+        if (!this.#disposed) this.#write({ id, result: { answers: Object.fromEntries(Object.entries(result.answers).map(([key, answers]) => [key, { answers }])) } });
+      } catch (error) {
+        if (!this.#disposed) this.#write({ id, error: { code: -32602, message: (error as Error).message } });
+      }
+      return;
+    }
     if (method === "item/commandExecution/requestApproval" || method === "item/fileChange/requestApproval") {
       const fileChange = method === "item/fileChange/requestApproval";
       const item = this.#items.get(String(params.itemId));
@@ -512,6 +527,7 @@ export const codexProvider: Provider = {
   label: "Codex",
   binary: "codex",
   supportsPermissionPrompt: true,
+  capabilities: { transport: "rpc", steer: true, compact: true, stopShell: true },
   steerHint: "Codex adds it to the turn in progress.",
   models: [],
   listModels: () => discoverModels("codex"),

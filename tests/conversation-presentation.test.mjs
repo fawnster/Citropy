@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync, spawn } from "node:child_process";
+import { once } from "node:events";
 import { createServer } from "vite";
 import react from "@vitejs/plugin-react";
-import { chromium } from "playwright";
+import { chromium, _electron } from "playwright";
 
 const thread = {
   id: "chat", projectId: "workspace", provider: "claude", model: "sample", title: "Presentation check",
@@ -21,7 +23,7 @@ const tools = Array.from({ length: 3 }, (_, index) => ({
   output: "Example file contents.",
 }));
 
-test("conversation presentation", { timeout: 90_000 }, async (t) => {
+test("conversation presentation", { timeout: 180_000 }, async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "citropy-presentation-"));
   let server;
   let browser;
@@ -37,8 +39,8 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
   });
   await server.listen();
   browser = await chromium.launch({ headless: true });
-  async function fixture({ preferences = {}, messages = [message("saved", [textPart("saved-text", "Saved conversation.")])], children = [], histories = {}, githubAccount, reducedMotion = "no-preference", isGit = false } = {}) {
-    const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion });
+  async function fixture({ desktopPage, preferences = {}, messages = [message("saved", [textPart("saved-text", "Saved conversation.")])], children = [], histories = {}, githubAccount, reducedMotion = "no-preference", isGit = false, hasTouch = false } = {}) {
+    const page = desktopPage ?? await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion, hasTouch });
     page.setDefaultTimeout(10000);
     const errors = [];
     const requests = [];
@@ -46,6 +48,15 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     page.on("pageerror", (error) => errors.push(error.message));
     page.on("console", (entry) => {
       if (entry.type() === "error" && /same key|unique.*key/.test(entry.text())) errors.push(entry.text());
+    });
+    if (desktopPage) await page.addInitScript(() => {
+      window.citropyDesktop = {
+        windowState: async () => ({ maximized: false, fullscreen: false, platform: "linux", development: true, version: "0.1.0" }),
+        windowCommand: async () => {},
+        onWindowState: () => () => {},
+        onNotification: () => () => {},
+        onBrowserSelect: () => () => {},
+      };
     });
     await page.addInitScript((preferences) => {
       for (const [key, value] of Object.entries({ project: "workspace", thread: "chat", inspector: "0", theme: "dark", uiScale: "120", ...preferences }))
@@ -91,6 +102,76 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     return { page, emit, begin, complete, idle, requests, close: async () => { assert.deepEqual(errors, []); await page.close(); } };
   }
 
+  await t.test("desktop running shells dismiss without blocking the workspace", { timeout: 40_000 }, async (test) => {
+    const display = spawn("Xvfb", ["-displayfd", "3", "-screen", "0", "1600x1000x24"], { stdio: ["ignore", "ignore", "ignore", "pipe"] });
+    let desktop;
+    test.after(async () => { await desktop?.close(); display.kill(); });
+    const [number] = await once(display.stdio[3], "data");
+    const environment = { ...process.env, DISPLAY: `:${String(number).trim()}` };
+    delete environment.ELECTRON_RUN_AS_NODE;
+    const main = join(directory, "shell-desktop.cjs");
+    await writeFile(main, `const { app, BrowserWindow } = require("electron");
+app.setPath("userData", ${JSON.stringify(join(directory, "desktop"))});
+app.whenReady().then(() => {
+  const window = new BrowserWindow({ width: 1440, height: 900, x: 0, y: 0, frame: false });
+  window.loadURL("about:blank");
+});
+`);
+    desktop = await _electron.launch({ args: ["--ozone-platform=x11", "--no-sandbox", main], env: environment, timeout: 10_000 });
+    const f = await fixture({ desktopPage: await desktop.firstWindow() });
+    const { page, emit } = f;
+    const click = async (locator) => {
+      await locator.click({ trial: true });
+      const bounds = await locator.boundingBox();
+      execFileSync("xdotool", ["mousemove", "--sync", String(Math.round(bounds.x + bounds.width / 2)), String(Math.round(bounds.y + bounds.height / 2)), "click", "1"], { env: environment });
+    };
+    emit({ t: "shell.upsert", shell: { id: "server", projectId: "workspace", threadId: "chat", command: "npm run dev", cwd: "/example", status: "running", background: true, stopMode: "shell", output: "Server ready\n", startedAt: 1 } });
+    const trigger = page.getByRole("button", { name: "Running shells, 1 active", exact: true });
+    const panel = page.getByRole("dialog", { name: "Running shells", exact: true });
+    const composer = page.locator(".composer-input");
+    for (const [width, reducedMotion] of [[1440, "no-preference"], [700, "reduce"]]) {
+      await desktop.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setContentSize(width, 900), width);
+      await page.emulateMedia({ reducedMotion });
+      if (width === 700) await click(page.getByRole("button", { name: "Toggle sidebar", exact: true }));
+      await click(trigger);
+      await panel.waitFor();
+      await click(composer);
+      await panel.waitFor({ state: "detached", timeout: 2000 });
+      assert.equal(await composer.evaluate(element => element === document.activeElement), true);
+      await page.keyboard.type("Still clickable");
+      assert.equal(await composer.inputValue(), "Still clickable");
+      await composer.fill("");
+      await click(trigger);
+      await click(panel.getByRole("button", { name: "Close running shells", exact: true }));
+      await panel.waitFor({ state: "detached" });
+      assert.equal(await trigger.evaluate(element => element === document.activeElement), true);
+      await click(trigger);
+      await panel.waitFor();
+      execFileSync("xdotool", ["key", "Escape"], { env: environment });
+      await panel.waitFor({ state: "detached" });
+      await click(trigger);
+      await panel.waitFor();
+      await click(page.getByRole("button", { name: "Notifications", exact: true }));
+      await panel.waitFor({ state: "detached" });
+      await page.getByRole("dialog", { name: "Notifications", exact: true }).waitFor();
+      execFileSync("xdotool", ["key", "Escape"], { env: environment });
+      await page.getByRole("dialog", { name: "Notifications", exact: true }).waitFor({ state: "detached" });
+      const workspace = page.getByRole("button", { name: "Choose workspace, Example workspace", exact: true });
+      await click(workspace);
+      const menu = page.getByRole("menu");
+      const search = menu.getByRole("textbox", { name: "Find a workspace", exact: true });
+      await search.waitFor();
+      await click(search);
+      await page.keyboard.type("Example");
+      await click(menu.getByRole("menuitem", { name: /^Example workspace/ }));
+      await menu.waitFor({ state: "detached" });
+      await click(composer);
+      assert.equal(await composer.evaluate(element => element === document.activeElement), true);
+      assert.equal(await page.locator(":popover-open").count(), 0);
+    }
+    await f.close();
+  });
+
   await t.test("running shells stay discoverable across tasks with bounded output and clear stop scope", async () => {
     const other = { ...thread, id: "server-task", title: "Preview the workspace" };
     const f = await fixture({ children: [other] });
@@ -119,7 +200,7 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.getByRole("navigation", { name: "Workspace navigation", exact: true }).getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Running shells, 2 active", exact: true }).click();
-    await panel.getByRole("button", { name: "Open task", exact: true }).click();
+    await panel.getByRole("button", { name: "Show command", exact: true }).click();
     await page.waitForFunction(async () => (await import("/web/src/lib/store.ts")).useApp.getState().activeThreadId === "server-task");
     await page.getByRole("button", { name: "Running shells, 2 active", exact: true }).click();
     const requests = [];
@@ -151,11 +232,57 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     const terminal = { ...shell, id: "terminal-shell", panelId: "terminal-panel", command: "npm run preview", startedAt: shell.startedAt + 10 };
     emit({ t: "panel.upsert", panel: { id: "terminal-panel", projectId: "workspace", threadId: "server-task", kind: "terminal", title: "Terminal 1" } }, { t: "shell.upsert", shell: terminal });
     await page.getByRole("button", { name: "Running shells, 1 active", exact: true }).click();
-    await panel.getByRole("button", { name: "Open terminal", exact: true }).waitFor();
+    await panel.getByRole("button", { name: "Open terminal", exact: true }).click();
+    await panel.waitFor({ state: "hidden" });
+    await page.locator('#panel-body-terminal-panel .xterm-screen').waitFor();
+    assert.equal(await page.getByRole("tab", { name: "Terminal 1", exact: true }).getAttribute("aria-selected"), "true");
+    assert.ok(f.requests.some(event => event.t === "term.open" && event.termId === "terminal-panel"));
+    await page.getByRole("button", { name: "Running shells, 1 active", exact: true }).click();
     emit({ t: "panel.remove", id: "terminal-panel" }, { t: "shell.upsert", shell: { ...terminal, status: "stopped", endedAt: Date.now() } });
     await panel.getByRole("button", { name: "Open task", exact: true }).waitFor();
     await panel.getByRole("button", { name: "Close running shells", exact: true }).click();
     await panel.waitFor({ state: "hidden" });
+    await f.close();
+  });
+
+  await t.test("shell navigation reveals the exact command and output inside folded work details", async () => {
+    const command = { ...tools[0], id: "background-command", callId: "provider:background", name: "Bash", shape: "command", headline: "npm run preview", output: "Preview listening on port 4000" };
+    const history = [
+      message("command-message", [textPart("intro", "Checking the preview."), ...tools, command, textPart("result", "Preview started.")]),
+      ...Array.from({ length: 48 }, (_, index) => ({ ...message(`later-${index}`, [textPart(`later-text-${index}`, `Later conversation ${index}`)]), role: index % 2 ? "assistant" : "user" })),
+    ];
+    const other = { ...thread, id: "other-task", projectId: "other-workspace", title: "Other task" };
+    const f = await fixture({ messages: history, children: [other], histories: { "other-task": history.map(message => ({ ...message, id: `other-${message.id}`, parts: message.parts.map(part => ({ ...part, id: `other-${part.id}` })) })) } });
+    const { page, emit } = f;
+    emit({ t: "project.upsert", project: { id: "other-workspace", name: "Other workspace", path: "/other", isGit: false, lastOpened: 1 } });
+    for (const [width, threadId] of [[1440, "chat"], [640, "other-task"], [640, "other-task"]]) {
+      await page.setViewportSize({ width, height: 900 });
+      const projectId = threadId === "chat" ? "workspace" : "other-workspace";
+      emit({ t: "shell.upsert", shell: { id: `${threadId}:${command.callId}`, projectId, threadId, command: command.headline, cwd: "/example", status: "running", background: true, stopMode: "shell", output: command.output, startedAt: Date.now() } });
+      await page.getByRole("button", { name: /^Running shells, \d+ active$/ }).click();
+      const panel = page.getByRole("dialog", { name: "Running shells", exact: true });
+      await panel.getByRole("button", { name: "Show command", exact: true }).click();
+      await panel.waitFor({ state: "hidden" });
+      await page.locator('.tool[data-open="true"] .tool-output').getByText(command.output, { exact: true }).waitFor({ timeout: 2000 });
+      const target = page.locator('.tool').filter({ hasText: command.headline });
+      await page.waitForFunction(() => {
+        const element = document.querySelector('.tool[data-open="true"] .tool-head');
+        const canvas = document.querySelector('.canvas').getBoundingClientRect();
+        const bounds = element?.getBoundingClientRect();
+        return bounds && bounds.top >= canvas.top && bounds.bottom <= canvas.bottom;
+      });
+      assert.equal(await target.locator('.tool-head').evaluate(element => element === document.activeElement), true);
+      assert.equal(f.requests.some(event => event.t === "term.open"), false);
+      await page.screenshot({ path: `/tmp/citropy-shell-command-${width}.png`, animations: "disabled" });
+      await target.locator('.tool-head').click();
+      await page.locator('.group').filter({ hasText: command.headline }).locator('.group-head').click();
+      await page.locator('.canvas').evaluate(element => { element.scrollTop = element.scrollHeight; });
+    }
+    emit({ t: "shell.upsert", shell: { id: "chat:removed-command", projectId: "workspace", threadId: "chat", command: "Earlier command", cwd: "/example", status: "running", background: true, stopMode: "shell", output: "Earlier output", startedAt: Date.now() } });
+    await page.getByRole("button", { name: "Running shells, 3 active", exact: true }).click();
+    await page.getByRole("dialog", { name: "Running shells", exact: true }).getByRole("button", { name: "Show command", exact: true }).click();
+    await page.getByText("This command is no longer in the conversation history. Its recent output is available in Running shells.", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(async () => (await import('/web/src/lib/store.ts')).useApp.getState().searchShellId), null);
     await f.close();
   });
 
@@ -222,6 +349,130 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     await f.close();
   });
 
+  await t.test("message actions reveal near either header without gaps, layout work, or hidden click targets", async () => {
+    const f = await fixture({ githubAccount: { login: "a-long-account-name-for-the-header" }, preferences: { sidebar: "0" }, messages: [
+      { ...message("question", [textPart("question-text", "The push was rejected because the remote branch contains changes.\n\nExplain what happened before changing any files.")]), role: "user" },
+      message("answer", [textPart("answer-text", "The remote branch has newer commits.")]),
+    ] });
+    const { page } = f;
+    const turn = page.locator("#message-question");
+    const actions = turn.locator(".message-actions");
+    const settle = () => page.waitForFunction(() => [...document.querySelectorAll(".turn, .turn *")].every(node => node.getAnimations().every(animation => animation.playState !== "running")));
+    const leave = async () => {
+      await page.mouse.move(10, 10);
+      await page.evaluate(() => document.activeElement?.blur());
+      await settle();
+    };
+    await page.evaluate(() => document.fonts.ready);
+    for (const width of [1440, 600, 420]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const review of [false, true]) {
+        f.emit({ t: "thread.upsert", thread: { ...thread, checkpoints: review ? ["question", "answer"].map(messageId => ({ messageId, before: "before", after: "after", createdAt: 1 })) : [] } });
+        await page.waitForFunction(count => document.querySelectorAll("#message-question .message-actions button").length === count, review ? 3 : 2);
+        for (const id of ["question", "answer"]) {
+          const user = id === "question";
+          const message = page.locator(`#message-${id}`);
+          const header = message.locator(".turn-heading");
+          const toolbar = message.locator(".message-actions");
+          const metadata = header.locator(user ? "time" : "strong");
+          const body = message.locator(user ? ".user-card" : ".agent-card");
+          await leave();
+          const resting = await message.evaluate((node, user) => {
+            const content = node.querySelector(".turn-heading").getBoundingClientRect();
+            const metadata = node.querySelector(user ? "time" : ".turn-heading strong").getBoundingClientRect();
+            const actions = node.querySelector(".message-actions");
+            const button = actions.querySelector("button").getBoundingClientRect();
+            return { gap: user ? content.right - metadata.right : metadata.left - content.left, x: metadata.x, opacity: getComputedStyle(actions).opacity, hiddenTarget: actions.contains(document.elementFromPoint(button.x + button.width / 2, button.y + button.height / 2)) };
+          }, user);
+          const bubble = await body.boundingBox();
+          assert.ok(Math.abs(resting.gap) < 1, JSON.stringify({ width, review, id, resting }));
+          assert.equal(resting.opacity, "0");
+          assert.equal(resting.hiddenTarget, false);
+          await body.hover();
+          await settle();
+          assert.equal(await toolbar.evaluate(node => getComputedStyle(node).opacity), "0", "Hovering message text must leave actions hidden");
+          const heading = await header.boundingBox();
+          const content = await message.locator(".message-content").boundingBox();
+          const edge = user ? content.x + 2 : content.x + content.width - 2;
+          if (edge < heading.x || edge > heading.x + heading.width) {
+            await page.mouse.move(edge, heading.y + heading.height / 2);
+            await settle();
+            assert.equal(await toolbar.evaluate(node => getComputedStyle(node).opacity), "0", "Empty header space must leave actions hidden");
+          }
+          await header.hover();
+          await settle();
+          assert.equal(await toolbar.evaluate(node => getComputedStyle(node).opacity), "1");
+          const revealed = await metadata.boundingBox();
+          assert.ok(user ? revealed.x < resting.x - 40 : revealed.x > resting.x + 30);
+          const nearestButton = await toolbar.locator("button").nth(user ? 0 : -1).boundingBox();
+          assert.ok(user ? revealed.x + revealed.width < nearestButton.x : nearestButton.x + nearestButton.width < revealed.x);
+          assert.deepEqual(await body.boundingBox(), bubble);
+          for (const button of await toolbar.locator("button").all()) {
+            await button.hover();
+            await settle();
+            assert.equal(await toolbar.evaluate(node => getComputedStyle(node).opacity), "1");
+            assert.equal(await button.evaluate(node => {
+              const box = node.getBoundingClientRect();
+              return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
+            }), true);
+          }
+          await page.screenshot({ path: `/tmp/citropy-header-zones-${id}-${width}-${review ? "review" : "basic"}.png`, animations: "disabled" });
+          await leave();
+          assert.ok(Math.abs((await metadata.boundingBox()).x - resting.x) < 1);
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+        }
+      }
+    }
+    await actions.getByRole("button", { name: "Branch from this message", exact: true }).focus();
+    await page.keyboard.press("Tab");
+    await page.keyboard.press("Enter");
+    const dialog = page.getByRole("dialog", { name: "Restore before this message", exact: true });
+    await dialog.waitFor();
+    await page.keyboard.press("Escape");
+    await dialog.waitFor({ state: "detached" });
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await leave();
+    const headers = await page.locator(".turn-heading").all();
+    for (const header of headers) {
+      await header.hover();
+      await settle();
+      await leave();
+    }
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send("Performance.enable");
+    const layoutCount = async () => (await cdp.send("Performance.getMetrics")).metrics.find(metric => metric.name === "LayoutCount").value;
+    const before = await layoutCount();
+    for (let index = 0; index < 5; index++) {
+      for (const header of headers) {
+        await header.hover();
+        await settle();
+        await leave();
+      }
+    }
+    const layouts = await layoutCount() - before;
+    t.diagnostic(`Message actions: ${layouts} layouts across ten hover cycles`);
+    assert.ok(layouts <= 1, `Hovering caused ${layouts} layouts`);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await turn.locator(".turn-heading").hover();
+    await settle();
+    assert.equal(await actions.evaluate(node => getComputedStyle(node).opacity), "1");
+    await cdp.detach();
+    await f.close();
+    const touch = await fixture({ hasTouch: true, preferences: { sidebar: "0" }, messages: [
+      { ...message("touch-question", [textPart("touch-question-text", "Explain the changes.")]), role: "user" },
+      message("touch-answer", [textPart("touch-answer-text", "The changes are ready.")]),
+    ] });
+    await touch.page.setViewportSize({ width: 420, height: 900 });
+    assert.equal(await touch.page.evaluate(() => matchMedia("(hover: none)").matches), true);
+    for (const toolbar of await touch.page.locator(".message-actions").all()) {
+      assert.equal(await toolbar.evaluate(node => getComputedStyle(node).opacity), "1");
+    }
+    await touch.page.getByRole("button", { name: "Restore before this message", exact: true }).tap();
+    await touch.page.getByRole("dialog", { name: "Restore before this message", exact: true }).waitFor();
+    await touch.page.getByRole("button", { name: "Cancel", exact: true }).tap();
+    await touch.close();
+  });
+
   await t.test("conversation menus stay visible above the sidebar footer and support keyboard navigation", async () => {
     const f = await fixture({ preferences: { compactNavigation: "1" }, children: Array.from({ length: 12 }, (_, index) => ({ ...thread, id: `other-${index}`, title: `Other conversation ${index}` })) });
     const { page } = f;
@@ -264,6 +515,7 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     const f = await fixture({ messages: [message("work", [tools[0], { ...tools[1], name: "Bash", shape: "command", headline: "git status" }])] });
     const { page } = f;
     f.emit({ t: "thread.upsert", thread: { ...thread, running: true, status: "thinking", runStartedAt: Date.now() - 3200 } });
+    await page.getByRole("button", { name: "Work details", exact: true }).click();
     const activity = page.locator(".turn-agent").filter({ has: page.locator(".group") });
     await activity.getByRole("button", { name: "Read 1 file and ran 1 command", exact: true }).waitFor();
     assert.equal(await activity.locator(".message-bubble").count(), 0);
@@ -341,13 +593,46 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
       return body && inner && Math.abs(body.getBoundingClientRect().height - inner.getBoundingClientRect().height) < 1;
     });
     f.emit({ t: "thread.upsert", thread: { ...thread, model: "claude-sonnet-5", running: true, status: "thinking", runStartedAt: Date.now() - 3200 } });
-    for (const width of [1440, 600]) {
+    for (const width of [1440, 960, 600, 420]) {
       await page.setViewportSize({ width, height: 1100 });
       if (width === 600) {
         await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
         await page.locator(".rail").waitFor({ state: "detached" });
       }
       await page.screenshot({ path: `/tmp/citropy-chat-bubbles-${width}.png`, animations: "disabled" });
+      const reading = await page.locator(".canvas-inner").boundingBox();
+      const composer = await page.locator(".composer-shell").boundingBox();
+      assert.ok(Math.abs(reading.x - composer.x) < 1 && Math.abs(reading.width - composer.width) < 1, JSON.stringify({ width, reading, composer }));
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    }
+    await f.close();
+  });
+
+  await t.test("message content shares the composer edges with avatars outside the reading column", async () => {
+    const f = await fixture({ preferences: { sidebar: "0" }, messages: [
+      { ...message("question", [textPart("question-text", "Check the layout at every window size.")]), role: "user" },
+      message("answer", [textPart("answer-text", "The message and composer share a reading column.")]),
+    ] });
+    const { page } = f;
+    await page.evaluate(() => document.fonts.ready);
+    for (const [width, scale] of [[1440, 120], [960, 120], [600, 120], [480, 150]]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate(async scale => (await import("/web/src/lib/store.ts")).setUiScale(scale), scale);
+      const layout = await page.evaluate(() => {
+        const composer = document.querySelector(".composer-shell").getBoundingClientRect().toJSON();
+        return { composer, wide: document.querySelector(".conversation-viewport").clientWidth > 960, turns: [...document.querySelectorAll(".turn")].filter(node => node.querySelector(".message-avatar")).map(node => ({
+          user: node.classList.contains("turn-user"),
+          content: node.querySelector(".message-content").getBoundingClientRect().toJSON(),
+          avatar: node.querySelector(".message-avatar").getBoundingClientRect().toJSON(),
+          heading: node.querySelector(".turn-heading").getBoundingClientRect().toJSON(),
+        })) };
+      });
+      assert.equal(layout.turns.length, 2);
+      for (const turn of layout.turns) {
+        assert.ok(Math.abs(turn.content.left - layout.composer.left) < 1 && Math.abs(turn.content.right - layout.composer.right) < 1, JSON.stringify({ width, scale, layout }));
+        assert.ok(turn.user ? turn.avatar.left > turn.heading.right : turn.avatar.right < turn.heading.left, JSON.stringify(turn));
+        if (layout.wide) assert.ok(turn.user ? turn.avatar.left > turn.content.right : turn.avatar.right < turn.content.left, JSON.stringify(turn));
+      }
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     }
     await f.close();
@@ -366,15 +651,15 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     for (let index = 1; index <= 2; index++) {
       await page.getByRole("button", { name: "New thread", exact: true }).click();
       assert.equal(await page.locator("dialog").count(), 0);
-      await page.locator(`.thread-row[title="Empty conversation ${index}"][data-active="true"]`).waitFor();
+      await page.locator(`.thread-row[aria-label="Empty conversation ${index}"][data-active="true"]`).waitFor();
       assert.equal(await page.locator(".conversation-viewport").count(), 1);
       assert.equal(await page.locator(".canvas-hint").count(), 1);
       assert.equal(await page.locator(".turn").count(), 0);
       assert.equal(await page.getByRole("textbox", { name: "Message", exact: true }).count(), 1);
     }
     for (const title of ["Presentation check", "Empty conversation 1", "Presentation check", "Empty conversation 2", "Presentation check"]) {
-      await page.locator(`.thread-row[title="${title}"]`).click();
-      await page.locator(`.thread-row[title="${title}"][data-active="true"]`).waitFor();
+      await page.locator(`.thread-row[aria-label="${title}"]`).click();
+      await page.locator(`.thread-row[aria-label="${title}"][data-active="true"]`).waitFor();
       assert.equal(await page.locator(".conversation-viewport").count(), 1);
       if (title === "Presentation check") {
         await page.locator('[data-part-id="saved-text"]').waitFor();
@@ -613,6 +898,41 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     }
   });
 
+  await t.test("replies fade once while thought text stays still through streaming and history navigation", async () => {
+    const f = await fixture();
+    const { page } = f;
+    await page.evaluate(() => {
+      window.proseEntrances = [];
+      const animate = Element.prototype.animate;
+      Element.prototype.animate = function (frames, options) {
+        if (this.matches(".prose")) window.proseEntrances.push(this.dataset.partId);
+        return animate.call(this, frames, options);
+      };
+    });
+    f.begin("fresh", "A new response");
+    await page.locator('[data-part-id="fresh-text"]').waitFor();
+    f.emit({ t: "part.add", threadId: "chat", messageId: "fresh", part: { id: "fresh-thought", kind: "reasoning", text: "Checking **the layout**", complete: false } });
+    await page.getByRole("button", { name: "Work details", exact: true }).click();
+    await page.getByRole("button", { name: "Thoughts", exact: true }).click();
+    await page.locator('[data-part-id="fresh-thought"] strong').waitFor();
+    f.emit({ t: "part.append", threadId: "chat", messageId: "fresh", partId: "fresh-text", text: " continues." });
+    f.emit({ t: "part.append", threadId: "chat", messageId: "fresh", partId: "fresh-thought", text: " at a narrow width." });
+    await page.locator('[data-part-id="fresh-thought"]').getByText("at a narrow width.", { exact: false }).waitFor();
+    assert.deepEqual(await page.evaluate(() => window.proseEntrances), ["fresh-text"]);
+    assert.equal(await page.locator('[data-part-id="fresh-thought"]').evaluate(node => node.getAnimations().length), 0);
+    f.complete("fresh");
+    f.idle();
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("button", { name: "Back to chat", exact: true }).click();
+    await page.locator('[data-part-id="fresh-text"]').waitFor();
+    assert.deepEqual(await page.evaluate(() => window.proseEntrances), ["fresh-text"]);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    f.begin("reduced", "An immediate response.");
+    await page.locator('[data-part-id="reduced-text"]').waitFor();
+    assert.deepEqual(await page.evaluate(() => window.proseEntrances), ["fresh-text"]);
+    await f.close();
+  });
+
   await t.test("typing reveals finished Markdown at the selected speed without replaying history", async () => {
     const f = await fixture({ preferences: { textStreaming: "0", typingAnimation: "1", typingSpeed: "20" } });
     const { page } = f;
@@ -699,7 +1019,7 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     const f = await fixture({ children });
     const { page } = f;
     assert.equal(await page.getByRole("button", { name: "Active research", exact: true }).count(), 0);
-    await page.locator('.thread-row[title="Presentation check"]').hover();
+    await page.locator('.thread-row[aria-label="Presentation check"]').hover();
     const toggle = page.locator('.thread-entry > .thread-children-disclosure > .thread-children-clip > .thread-subagents-toggle');
     await toggle.click();
     await page.getByRole("button", { name: "Active research", exact: true }).waitFor();
@@ -724,8 +1044,48 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     await f.close();
   });
 
-  await t.test("composer suggestions use keyboard commands and skills, and navigation collapses by dragging", async () => {
+  await t.test("finished conversations reopen from the composer without losing drafts or sending them", async () => {
     const f = await fixture();
+    const { page, emit } = f;
+    const input = page.getByRole("textbox", { name: "Message", exact: true });
+    const notice = page.locator(".composer-finished");
+    const reopen = notice.getByRole("button", { name: "Reopen", exact: true });
+    for (const width of [1440, 640]) {
+      await page.setViewportSize({ width, height: 900 });
+      if (width === 640) await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+      await input.fill("Continue with the saved draft.");
+      emit({ t: "thread.upsert", thread: { ...thread, finished: true } });
+      await notice.waitFor();
+      const bounds = await notice.boundingBox();
+      const action = await reopen.boundingBox();
+      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, JSON.stringify(bounds));
+      assert.ok(action.x >= bounds.x && action.x + action.width <= bounds.x + bounds.width, JSON.stringify(action));
+      await page.evaluate(async () => (await import("/web/src/lib/store.ts")).useApp.setState({ connected: false }));
+      assert.equal(await reopen.isDisabled(), true);
+      await page.evaluate(async () => (await import("/web/src/lib/store.ts")).useApp.setState({ connected: true }));
+      const previous = f.requests.filter(event => event.t === "thread.finish").length;
+      await reopen.focus();
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(80);
+      assert.deepEqual(f.requests.filter(event => event.t === "thread.finish").slice(previous), [{ t: "thread.finish", id: "chat", finished: false }]);
+      f.idle();
+      await notice.waitFor({ state: "detached" });
+      assert.equal(await input.inputValue(), "Continue with the saved draft.");
+      assert.equal(f.requests.some(event => event.t === "thread.send"), false);
+    }
+    emit({ t: "thread.upsert", thread: { ...thread, finished: true } });
+    await notice.waitFor();
+    await page.getByRole("button", { name: "Send", exact: true }).click();
+    await page.waitForFunction(() => document.querySelector("textarea").value === "");
+    assert.equal(f.requests.filter(event => event.t === "thread.send" && event.text === "Continue with the saved draft.").length, 1);
+    emit({ t: "thread.upsert", thread: { ...thread, finished: true, running: true, status: "working" } });
+    await notice.waitFor({ state: "detached" });
+    assert.equal(await page.getByRole("button", { name: "Stop", exact: true }).isEnabled(), true);
+    await f.close();
+  });
+
+  await t.test("composer suggestions use keyboard commands and skills, and navigation collapses by dragging", async () => {
+    const f = await fixture({ preferences: { compactNavigation: "0" } });
     const { page } = f;
     await page.route("**/api/skills?*", route => route.fulfill({ json: [
       { id: "review", name: "review", description: "Review this project", provider: "claude", enabled: true, scope: "project", path: "/example/SKILL.md" },
@@ -925,6 +1285,28 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     await f.close();
   });
 
+  await t.test("long queued logs stay inside the chat with reachable controls", async () => {
+    const f = await fixture();
+    const { page } = f;
+    const queue = [{ id: "log", text: "[main/ERROR]: Incompatible mods found! ".repeat(150), createdAt: 2 }];
+    f.emit({ t: "thread.upsert", thread: { ...thread, running: true, status: "thinking", runStartedAt: Date.now() - 10000, queue } });
+    await page.getByRole("button", { name: "Expand 1 queued message" }).click();
+    for (const width of [1440, 700]) {
+      await page.setViewportSize({ width, height: 900 });
+      if (width === 700) await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+      const sizes = await page.evaluate(() => {
+        const stage = document.querySelector(".stage").getBoundingClientRect();
+        const queue = document.querySelector(".composer-queue").getBoundingClientRect();
+        const remove = document.querySelector('.composer-queue-actions [aria-label="Remove"]').getBoundingClientRect();
+        return { width: innerWidth, stageRight: stage.right, queueRight: queue.right, removeRight: remove.right, overflow: document.documentElement.scrollWidth > innerWidth };
+      });
+      assert.ok(sizes.queueRight <= sizes.stageRight && sizes.stageRight <= width && sizes.removeRight <= sizes.queueRight && !sizes.overflow, JSON.stringify(sizes));
+      assert.ok(await page.getByRole("button", { name: "Queue", exact: true }).isVisible());
+      await page.screenshot({ path: `/tmp/citropy-long-queue-${width}.png`, animations: "disabled" });
+    }
+    await f.close();
+  });
+
   await t.test("queued follow-ups stay visible and editable, and messages written offline wait for the connection", async () => {
     const until = async (check) => {
       for (let index = 0; index < 150; index++) {
@@ -1028,6 +1410,10 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
       }
       if (streaming === "1") {
         f.emit({ t: "part.append", threadId: "chat", messageId: "pending", partId: "pending-reason", text: "Multiplying 15 by 15." });
+        await page.getByRole("button", { name: "Work details", exact: true }).waitFor();
+        assert.equal(await page.locator(".reason-text").count(), 0);
+        await page.getByRole("button", { name: "Work details", exact: true }).click();
+        await page.getByRole("button", { name: "Thoughts", exact: true }).click();
         await page.locator(".turn-agent .reason-text").getByText("Multiplying 15 by 15.", { exact: true }).waitFor();
         await page.locator("#message-pending .turn-heading").getByText("Muse Spark 1.3 Free", { exact: true }).waitFor();
         assert.equal(await page.locator(".turn-agent .turn-heading").count(), 1);
@@ -1072,12 +1458,11 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
   await t.test("the thinking indicator loops without a visual reset and respects reduced motion", async () => {
     const f = await fixture();
     f.emit({ t: "thread.upsert", thread: { ...thread, running: true, status: "thinking", runStartedAt: Date.now() - 3200 } });
-    const signal = f.page.locator(".working-weave");
+    const signal = f.page.locator(".working-grid");
     await signal.waitFor();
     await f.page.screenshot({ path: "/tmp/citropy-thinking-desktop.png" });
-    const center = signal.locator("i").nth(1);
-    assert.equal(await center.evaluate(line => line.getAnimations().length), 0);
-    const frames = await signal.evaluate((element) => [element.firstElementChild, element.lastElementChild].map((line) => {
+    assert.equal(await signal.locator("i").count(), 9);
+    const frames = await signal.evaluate((element) => [...element.children].map((line) => {
       const animation = line.getAnimations()[0];
       animation.pause();
       const timing = animation.effect.getTiming();
@@ -1092,20 +1477,17 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     for (const frame of frames) {
       assert.ok(Math.abs(frame.before.opacity - frame.after.opacity) < 0.005);
       assert.ok(frame.before.box.every((value, index) => Math.abs(value - frame.after.box[index]) < 0.01));
-      assert.ok(frame.middle.box[2] > frame.before.box[2]);
-      assert.equal(frame.before.box[0], frame.middle.box[0]);
-      assert.equal(frame.before.box[1], frame.middle.box[1]);
-      assert.equal(frame.before.box[3], frame.middle.box[3]);
+      assert.deepEqual(frame.before.box, frame.middle.box);
       assert.ok(frame.middle.opacity - frame.before.opacity > 0.5);
     }
     for (const scale of [90, 120, 150]) {
       await f.page.evaluate(async scale => (await import("/web/src/lib/store.ts")).setUiScale(scale), scale);
       const centered = await signal.evaluate(element => {
         const icon = element.getBoundingClientRect();
-        const line = element.children[1].getBoundingClientRect();
+        const line = element.children[4].getBoundingClientRect();
         return Math.abs(line.top + line.height / 2 - icon.top - icon.height / 2);
       });
-      assert.ok(centered < 0.05, `Middle bar is off center at ${scale}%: ${centered}px`);
+      assert.ok(centered < 0.05, `Center pixel is off center at ${scale}%: ${centered}px`);
     }
     await f.page.evaluate(async () => (await import("/web/src/lib/store.ts")).setUiScale(120));
     await f.page.evaluate(() => document.documentElement.setAttribute("data-page-hidden", ""));
@@ -1118,6 +1500,75 @@ test("conversation presentation", { timeout: 90_000 }, async (t) => {
     await f.page.screenshot({ path: "/tmp/citropy-thinking-narrow.png" });
     const bounds = await signal.boundingBox();
     assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 620);
+    await f.close();
+  });
+
+  await t.test("links show site icons and offer keyboard-accessible browser destinations", async () => {
+    const f = await fixture();
+    const { page } = f;
+    const url = "https://docs.example.test/guide?mode=focus#next";
+    const icons = [];
+    const network = await page.context().newCDPSession(page);
+    await network.send("Fetch.enable", { patterns: [{ urlPattern: "https://*.example.test/favicon.ico" }] });
+    network.on("Fetch.requestPaused", async ({ requestId, request }) => {
+      const missing = request.url.includes("missing.");
+      if (!missing) icons.push({ url: request.url, referer: request.headers.Referer });
+      await network.send("Fetch.fulfillRequest", { requestId, responseCode: missing ? 404 : 200,
+        responseHeaders: [{ name: "Content-Type", value: "image/svg+xml" }],
+        body: Buffer.from(missing ? "" : '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="blue"/></svg>').toString("base64"),
+      });
+    });
+    f.emit({ t: "message.add", threadId: "chat", message: message("links", [textPart("links-text", `[Docs](${url}) and [Missing icon](https://missing.example.test/docs).\n\n[Mail](mailto:hello@example.test) and [Unsafe](javascript:alert%281%29).`)]) });
+    const link = page.getByRole("link", { name: "Docs", exact: true });
+    await link.locator(".link-site-icon[data-loaded]").waitFor();
+    assert.deepEqual(icons, [{ url: "https://docs.example.test/favicon.ico", referer: undefined }]);
+    const fallback = page.getByRole("link", { name: "Missing icon", exact: true });
+    await fallback.locator("img[hidden]").waitFor({ state: "attached" });
+    assert.equal(await fallback.locator("svg").isVisible(), true);
+    assert.equal(await page.getByRole("link", { name: "Unsafe", exact: true }).getAttribute("href"), "#");
+    assert.equal(await page.getByRole("link", { name: "Mail", exact: true }).locator(".link-site-icon").count(), 0);
+    await link.click();
+    const menu = page.getByRole("menu", { name: "docs.example.test", exact: true });
+    await menu.waitFor();
+    assert.equal(await menu.getByRole("menuitem", { name: /^Open in Citropy/ }).isDisabled(), true);
+    await page.keyboard.press("Escape");
+    await menu.waitFor({ state: "detached" });
+    assert.equal(await link.evaluate(node => node === document.activeElement), true);
+    await page.evaluate(() => {
+      window.citropyDesktop = {};
+      window.openedLinks = [];
+      window.open = (...args) => { window.openedLinks.push(args); return null; };
+    });
+    await page.keyboard.press("Enter");
+    await menu.waitFor();
+    assert.equal(await menu.getByRole("menuitem", { name: "Open in Citropy", exact: true }).isEnabled(), true);
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    await menu.waitFor({ state: "detached" });
+    assert.deepEqual(await page.evaluate(() => window.openedLinks), [[url, "_blank", "noopener,noreferrer"]]);
+    assert.equal(f.requests.some(event => event.t === "panel.open"), false);
+    await link.click();
+    await menu.getByRole("menuitem", { name: "Open in Citropy", exact: true }).click();
+    await menu.waitFor({ state: "detached" });
+    const request = f.requests.find(event => event.t === "panel.open");
+    assert.equal(request?.url, url);
+    assert.equal(request?.kind, "browser");
+    assert.equal(request?.projectId, "workspace");
+    assert.equal(request?.threadId, "chat");
+    await page.getByRole("button", { name: "Toggle inspector", exact: true }).click();
+    await page.setViewportSize({ width: 620, height: 760 });
+    await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+    await link.click();
+    const bounds = await menu.boundingBox();
+    assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= 620 && bounds.y + bounds.height <= 760);
+    await page.getByRole("textbox", { name: "Message", exact: true }).click();
+    await menu.waitFor({ state: "detached" });
+    assert.equal(await page.getByRole("textbox", { name: "Message", exact: true }).evaluate(node => node === document.activeElement), true);
+    await link.click();
+    await menu.waitFor();
+    f.emit({ t: "part.patch", threadId: "chat", messageId: "links", partId: "links-text", patch: { text: "The linked message has been replaced." } });
+    await menu.waitFor({ state: "detached" });
+    await page.getByText("The linked message has been replaced.", { exact: true }).waitFor();
     await f.close();
   });
 

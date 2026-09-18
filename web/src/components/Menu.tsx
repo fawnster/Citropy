@@ -30,7 +30,7 @@ export interface MenuItem {
 }
 
 interface Props {
-  trigger: (props: {
+  trigger?: (props: {
     open: boolean;
     toggle: () => void;
     id: string;
@@ -44,6 +44,8 @@ interface Props {
   searchPlaceholder?: string;
   className?: string;
   emptyMessage?: string;
+  anchor?: HTMLElement;
+  onClose?: () => void;
 }
 
 export function Menu({
@@ -57,12 +59,14 @@ export function Menu({
   searchPlaceholder = "Search models",
   className = "",
   emptyMessage,
+  anchor,
+  onClose,
 }: Props) {
   const t = useI18n();
   const reducedMotion = useReducedMotion();
   const uiScale = useApp((state) => state.uiScale);
   const [query, setQuery] = useState("");
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(Boolean(anchor));
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set());
   const wrap = useRef<HTMLDivElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -92,22 +96,23 @@ export function Menu({
     if (!open || !element) return;
     element.showPopover();
     const position = () => {
-      const anchor = wrap.current?.getBoundingClientRect();
-      if (!anchor) return;
+      if (anchor && !anchor.isConnected) { setOpen(false); return; }
+      const bounds = (anchor ?? wrap.current)?.getBoundingClientRect();
+      if (!bounds) return;
       const scale = uiScale / 100;
-      const anchorLeft = anchor.left / scale;
+      const anchorLeft = bounds.left / scale;
       const menuWidth = Math.min(width, viewportWidth() - 24);
-      const preferred = align === "end" ? anchor.right / scale - menuWidth : anchorLeft;
+      const preferred = align === "end" ? bounds.right / scale - menuWidth : anchorLeft;
       element.style.width = `${menuWidth}px`;
       element.style.maxHeight = "";
       const height = element.offsetHeight;
-      const above = Math.max(0, anchor.top / scale - 18);
-      const below = Math.max(0, (innerHeight - anchor.bottom) / scale - 18);
+      const above = Math.max(0, bounds.top / scale - 18);
+      const below = Math.max(0, (innerHeight - bounds.bottom) / scale - 18);
       const upwards = height > below && above > below;
       const available = upwards ? above : below;
       element.style.maxHeight = `${available}px`;
       element.style.left = `${Math.max(12, Math.min(preferred, viewportWidth() - menuWidth - 12))}px`;
-      element.style.top = `${upwards ? anchor.top / scale - Math.min(height, available) - 6 : anchor.bottom / scale + 6}px`;
+      element.style.top = `${upwards ? bounds.top / scale - Math.min(height, available) - 6 : bounds.bottom / scale + 6}px`;
     };
     position();
     if (searchable) {
@@ -123,7 +128,12 @@ export function Menu({
     }
     const resize = new ResizeObserver(position);
     resize.observe(element);
-    if (wrap.current) resize.observe(wrap.current);
+    const source = anchor ?? wrap.current;
+    if (source) resize.observe(source);
+    const removed = anchor ? new MutationObserver(() => {
+      if (!anchor.isConnected) setOpen(false);
+    }) : undefined;
+    removed?.observe(document.body, { childList: true, subtree: true });
     const scroll = (event: Event) => {
       if (!element.contains(event.target as Node)) position();
     };
@@ -131,23 +141,24 @@ export function Menu({
     window.addEventListener("scroll", scroll, true);
     return () => {
       resize.disconnect();
+      removed?.disconnect();
       window.removeEventListener("resize", position);
       window.removeEventListener("scroll", scroll, true);
     };
-  }, [open, width, align, searchable, uiScale]);
+  }, [open, width, align, searchable, uiScale, anchor]);
 
   useEffect(() => {
     if (!open) return;
     setQuery("");
     const onPointer = (event: PointerEvent) => {
-      if (!wrap.current?.contains(event.target as Node)) setOpen(false);
+      if (!wrap.current?.contains(event.target as Node) && !anchor?.contains(event.target as Node)) setOpen(false);
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
         setOpen(false);
-        document.getElementById(id)?.focus();
+        (anchor ?? document.getElementById(id))?.focus({ preventScroll: true });
       }
     };
     document.addEventListener("pointerdown", onPointer, true);
@@ -156,7 +167,7 @@ export function Menu({
       document.removeEventListener("pointerdown", onPointer, true);
       document.removeEventListener("keydown", onKey, true);
     };
-  }, [open, id]);
+  }, [open, id, anchor]);
 
   useLayoutEffect(() => {
     if (open && document.activeElement === document.body)
@@ -166,13 +177,14 @@ export function Menu({
   return (
     <div
       className="menu-wrap"
+      style={anchor ? { display: "contents" } : undefined}
       ref={wrap}
       onBlur={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
       }}
     >
-      {trigger({ open, toggle: () => setOpen((value) => !value), id })}
-      <AnimatePresence>
+      {trigger?.({ open, toggle: () => setOpen((value) => !value), id })}
+      <AnimatePresence onExitComplete={onClose}>
         {open && (
           <motion.div
             ref={menu}
@@ -184,7 +196,8 @@ export function Menu({
               maxWidth: "calc(var(--viewport-width) - 24px)",
             }}
             role="menu"
-            aria-labelledby={id}
+            aria-labelledby={anchor ? undefined : id}
+            aria-label={anchor ? header : undefined}
             initial={{ opacity: 0, scale: reducedMotion ? 1 : 0.985 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: reducedMotion ? 1 : 0.985, pointerEvents: "none" }}
@@ -267,7 +280,7 @@ export function Menu({
                         onClick={() => {
                           if (item.children) { toggleGroup(item.id); return; }
                           setOpen(false);
-                          document.getElementById(id)?.focus();
+                          (anchor ?? document.getElementById(id))?.focus({ preventScroll: true });
                           item.onSelect?.();
                         }}
                       >

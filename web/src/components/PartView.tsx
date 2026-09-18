@@ -1,3 +1,4 @@
+import { QuestionHistory } from "./parts/QuestionHistory.tsx";
 import { memo } from "react";
 import { Prose } from "./parts/Prose.tsx";
 import { Reasoning } from "./parts/Reasoning.tsx";
@@ -19,11 +20,13 @@ export const PartView = memo(function PartView({ partId, live }: Props) {
     case "text":
       return <Prose partId={part.id} text={part.text} live={live && part.complete !== true} />;
     case "reasoning":
-      return <Reasoning text={part.text} live={live && part.complete !== true} />;
+      return <Reasoning ids={[part.id]} live={live} />;
     case "tool":
       return <ToolCard part={part} />;
     case "todo":
-      return <TodoBoard items={part.items} />;
+      return <TodoBoard partId={part.id} items={part.items} />;
+    case "question":
+      return <QuestionHistory part={part} />;
     case "notice":
       return <Notice level={part.level} text={part.text} />;
     default:

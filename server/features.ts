@@ -1,14 +1,18 @@
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { store } from "./store.ts";
+import { answerQuestion } from "./questions.ts";
 import { stopShell } from "./shells.ts";
 import { dev } from "./config.ts";
 import { desktopRequest } from "./desktop.ts";
-import { reloadProviderSessions, providerBusy, runtimeFor } from "./runtime.ts";
+import { reloadProviderSessions, providerBusy, runtimeFor, disposeRuntime } from "./runtime.ts";
+import { assertWorkspaceIdle, restoreCheckpoint, redoCheckpoint, forkConversation, reviewChanges } from "./checkpoints.ts";
+import type { ReviewScope } from "../shared/review.ts";
+import { changeHunk, reviewWithModel } from "./review.ts";
+import { findContextPaths, inspectContext } from "./context.ts";
+import { copyToWorktree, removeWorktree } from "./worktree-actions.ts";
 import { providerMaintenance, startProviderUpdate, assertProviderReady } from "./providers/maintenance.ts";
 import { readGlobalInstructions, saveGlobalInstructions } from "./providers/instructions.ts";
 import { waitForStoppedProcesses } from "./providers/process.ts";
-import { openPanel } from "./panels.ts";
-import * as terminals from "./terminals.ts";
 import { modelSettings } from "../shared/model-options.ts";
 import { resolveProjectSettings } from "../shared/project-settings.ts";
 import {
@@ -95,34 +99,6 @@ function settings(
         throw new Error(`Invalid ${key} setting`);
       out[key] = input[key];
     }
-  if (input.actions !== undefined) {
-    if (!Array.isArray(input.actions) || input.actions.length > 20)
-      throw new Error("Add up to 20 project actions.");
-    out.actions = input.actions.map((entry: any) => {
-      if (
-        typeof entry.id !== "string" ||
-        typeof entry.name !== "string" ||
-        !entry.name.trim() ||
-        typeof entry.command !== "string" ||
-        !entry.command.trim() ||
-        entry.command.length > 8000
-      )
-        throw new Error("Every action needs a name and command.");
-      return {
-        id: entry.id.slice(0, 80),
-        name: entry.name.trim().slice(0, 80),
-        command: entry.command,
-        setup: entry.setup === true,
-      };
-    });
-    if (
-      new Set(out.actions!.map((action) => action.id)).size !==
-        out.actions!.length ||
-      new Set(out.actions!.map((action) => action.name.toLowerCase())).size !==
-        out.actions!.length
-    )
-      throw new Error("Give each project action a different name.");
-  }
   return out;
 }
 
@@ -170,7 +146,52 @@ export async function handleFeatures(
       .end(JSON.stringify(value));
   };
   try {
-    if (url.pathname === "/api/shells/stop" && req.method === "POST") {
+    if (url.pathname === "/api/threads/question" && req.method === "POST") {
+      const input = await body(req);
+      answerQuestion(threadId ?? "", String(input.id ?? ""), input.answers);
+      respond({ ok: true });
+    } else if (url.pathname === "/api/threads/worktree" && req.method === "POST") {
+      const thread = store.threads.get(threadId ?? "");
+      if (!thread) throw new Error("Conversation not found.");
+      const input = await body(req);
+      if (input.action === "copy") await copyToWorktree(thread);
+      else if (input.action === "remove") await removeWorktree(thread);
+      else throw new Error("Choose a worktree action.");
+      respond(store.meta(thread));
+    } else if (url.pathname === "/api/threads/context" && ["GET", "POST"].includes(req.method || "")) {
+      const thread = store.threads.get(threadId ?? "");
+      if (!thread) throw new Error("Conversation not found.");
+      if (req.method === "GET") respond(await findContextPaths(thread, url.searchParams.get("query") || ""));
+      else respond(await inspectContext(thread, String((await body(req)).draft || "")));
+    } else if (url.pathname === "/api/threads/hunk" && req.method === "POST") {
+      const thread = store.threads.get(threadId ?? "");
+      if (!thread) throw new Error("Conversation not found.");
+      await changeHunk(thread, await body(req) as Parameters<typeof changeHunk>[1]);
+      respond({ ok: true });
+    } else if (url.pathname === "/api/threads/review-model" && req.method === "POST") {
+      const thread = store.threads.get(threadId ?? "");
+      if (!thread) throw new Error("Conversation not found.");
+      const input = await body(req);
+      respond(await reviewWithModel(thread, input.scope, input.messageId));
+    } else if (url.pathname === "/api/threads/review" && req.method === "GET") {
+      const thread = store.threads.get(threadId ?? "");
+      if (!thread) throw new Error("Conversation not found.");
+      respond(await reviewChanges(thread, (url.searchParams.get("scope") || "lastTurn") as ReviewScope, url.searchParams.get("messageId") || undefined));
+    } else if (url.pathname === "/api/threads/restore" && req.method === "POST") {
+      const thread = store.threads.get(threadId ?? "");
+      if (!thread) throw new Error("Conversation not found.");
+      const input = await body(req);
+      assertWorkspaceIdle(thread);
+      if (runtimeFor(thread.id).busy) throw new Error("Wait for the task to finish preparing or stopping.");
+      disposeRuntime(thread.id, true);
+      if (input.redo === true) await redoCheckpoint(thread);
+      else await restoreCheckpoint(thread, input.messageId, input.mode);
+      respond({ ok: true });
+    } else if (url.pathname === "/api/threads/fork" && req.method === "POST") {
+      const thread = store.threads.get(threadId ?? "");
+      if (!thread) throw new Error("Conversation not found.");
+      respond(store.meta(await forkConversation(thread, (await body(req)).messageId)));
+    } else if (url.pathname === "/api/shells/stop" && req.method === "POST") {
       const { id } = await body(req);
       if (typeof id !== "string" || !id) throw new Error("Choose a running shell.");
       await stopShell(id);
@@ -246,8 +267,6 @@ export async function handleFeatures(
       respond(store.projectDefaults);
     } else if (url.pathname === "/api/projects/defaults" && req.method === "PATCH") {
       const input = await body(req);
-      if (input.settings?.actions !== undefined)
-        throw new Error("Terminal actions belong to a folder.");
       const defaults = settings(input.settings ?? {}, providers, true);
       store.configureProjectDefaults(defaults);
       respond(defaults);
@@ -266,25 +285,6 @@ export async function handleFeatures(
           settings: settings(input.settings ?? {}, providers),
         }),
       );
-    } else if (
-      url.pathname === "/api/projects/action" &&
-      req.method === "POST"
-    ) {
-      const input = await body(req);
-      const project = store.projects.get(projectId ?? "");
-      const action = project?.settings?.actions?.find(
-        (entry) => entry.id === input.id,
-      );
-      if (!project || !action) throw new Error("Project action not found");
-      const panel = openPanel(project.id, "terminal", threadId);
-      terminals.open(
-        panel.id,
-        workspacePath(project.id, threadId),
-        100,
-        28,
-        action.command,
-      );
-      respond(panel);
     } else if (url.pathname === "/api/threads" && req.method === "POST") {
       const input = await body(req);
       const project = store.projects.get(input.projectId);
@@ -319,18 +319,6 @@ export async function handleFeatures(
           input.permissionMode ?? defaults?.permissionMode ?? "manual",
         title: "New thread",
       });
-      if ((input.workspace?.kind ?? defaults?.workspace) === "new")
-        for (const action of defaults?.actions ?? [])
-          if (action.setup) {
-            const panel = openPanel(project.id, "terminal", thread.id);
-            terminals.open(
-              panel.id,
-              workspace.workspacePath,
-              100,
-              28,
-              action.command,
-            );
-          }
       respond(store.meta(thread));
     } else if (
       url.pathname === "/api/threads/organize" &&
@@ -388,6 +376,12 @@ export async function handleFeatures(
       input.ids.forEach((id: string, index: number) =>
         store.organizeThread(id, { position: index }),
       );
+      respond({ ok: true });
+    } else if (url.pathname === "/api/threads/transfer" && req.method === "POST") {
+      const input = await body(req);
+      const provider = providers.find(entry => entry.id === input.provider);
+      if (!provider || typeof input.model !== "string" || !input.model) throw new Error("Choose a provider and model for the transfer.");
+      await runtimeFor(threadId ?? "").transfer(provider, input.model);
       respond({ ok: true });
     } else if (
       url.pathname === "/api/threads/compact" &&

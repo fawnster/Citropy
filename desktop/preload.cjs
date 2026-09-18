@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld("citropyDesktop", {
   configureProjectDefaults: (settings) => ipcRenderer.invoke("environments:project-defaults", settings),
   connectEnvironment: (id) => ipcRenderer.invoke("environments:connect", id),
   disconnectEnvironment: (id) => ipcRenderer.invoke("environments:disconnect", id),
+  stopEnvironment: (id) => ipcRenderer.invoke("environments:stop", id),
   removeEnvironment: (id) => ipcRenderer.invoke("environments:remove", id),
   chooseWorkspaceFolder: (id, path) => ipcRenderer.invoke("environments:choose-folder", { id, path }),
   onEnvironmentsState: (callback) => {

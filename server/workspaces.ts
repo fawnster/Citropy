@@ -3,7 +3,6 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { mkdir, realpath } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { uid } from "./ids.ts";
 import { store } from "./store.ts";
 import { resolveProjectSettings } from "../shared/project-settings.ts";

@@ -120,6 +120,20 @@ test("computer sessions enforce ownership, consent, coordinates and cleanup", { 
     await computer.stopComputer();
   });
 
+  await t.test("screen indicator pause and resume update the session and discard old coordinates", async () => {
+    await computer.startComputer(thread.id);
+    const frame = await computer.computerScreenshot(thread.id);
+    desktop.emit("message", JSON.stringify({ t: "computer.paused", paused: true }));
+    assert.equal(computer.computerState().status, "paused");
+    assert.throws(() => computer.computerAction(thread.id, { action: "type", text: "blocked" }), /paused/);
+    desktop.emit("message", JSON.stringify({ t: "computer.paused", paused: false }));
+    assert.equal(computer.computerState().status, "active");
+    assert.throws(() => computer.computerAction(thread.id, { action: "click", frameId: frame.id, x: 1, y: 1 }), /screenshot/);
+    await computer.stopComputer();
+    desktop.emit("message", JSON.stringify({ t: "computer.paused", paused: false }));
+    assert.equal(computer.computerState().status, "idle");
+  });
+
   await t.test("Claude capture dimensions survive client resizing and restarted screens reject old IDs", async () => {
     const previousDisplays = displays;
     displays = [{ id: "103", name: "Screen 1", width: 2560, height: 1440 }, { id: "121", name: "Screen 2", width: 1920, height: 1080 }];

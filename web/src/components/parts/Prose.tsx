@@ -7,9 +7,10 @@ interface Props {
   text: string;
   live: boolean;
   partId?: string;
+  className?: string;
 }
 
-export function Prose({ partId, text, live }: Props) {
+export function Prose({ partId, text, live, className }: Props) {
   const streaming = useApp((state) => state.textStreaming);
   const waiting = live && !streaming;
   const { html, ready } = useMarkdown(waiting ? "" : text, live && streaming);
@@ -19,11 +20,20 @@ export function Prose({ partId, text, live }: Props) {
   if (!text || waiting || (!streaming && !ready)) return null;
   return (
     <div
-      className="prose"
+      className={className ? `prose ${className}` : "prose"}
       ref={root}
       data-part-id={partId}
       data-live={(streaming && live) || revealing || undefined}
       aria-busy={revealing || undefined}
+      onLoadCapture={event => {
+        if (event.target instanceof HTMLImageElement && event.target.classList.contains("link-favicon")) event.target.parentElement?.setAttribute("data-loaded", "");
+      }}
+      onErrorCapture={event => {
+        if (event.target instanceof HTMLImageElement && event.target.classList.contains("link-favicon")) {
+          event.target.hidden = true;
+          event.target.parentElement?.removeAttribute("data-loaded");
+        }
+      }}
       dangerouslySetInnerHTML={markup}
     />
   );

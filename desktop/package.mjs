@@ -35,7 +35,7 @@ await cp(join(root, "package-lock.json"), join(staging, "desktop/remote-package-
 const manifest = JSON.parse(
   await readFile(join(staging, "package.json"), "utf8"),
 );
-manifest.main = "desktop/main.mjs";
+manifest.main = "desktop/entry.mjs";
 await writeFile(
   join(staging, "package.json"),
   `${JSON.stringify(manifest, null, 2)}\n`,

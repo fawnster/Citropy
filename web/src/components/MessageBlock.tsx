@@ -3,6 +3,8 @@ import { memo, type ReactNode } from "react";
 import { PartView } from "./PartView.tsx";
 import { WorkGroup } from "./WorkGroup.tsx";
 import { WorkDetails } from "./WorkDetails.tsx";
+import { Reasoning } from "./parts/Reasoning.tsx";
+import { MessageActions } from "./MessageActions.tsx";
 import type { TimelineRow } from "../lib/timeline.ts";
 import { useApp } from "../lib/store.ts";
 import { UserRound } from "lucide-react";
@@ -35,9 +37,9 @@ export const MessageBlock = memo(function MessageBlock({
   const shell = useApp((state) => messageId ? state.messages[messageId] : undefined);
   const partKind = useApp((state) => row?.kind === "part" ? state.parts[row.id]?.kind : undefined);
   const provider = useApp((state) =>
-    state.activeThreadId
+    shell?.provider ?? (state.activeThreadId
       ? state.threads[state.activeThreadId]?.provider
-      : undefined,
+      : undefined),
   );
   const threadModel = useApp((state) =>
     state.activeThreadId
@@ -79,6 +81,7 @@ export const MessageBlock = memo(function MessageBlock({
           <div className="turn-heading">
             <strong>{account?.login ?? t("You")}</strong>
             <time>{clock(shell.ts)}</time>
+            {thread && messageId && <MessageActions thread={thread} messageId={messageId} user />}
           </div>
           {shell.attachments?.length && thread ? (
             <Attachments
@@ -101,7 +104,7 @@ export const MessageBlock = memo(function MessageBlock({
   const modelId = shell?.model ?? threadModel;
   const modelName = modelLabel(catalog?.models ?? [], modelId);
   const model = selectedModel(catalog?.models ?? [], modelId);
-  const activity = row?.kind === "group" || row?.kind === "activity" || Boolean(partKind && partKind !== "text");
+  const activity = Boolean(row && row.kind !== "part") || Boolean(partKind && partKind !== "text");
 
   return (
     <article
@@ -120,6 +123,7 @@ export const MessageBlock = memo(function MessageBlock({
       <div className="message-content">
         {first && (
           <div className="turn-heading">
+            {thread && messageId && !streaming && <MessageActions thread={thread} messageId={messageId} user={false} />}
             <strong>{modelName}</strong>
             {provider && (
               <span
@@ -136,9 +140,11 @@ export const MessageBlock = memo(function MessageBlock({
         {row && (
           <div className={activity ? "agent-activity" : "message-bubble agent-card"}>
             {row.kind === "activity" ? (
-              <WorkDetails id={row.id} ids={row.ids} open={row.open} />
+              <WorkDetails id={row.id} ids={row.ids} open={row.open} active={row.active} previewId={row.previewId} />
             ) : row.kind === "group" ? (
               <WorkGroup key={row.ids[0]} ids={row.ids} />
+            ) : row.kind === "thoughts" ? (
+              <Reasoning ids={row.ids} live={streaming} />
             ) : (
               <PartView key={row.id} partId={row.id} live={streaming} />
             )}

@@ -61,6 +61,7 @@ export interface Provider {
   models: ModelOption[];
   listModels(): Promise<ModelOption[]>;
   supportsPermissionPrompt: boolean;
+  capabilities: { transport: "stdio" | "rpc" | "http"; steer: boolean; compact: boolean; stopShell: boolean };
   steerHint?: string;
   detect(): Promise<{ available: boolean; version?: string }>;
   start(options: StartOptions): AgentSession;

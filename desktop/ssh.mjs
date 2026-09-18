@@ -4,6 +4,7 @@ import { mkdir, mkdtemp, readFile, writeFile, rename, readdir, cp, rm } from "no
 import { createServer } from "node:net";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { validateContainer, startContainer, stopContainer } from "./containers.mjs";
 import { remoteProxy } from "./remote-proxy.mjs";
 
 export const shellQuote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
@@ -26,6 +27,7 @@ function nodePath(output) {
 }
 
 export function validateConnection(input) {
+  if (input?.kind === "container") return validateContainer(input);
   const name = String(input?.name || "").trim();
   const target = String(input?.target || "").trim();
   const port = Number(input?.port || 0);
@@ -86,12 +88,12 @@ export class SshEnvironments {
     const connection = { id: previous?.id || randomUUID(), ...validateConnection(input) };
     if (previous) {
       if (this.sessions.get(previous.id)?.status === "connected") throw new Error("Disconnect before editing this connection.");
-      if (previous.target !== connection.target || previous.port !== connection.port) throw new Error("Add a new connection to change the SSH host or port.");
+      if (previous.kind !== connection.kind || previous.target !== connection.target || previous.port !== connection.port) throw new Error(connection.kind === "container" ? "Add a new container to change its folder." : "Add a new connection to change the SSH host or port.");
       await this.persist(this.connections.map(entry => entry.id === previous.id ? connection : entry));
       this.publish();
       return connection;
     }
-    if (this.connections.some(entry => entry.target === connection.target && entry.port === connection.port)) throw new Error("This SSH target is already saved.");
+    if (this.connections.some(entry => entry.kind === connection.kind && entry.target === connection.target && entry.port === connection.port)) throw new Error(connection.kind === "container" ? "A container for this folder is already saved." : "This SSH target is already saved.");
     await this.persist([...this.connections, connection]);
     this.publish();
     return connection;
@@ -107,6 +109,8 @@ export class SshEnvironments {
 
   async remove(id) {
     if (id === this.activeId) throw new Error("Switch to Local before removing this connection.");
+    const connection = this.connections.find(entry => entry.id === id);
+    if (connection?.kind === "container") await this.stop(id);
     await this.disconnect(id);
     await this.persist(this.connections.filter(entry => entry.id !== id));
     await this.sessions.get(id)?.proxy?.close();
@@ -137,6 +141,13 @@ export class SshEnvironments {
     session.status = "disconnected";
     session.message = undefined;
     this.publish();
+  }
+
+  async stop(id) {
+    const connection = this.connections.find(entry => entry.id === id);
+    if (connection?.kind !== "container") throw new Error("Choose a container environment.");
+    await this.disconnect(id);
+    await stopContainer(this, connection);
   }
 
   async local() {
@@ -312,6 +323,19 @@ ${runtime}/bin/node -e ${shellQuote(checkNode)}`, archive, 180000);
     const signal = controller.signal;
     const ssh = (script, input, timeout) => this.command("ssh", [...sshArguments(connection), connection.target, `sh -c ${shellQuote(script)}`], { signal, input, timeout });
     try {
+      if (connection.kind === "container") {
+        const target = await startContainer(this, connection, signal, progress);
+        signal.throwIfAborted();
+        session.proxy ||= await remoteProxy(() => this.origin);
+        session.proxy.setTarget(target);
+        await this.syncProjectDefaults(undefined, session, signal);
+        signal.throwIfAborted();
+        this.activeId = id;
+        session.status = "connected";
+        session.message = target.outdated ? "Stop this container and reconnect to update its backend." : undefined;
+        this.publish();
+        return this.state();
+      }
       progress("Checking SSH and Node…");
       const node = await this.prepareRuntime(connection, ssh, signal, progress);
       progress("Preparing remote backend…");

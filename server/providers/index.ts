@@ -41,6 +41,7 @@ export async function describeProviders(): Promise<ProviderInfo[]> {
       models,
       supportsPermissionPrompt: provider.supportsPermissionPrompt,
       steerHint: provider.steerHint,
+      capabilities: provider.capabilities,
       available: detected.available,
       enabled: !store.disabledProviders.has(provider.id),
       version: detected.version,

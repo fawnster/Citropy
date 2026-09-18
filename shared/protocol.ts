@@ -1,3 +1,4 @@
+import type { QuestionPart, QuestionRequest } from "./questions.ts";
 import type { GitHubRequest, GitHubResponse } from "./github.ts";
 import type { ComputerState } from "./computer.ts";
 import type { BrowserAction, BrowserState, PanelKind, PanelTab, ToolConnection, ToolDefinition } from "./workbench.ts";
@@ -19,7 +20,8 @@ export type PartKind =
   | "tool"
   | "todo"
   | "patch"
-  | "notice";
+  | "notice"
+  | "question";
 
 export type ToolStatus = "running" | "ok" | "error" | "denied";
 
@@ -84,7 +86,7 @@ export interface ReasoningPart {
 
 export interface TodoItem {
   text: string;
-  status: "pending" | "in_progress" | "completed";
+  status: "pending" | "in_progress" | "completed" | "cancelled";
 }
 
 export interface TodoPart {
@@ -128,7 +130,7 @@ export interface NoticePart {
   text: string;
 }
 
-export type Part = TextPart | ReasoningPart | ToolPart | TodoPart | PatchPart | NoticePart;
+export type Part = TextPart | ReasoningPart | ToolPart | TodoPart | PatchPart | NoticePart | QuestionPart;
 
 export interface Attachment {
   id?: string;
@@ -139,6 +141,8 @@ export interface Attachment {
 }
 
 export interface Message {
+  provider?: ProviderId;
+  contextSources?: import("./context.ts").ContextSource[];
   id: string;
   role: "user" | "assistant" | "system";
   parts: Part[];
@@ -195,7 +199,6 @@ export interface ProjectSettings {
   workspace?: "current" | "new";
   autoPull?: boolean;
   browserAccess?: boolean;
-  actions?: Array<{ id: string; name: string; command: string; setup?: boolean }>;
 }
 
 export interface WorkspaceChoice {
@@ -206,6 +209,13 @@ export interface WorkspaceChoice {
 }
 
 export interface ThreadMeta {
+  transferContext?: string;
+  transfers?: Array<{ provider: ProviderId; model?: string; externalId?: string; usage: Usage; at: number }>;
+  contextSources?: import("./context.ts").ContextSource[];
+  checkpoints?: import("./review.ts").TurnCheckpoint[];
+  branchedFrom?: { threadId: string; messageId: string };
+  rebuildContext?: boolean;
+  canRedo?: boolean;
   id: string;
   projectId: string;
   provider: ProviderId;
@@ -287,6 +297,7 @@ export interface ProviderInfo {
   binary?: string;
   models: ModelOption[];
   supportsPermissionPrompt: boolean;
+  capabilities?: { transport: "stdio" | "rpc" | "http"; steer: boolean; compact: boolean; stopShell: boolean };
   steerHint?: string;
   modelsError?: string;
   modelsUpdatedAt?: number;
@@ -335,7 +346,7 @@ export interface AppNotification {
 
 export interface Snapshot {
   shells?: ShellProcess[];
-  projectDefaults?: Omit<ProjectSettings, "actions">;
+  projectDefaults?: ProjectSettings;
   assistance?: import("./assistance.ts").AssistanceSettings;
   computer?: ComputerState;
   notifications?: AppNotification[];
@@ -345,6 +356,8 @@ export interface Snapshot {
   toolConnections?: ToolConnection[];
   tools?: ToolDefinition[];
   permissions: PermissionRequest[];
+  questions?: QuestionRequest[];
+  development?: boolean;
   projects: Project[];
   threads: ThreadMeta[];
   providers: ProviderInfo[];
@@ -352,10 +365,10 @@ export interface Snapshot {
   home: string;
 }
 
-export type ServerEvent =
+export type ServerEvent = (
   | { t: "shell.upsert"; shell: ShellProcess }
   | { t: "shell.remove"; id: string }
-  | { t: "project.defaults"; settings: Omit<ProjectSettings, "actions"> }
+  | { t: "project.defaults"; settings: ProjectSettings }
   | { t: "assistance.settings"; settings: import("./assistance.ts").AssistanceSettings }
   | { t: "computer.state"; computer: ComputerState }
   | { t: "thread.accepted"; requestId: string }
@@ -372,7 +385,8 @@ export type ServerEvent =
   | { t: "thread.search"; query: string; projectId?: string; results: Array<{ threadId: string; messageId?: string; snippet: string }> }
   | { t: "project.chosen"; projectId: string | null; error?: string }
   | { t: "providers.update"; providers: ProviderInfo[] }
-  | { t: "hello"; snapshot: Snapshot }
+  | { t: "hello"; snapshot: Snapshot; epoch?: string }
+  | { t: "reconnected"; epoch: string; shells?: ShellProcess[]; browsers?: BrowserState[]; computer?: ComputerState }
   | { t: "project.upsert"; project: Project }
   | { t: "project.remove"; id: string }
   | { t: "thread.upsert"; thread: ThreadMeta }
@@ -384,13 +398,16 @@ export type ServerEvent =
   | { t: "part.patch"; threadId: string; messageId: string; partId: string; patch: Record<string, unknown> }
   | { t: "permission.request"; request: PermissionRequest }
   | { t: "permission.close"; id: string }
+  | { t: "question.request"; request: QuestionRequest }
+  | { t: "question.close"; id: string }
   | { t: "git.status"; projectId: string; threadId?: string; status: GitStatus }
   | { t: "git.diff"; requestId: string; patch: FilePatch | null; error?: string }
   | { t: "file.tree"; requestId: string; entries: FileEntry[] }
   | { t: "file.content"; requestId: string; path: string; content: string | null }
-  | { t: "term.data"; termId: string; data: string }
+  | { t: "term.data"; termId: string; data: string; streamId?: string; reset?: boolean }
   | { t: "term.exit"; termId: string; code: number }
-  | { t: "toast"; level: "info" | "warn" | "error" | "success"; text: string };
+  | { t: "toast"; level: "info" | "warn" | "error" | "success"; text: string }
+) & { sequence?: number };
 
 export interface FileEntry {
   name: string;
@@ -406,10 +423,11 @@ export type ClientEvent = (
       t: "notifications.configure";
       preferences: Partial<NotificationPreferences>;
     }
-  | { t: "panel.open"; projectId: string; kind: PanelKind; id?: string; threadId?: string }
+  | { t: "panel.open"; projectId: string; kind: PanelKind; id?: string; threadId?: string; url?: string }
   | { t: "panel.close"; id: string }
   | { t: "browser.action"; id: string; input: BrowserAction }
   | { t: "desktop.open" }
+  | { t: "server.restart" }
   | { t: "thread.finish"; id: string; finished: boolean }
   | { t: "github.request"; requestId: string; request: GitHubRequest }
   | { t: "git.manage"; requestId: string; projectId: string; operation: GitOperation; value?: string; offset?: number; remote?: string }
@@ -464,12 +482,13 @@ export type ClientEvent = (
     }
   | { t: "git.refresh"; projectId: string }
   | { t: "git.diff"; requestId: string; projectId: string; path: string; staged?: boolean }
-  | { t: "git.stage"; projectId: string; path: string; staged: boolean }
   | { t: "git.commit"; projectId: string; message: string }
   | { t: "git.discard"; projectId: string; path: string }
   | { t: "file.tree"; requestId: string; projectId: string; path?: string }
   | { t: "file.read"; requestId: string; projectId: string; path: string }
-  | { t: "term.open"; termId: string; projectId: string; cols: number; rows: number }
+  | { t: "term.open"; termId: string; projectId: string; cols: number; rows: number; flowControl?: boolean }
+  | { t: "term.ack"; termId: string; count: number; streamId: string }
+  | { t: "term.unsubscribe"; termId: string }
   | { t: "term.data"; termId: string; data: string }
   | { t: "term.resize"; termId: string; cols: number; rows: number }
   | { t: "term.close"; termId: string }

@@ -18,6 +18,7 @@ import { useI18n } from "../lib/i18n.ts";
 export function Conversation() {
   const t = useI18n();
   const searchMessageId = useApp((state) => state.searchMessageId);
+  const searchShellId = useApp((state) => state.searchShellId);
   const threadId = useApp((state) => state.activeThreadId);
   const ids = useApp((state) => (threadId ? state.order[threadId] : undefined));
   const selectRows = useMemo(() => {
@@ -61,6 +62,7 @@ export function Conversation() {
       state.threads[threadId]?.updatedAt ?? 0;
   });
   const connected = useApp((state) => state.connected);
+  const loaded = useApp((state) => Boolean(threadId && state.loaded[threadId]));
   const followRequest = useApp((state) => state.followRequest);
   const [selectedMessageId, setSelectedMessageId] = useState<string>();
   const {
@@ -86,8 +88,9 @@ export function Conversation() {
   timeline.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
     const canvas = viewport.current;
     const offset = instance.scrollOffset ?? 0;
-    return Boolean(canvas && offset <= canvas.scrollHeight - canvas.clientHeight + 1 && item.start < offset + instance.scrollAdjustments);
+    return Boolean(canvas && offset <= canvas.scrollHeight - canvas.clientHeight + 1 && item.end <= offset + instance.scrollAdjustments);
   };
+  const virtualItems = timeline.getVirtualItems();
 
   useEffect(() => {
     if (threadId && connected) {
@@ -127,31 +130,78 @@ export function Conversation() {
   }, [threadId, nearBottom]);
 
   useEffect(() => {
-    if (!searchMessageId || !ids?.includes(searchMessageId)) return;
-    const activity = rows.find(row => row.messageId === searchMessageId && row.row?.kind === "activity")?.row;
-    if (activity?.kind === "activity" && !activity.open) {
-      useApp.setState(state => ({ disclosures: {
-        ...state.disclosures,
-        [activity.id]: { ...state.disclosures[activity.id], activity: true },
-      } }));
-      return;
+    if (!searchMessageId && !searchShellId) return;
+    const state = useApp.getState();
+    let messageId = searchMessageId;
+    let partId: string | undefined;
+    if (searchShellId) {
+      if (state.shells[searchShellId]?.threadId !== threadId) return;
+      for (const id of ids ?? []) {
+        partId = state.messages[id]?.partIds.find(id => {
+          const part = state.parts[id];
+          return part?.kind === "tool" && `${threadId}:${part.callId}` === searchShellId;
+        });
+        if (partId) { messageId = id; break; }
+      }
+      if (!partId) {
+        if (loaded) useApp.setState(state => {
+          if (state.searchShellId !== searchShellId) return state;
+          return { searchShellId: null, toasts: [...state.toasts, {
+            id: `shell-${searchShellId}`, level: "info", text: t("This command is no longer in the conversation history. Its recent output is available in Running shells."),
+          }] };
+        });
+        return;
+      }
     }
-    const frame = requestAnimationFrame(() => {
-      stopFollowing();
-      const index = rows.findIndex((row) => row.messageId === searchMessageId);
+    if (!threadId || !messageId || !ids?.includes(messageId)) return;
+    stopFollowing();
+    const activity = rows.find(row => row.row?.kind === "activity" && row.row.messageIds.includes(messageId))?.row;
+    const expanding = activity?.kind === "activity" && !activity.open;
+    let disclosures = expanding ? {
+      ...state.disclosures,
+      [activity.id]: { ...state.disclosures[activity.id], activity: true },
+    } : state.disclosures;
+    const expandedRows = expanding ? timelineRows({ ...state, disclosures }, threadId) : rows;
+    const index = expandedRows.findIndex(({ row, messageId: owner }) => partId
+      ? row?.kind === "group" && row.ids.includes(partId)
+      : owner === messageId);
+    const group = expandedRows[index]?.row;
+    if (partId && group?.kind === "group" &&
+      (!disclosures[group.ids[0]!]?.group || !disclosures[partId]?.tool)) {
+      disclosures = { ...disclosures };
+      const id = group.ids[0]!;
+      disclosures[id] = { ...disclosures[id], group: true };
+      disclosures[partId] = { ...disclosures[partId], tool: true };
+    }
+    if (disclosures !== state.disclosures) useApp.setState({ disclosures });
+    if (expanding) return;
+    let frame = requestAnimationFrame(() => {
       if (index !== -1) {
-        setSelectedMessageId(searchMessageId);
+        setSelectedMessageId(messageId!);
         timeline.scrollToIndex(index, { align: "start" });
       }
-      useApp.setState({ searchMessageId: null });
+      if (!partId) {
+        useApp.setState({ searchMessageId: null });
+        return;
+      }
+      frame = requestAnimationFrame(() => {
+        const element = document.getElementById(`tool-${partId}`);
+        const row = element?.closest<HTMLElement>(".timeline-row");
+        const item = timeline.getVirtualItems().find(item => item.index === index);
+        if (!element || !row || !item) return;
+        const offset = item.start + (element.getBoundingClientRect().top - row.getBoundingClientRect().top) / (useApp.getState().uiScale / 100) - 16;
+        timeline.scrollToOffset(offset, { align: "start" });
+        element.querySelector<HTMLButtonElement>(".tool-head")?.focus({ preventScroll: true });
+        useApp.setState({ searchShellId: null });
+      });
     });
     return () => cancelAnimationFrame(frame);
-  }, [searchMessageId, ids, rows, timeline, stopFollowing]);
+  }, [searchMessageId, searchShellId, threadId, loaded, ids, rows, virtualItems, timeline, stopFollowing, t]);
 
   const busy =
     compacting || status === "thinking" || status === "working" || status === "queued";
+  const activityRunning = rows.some(row => row.row?.kind === "activity" && row.row.active && !row.row.open);
   const messages = ids ?? [];
-  const virtualItems = timeline.getVirtualItems();
   const visibleItem = virtualItems.find((item) => item.end > (timeline.scrollOffset ?? 0) + 30);
   const jumpToMessage = useCallback((messageId: string) => {
     useApp.setState({ searchMessageId: messageId });
@@ -213,9 +263,9 @@ export function Conversation() {
               {error}
             </div>
           )}
-          {busy && <MessageBlock
+          {busy && !activityRunning && <MessageBlock
             messageId={lastMessage?.role === "assistant" ? lastMessage.id : undefined}
-            first={!continuesReply}
+            first={!continuesReply && !rows.some(row => row.row?.kind === "activity" && row.row.active)}
             last
             streaming={false}
           >

@@ -39,7 +39,6 @@ import { FileIcon } from "./FileIcon.tsx";
 import { groupGitFiles } from "../lib/git-files.ts";
 import { Menu } from "./Menu.tsx";
 import { SectionSidebar } from "./SectionSidebar.tsx";
-import { WorkspaceSelector } from "./WorkspaceSelector.tsx";
 import { GitDialog, type GitDialogAction } from "./GitDialog.tsx";
 import { GitReview, type GitSelection } from "./GitReview.tsx";
 import type {
@@ -180,11 +179,13 @@ export function GitManager({
   onCloseSidebar,
   onBack,
   navigation,
+  onBusyChange,
 }: {
   sidebarOpen: boolean;
   onCloseSidebar: () => void;
   onBack: () => void;
   navigation?: ReactNode;
+  onBusyChange: (busy: boolean) => void;
 }) {
   const t = useI18n();
   const projectId = useApp((state) => state.activeProjectId);
@@ -201,6 +202,10 @@ export function GitManager({
   const [data, setData] = useState<GitOverview | null>(null);
   const [section, setSection] = useState<Section>("Changes");
   const [busy, setBusy] = useState<GitOperation | null>(null);
+  useEffect(() => {
+    onBusyChange(Boolean(busy));
+    return () => onBusyChange(false);
+  }, [busy, onBusyChange]);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const [message, setMessage] = useState("");
   const [description, setDescription] = useState("");
@@ -558,7 +563,7 @@ export function GitManager({
 
   return (
     <section className="section-view" aria-label={t("Git manager")}>
-      <SectionSidebar open={sidebarOpen} title={t("Source control")} onBack={onBack} navigation={navigation} workspace={<WorkspaceSelector disabled={Boolean(busy)} />}>
+      <SectionSidebar activeItem={section} open={sidebarOpen} title={t("Source control")} onBack={onBack} navigation={navigation}>
           {tabs.map(({ name, icon: Icon }) => (
             <button
               className="section-link"

@@ -38,7 +38,7 @@ export function UsageView({
   }, [revision]);
   return (
     <section className="section-view" aria-label={t("Usage")}>
-      <SectionSidebar open={sidebarOpen} title={t("Usage")} onBack={onBack} navigation={navigation}>
+      <SectionSidebar activeItem="usage" open={sidebarOpen} title={t("Usage")} onBack={onBack} navigation={navigation}>
           <button className="section-link" aria-current="page">
             <BarChart3 size={17} />
             <span>{t("Overview")}</span>

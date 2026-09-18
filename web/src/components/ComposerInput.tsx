@@ -5,7 +5,8 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { BookOpen, TerminalSquare } from "lucide-react";
+import { BookOpen, TerminalSquare, Folder, FileText } from "lucide-react";
+import { contextReference } from "../../../shared/context.ts";
 import type { ThreadMeta } from "../../../shared/protocol.ts";
 import type { ProviderCommand, SkillInfo } from "../../../shared/features.ts";
 import { api } from "../lib/api.ts";
@@ -38,11 +39,12 @@ export function ComposerInput({
   const [selected, setSelected] = useState(0);
   const [dismissed, setDismissed] = useState<string>();
   const [skills, setSkills] = useState<SkillInfo[]>([]);
+  const [paths, setPaths] = useState<Array<{ path: string; dir: boolean }>>([]);
   const [nativeCommands, setNativeCommands] = useState<ProviderCommand[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const connected = useApp((state) => state.connected);
-  const mention = /(?:^|\s)@([\w.:-]*)$/.exec(value.slice(0, caret));
+  const mention = /(?:^|\s)@([^\s\[\]]*)$/.exec(value.slice(0, caret));
   const slash = /^\/[\w.:-]*$/.test(value) ? value : undefined;
   const query = mention ? `@${mention[1]}` : slash;
   const mode = mention ? "skills" : slash ? "commands" : undefined;
@@ -111,6 +113,15 @@ export function ComposerInput({
     setSelected(0);
     setDismissed(undefined);
   }, [query]);
+  useEffect(() => {
+    if (mode !== "skills") { setPaths([]); return; }
+    const controller = new AbortController();
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams({ threadId: thread.id, query: (mention?.[1] ?? "").split("#")[0]! });
+      void api<Array<{ path: string; dir: boolean }>>(`threads/context?${params}`, { signal: controller.signal }).then(setPaths).catch(error => { if (!controller.signal.aborted) setError(error.message); });
+    }, 120);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [query, mode, thread.id]);
   const enabled = skills
     .filter((skill) => skill.enabled && skill.provider === thread.provider)
     .sort(
@@ -143,7 +154,7 @@ export function ComposerInput({
   highlighted.push(value.slice(end));
   const options =
     mode === "skills"
-      ? enabled
+      ? [...paths.map(entry => ({ id: `context:${entry.path}`, label: `${contextReference(entry.path)}${(mention?.[1] ?? "").match(/#L\d+(?:-L?\d+)?$/)?.[0] ?? ""}`, hint: entry.dir ? t("Folder listing") : t("File context · add #L10-L20 for specific lines"), icon: entry.dir ? <Folder size={16} /> : <FileText size={16} /> })), ...enabled
           .filter((skill) =>
             skill.name
               .toLowerCase()
@@ -154,7 +165,7 @@ export function ComposerInput({
             label: `@${skill.name}`,
             hint: `${t(skill.scope)} · ${skill.description || t("Use this skill")}`,
             icon: <BookOpen size={16} />,
-          }))
+          }))]
       : [
           ...commands,
           ...nativeCommands
@@ -207,7 +218,7 @@ export function ComposerInput({
       {visible && (
         <div className="composer-suggestions" ref={list}>
           <div className="composer-suggestions-heading">
-            {mode === "skills" ? t("Skills") : t("Commands")}
+            {mode === "skills" ? t("Files and skills") : t("Commands")}
             <span>
               {mode === "skills"
                 ? providerLabels[thread.provider]
@@ -218,7 +229,7 @@ export function ComposerInput({
             className="composer-suggestion-list scroll"
             id="composer-suggestions"
             role="listbox"
-            aria-label={mode === "skills" ? t("Skills") : t("Commands")}
+            aria-label={mode === "skills" ? t("Files and skills") : t("Commands")}
           >
             {options.map((option, i) => (
               <button

@@ -3,10 +3,13 @@ import { MessageUsage } from "./message-usage.ts";
 import { discoverOpenCodeModels } from "./models.ts";
 import { spawn, execFile, type ChildProcess } from "node:child_process";
 import { promisify } from "node:util";
+import { request } from "node:http";
 import { onLines } from "../lines.ts";
+import { askQuestion, answerQuestion, cancelQuestions } from "../questions.ts";
 import { ask, cancelThread } from "../permissions.ts";
-import type { AgentEvent, AgentSession, Provider, StartOptions } from "./types.ts";
-import type { Attachment, ModelOption, TodoItem } from "../../shared/protocol.ts";
+import type { AgentSession, Provider, StartOptions } from "./types.ts";
+import type { Attachment } from "../../shared/protocol.ts";
+import { normalizeTodos } from "../../shared/todos.ts";
 import { pathToFileURL } from "node:url";
 import type { ProviderCommand } from "../../shared/features.ts";
 
@@ -20,8 +23,8 @@ interface Instance {
 function launch(options: StartOptions, signal: AbortSignal, textOnly = false): Promise<Instance> {
   return new Promise((resolve, reject) => {
     const inherited = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT || "{}");
-    const permission = options.permissionMode === "bypass" ? { "*": "allow" } : { "*": options.permissionMode === "plan" ? "deny" : "ask", read: "allow", glob: "allow", grep: "allow", list: "allow", task: "allow", edit: options.permissionMode === "acceptEdits" ? "allow" : options.permissionMode === "plan" ? "deny" : "ask", "citropy_*": "allow" };
-    const config = { ...inherited, permission: textOnly ? { "*": "deny" } : permission, mcp: { ...inherited.mcp, ...(options.mcp ? { citropy: { type: "remote", ...options.mcp, oauth: false, enabled: true } } : {}) } };
+    const permission = options.permissionMode === "bypass" ? { "*": "allow" } : { "*": options.permissionMode === "plan" ? "deny" : "ask", read: "allow", glob: "allow", grep: "allow", list: "allow", task: "allow", question: "allow", edit: options.permissionMode === "acceptEdits" ? "allow" : options.permissionMode === "plan" ? "deny" : "ask", "citropy_*": "allow" };
+    const config = { ...inherited, permission: textOnly ? { "*": "deny" } : permission, mcp: { ...inherited.mcp, ...(options.mcp ? { citropy: { type: "remote", ...options.mcp, oauth: false, enabled: true, timeout: 1_860_000 } } : {}) } };
     const child = spawn("opencode", ["serve", "--port", "0", "--hostname", "127.0.0.1"], {
       detached: process.platform !== "win32",
       cwd: options.cwd,
@@ -121,9 +124,12 @@ class OpenCodeSession implements AgentSession {
   #tools = new Map<string, string>();
   #roles = new Map<string, string>();
   #busy = false;
+  #busySeen = false;
+  #promptGeneration = 0;
   #compacting = false;
   #compactionError = "";
   #agentSessions = new Set<string>();
+  #questions = new Map<string, boolean>();
   #usage: MessageUsage;
 
   constructor(options: StartOptions) {
@@ -141,14 +147,19 @@ class OpenCodeSession implements AgentSession {
     const instance = await launch(this.#options, this.#abort.signal);
     if (this.#abort.signal.aborted) { stopProcess(instance.child, true); return; }
     this.#instance = instance;
-    if (this.#options.externalId) {
-      this.#sessionId = this.#options.externalId;
-    } else {
+    let sessionId = this.#options.externalId;
+    if (!sessionId) {
       const created = await this.#post("/session", { title: "Citropy thread" });
-      this.#sessionId = String((created as { id?: string }).id ?? "");
+      sessionId = String((created as { id?: string }).id ?? "");
     }
+    const response = await fetch(`${instance.base}/event`, {
+      headers: { accept: "text/event-stream" },
+      signal: this.#abort.signal,
+    });
+    if (!response.ok || !response.body) throw new Error(`OpenCode event stream failed: ${response.status}`);
+    this.#sessionId = sessionId;
     this.#options.emit({ type: "session", externalId: this.#sessionId, model: this.#options.model });
-    void this.#listen().catch((error: Error) => {
+    void this.#listen(response).catch((error: Error) => {
       if (this.#abort.signal.aborted) return;
       this.#finish(error.message);
       this.#options.emit({ type: "exit", code: -1 });
@@ -162,26 +173,33 @@ class OpenCodeSession implements AgentSession {
   async #post(path: string, body: unknown): Promise<unknown> {
     const base = this.#instance?.base;
     if (!base) throw new Error("opencode server not ready");
-    const response = await fetch(`${base}${path}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify(body),
-      signal: this.#abort.signal,
+    return new Promise((resolve, reject) => {
+      const req = request(`${base}${path}`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        signal: this.#abort.signal,
+      }, response => {
+        let text = "";
+        response.setEncoding("utf8");
+        response.on("data", chunk => { text += chunk; });
+        response.once("error", reject);
+        response.once("end", () => {
+          const status = response.statusCode ?? 0;
+          if (status < 200 || status >= 300) {
+            reject(new Error(`${path} failed: ${status} ${text}`));
+            return;
+          }
+          try { resolve(text ? JSON.parse(text) : {}); }
+          catch (error) { reject(error); }
+        });
+      });
+      req.once("error", reject);
+      req.end(JSON.stringify(body));
     });
-    if (!response.ok) throw new Error(`${path} failed: ${response.status} ${await response.text()}`);
-    const text = await response.text();
-    return text ? JSON.parse(text) : {};
   }
 
-  async #listen(): Promise<void> {
-    const base = this.#instance?.base;
-    if (!base) return;
-    const response = await fetch(`${base}/event`, {
-      headers: { accept: "text/event-stream" },
-      signal: this.#abort.signal,
-    });
-    if (!response.ok || !response.body) throw new Error(`OpenCode event stream failed: ${response.status}`);
-    const reader = response.body.getReader();
+  async #listen(response: Response): Promise<void> {
+    const reader = response.body!.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     try {
@@ -222,7 +240,9 @@ class OpenCodeSession implements AgentSession {
   }
 
   async #prompt(text: string, attachments: Attachment[] = []): Promise<void> {
+    const generation = ++this.#promptGeneration;
     this.#busy = true;
+    this.#busySeen = false;
     this.#options.emit({ type: "status", status: "thinking" });
     try {
       const body = this.#body(text, attachments);
@@ -238,9 +258,8 @@ class OpenCodeSession implements AgentSession {
           parts: (body.parts as Array<{ type: string }>).filter(part => part.type === "file"),
         });
       } else await this.#post(`/session/${this.#sessionId}/message`, body);
-      this.#finish();
     } catch (error) {
-      if (this.#abort.signal.aborted) return;
+      if (this.#abort.signal.aborted || generation !== this.#promptGeneration || this.#busySeen) return;
       this.#finish((error as Error).message);
     }
   }
@@ -282,6 +301,7 @@ class OpenCodeSession implements AgentSession {
     this.#queue = [];
     if (this.#compacting) this.#compactionError = "Context compaction was stopped.";
     cancelThread(this.#options.threadId);
+    cancelQuestions(this.#options.threadId);
     if (!this.#sessionId) {
       this.#options.emit({ type: "turn.end" });
       return;
@@ -289,10 +309,12 @@ class OpenCodeSession implements AgentSession {
     const pending = this.#prompting;
     await this.#post(`/session/${this.#sessionId}/abort`, {});
     await pending;
+    this.#finish();
   }
 
   dispose(): void {
     cancelThread(this.#options.threadId);
+    cancelQuestions(this.#options.threadId);
     this.#abort.abort();
     if (this.#instance) stopProcess(this.#instance.child, true);
     this.#instance = null;
@@ -310,14 +332,29 @@ class OpenCodeSession implements AgentSession {
     const info = props.info as { id?: string; parentID?: string } | undefined;
     if (type === "session.created" && info?.parentID === this.#sessionId && info.id) this.#agentSessions.add(info.id);
     const sessionID = props.sessionID ?? (props.part as { sessionID?: string } | undefined)?.sessionID ?? (props.info as { sessionID?: string } | undefined)?.sessionID;
-    if (sessionID && sessionID !== this.#sessionId && !(["permission.asked", "permission.v2.asked"].includes(type) && this.#agentSessions.has(String(sessionID)))) return;
+    if (sessionID && sessionID !== this.#sessionId && !(["permission.asked", "permission.v2.asked", "question.asked", "question.replied", "question.rejected"].includes(type) && this.#agentSessions.has(String(sessionID)))) return;
     const emit = this.#options.emit;
+
+    if (type === "session.status" || type === "session.idle") {
+      if (this.#compacting || !this.#busy) return;
+      const status = type === "session.idle" ? "idle" : (props.status as { type?: string } | undefined)?.type;
+      if (status === "busy") this.#busySeen = true;
+      if (status === "idle" && this.#busySeen) this.#finish();
+      return;
+    }
 
     if (type === "session.compacted") {
       if (!this.#compacting) emit({ type: "compacted" });
       return;
     }
-    if (this.#compacting && (type === "message.part.delta" || type === "message.part.updated")) return;
+    if (type === "todo.updated") {
+      if (!this.#compacting && this.#busy && Array.isArray(props.todos)) emit({ type: "todos", items: normalizeTodos(props.todos) });
+      return;
+    }
+    if (type === "message.part.delta" || type === "message.part.updated") {
+      if (this.#compacting || !this.#busy) return;
+      this.#busySeen = true;
+    }
 
     if (type === "message.part.delta") {
       const partId = String(props.partID ?? "");
@@ -375,7 +412,28 @@ class OpenCodeSession implements AgentSession {
       return;
     }
 
+    if (type === "question.asked") {
+      if (!this.#busy || typeof props.id !== "string" || this.#questions.has(props.id)) return;
+      this.#questions.set(props.id, false);
+      void this.#question(props.id, props.questions).catch((error: Error) => {
+        if (this.#abort.signal.aborted || !this.#busy) return;
+        this.#finish(error.message);
+        this.#options.emit({ type: "exit", code: -1 });
+        this.dispose();
+      });
+      return;
+    }
+    if (type === "question.replied" || type === "question.rejected") {
+      const id = String(props.requestID ?? "");
+      if (!this.#questions.has(id)) return;
+      this.#questions.set(id, true);
+      try {
+        answerQuestion(this.#options.threadId, `${this.#options.threadId}:opencode:${id}`, type === "question.rejected" ? null : Object.fromEntries((props.answers as string[][]).map((answers, index) => [`question_${index + 1}`, answers])));
+      } catch {}
+      return;
+    }
     if (type === "permission.v2.asked" || type === "permission.asked") {
+      if (!this.#busy) return;
       emit({ type: "status", status: "awaiting" });
       void ask(this.#options.threadId, mapTool(String(props.permission ?? "Tool")), { ...((props.metadata ?? {}) as Record<string, unknown>), patterns: props.patterns }).then((decision) => this.#post(`/permission/${encodeURIComponent(String(props.id))}/reply`, { reply: decision === "deny" ? "reject" : decision === "allow_always" ? "always" : "once" })).then(() => {
         if (this.#busy) emit({ type: "status", status: "working" });
@@ -383,13 +441,32 @@ class OpenCodeSession implements AgentSession {
     }
   }
 
+  async #question(id: string, questions: unknown): Promise<void> {
+    try {
+      let result;
+      try {
+        result = await askQuestion(this.#options.threadId, questions, { id: `${this.#options.threadId}:opencode:${id}`, signal: this.#abort.signal });
+      } catch (error) {
+        await this.#post(`/question/${encodeURIComponent(id)}/reject`, {});
+        this.#options.emit({ type: "notice", level: "warn", text: `Could not display the question: ${(error as Error).message}` });
+        return;
+      }
+      if (this.#abort.signal.aborted || !this.#busy || this.#questions.get(id)) return;
+      await this.#post(`/question/${encodeURIComponent(id)}/${result.cancelled ? "reject" : "reply"}`, result.cancelled ? {} : { answers: Object.values(result.answers) });
+    } finally {
+      this.#questions.delete(id);
+    }
+  }
+
   #finish(error?: string): void {
     if (!this.#busy) return;
     this.#busy = false;
+    this.#busySeen = false;
     for (const id of this.#blocks) this.#options.emit({ type: "block.end", blockId: id });
     this.#blocks.clear();
     this.#emitted.clear();
     cancelThread(this.#options.threadId, false);
+    cancelQuestions(this.#options.threadId);
     this.#tools.clear();
     this.#options.emit({ type: "turn.end", ...(error ? { error } : {}) });
   }
@@ -425,8 +502,8 @@ class OpenCodeSession implements AgentSession {
     }
 
     if (name === "TodoWrite") {
-      const todos = (input as { todos?: TodoItem[] }).todos;
-      if (Array.isArray(todos)) emit({ type: "todos", items: todos });
+      const todos = (input as { todos?: unknown }).todos;
+      if (Array.isArray(todos)) emit({ type: "todos", items: normalizeTodos(todos) });
       return;
     }
 
@@ -441,7 +518,6 @@ class OpenCodeSession implements AgentSession {
     }
     if (name === "Bash" && typeof part.state?.metadata?.output === "string") emit({ type: "tool.output", callId, output: part.state.metadata.output });
     if (status === "completed" || status === "error") {
-      this.#tools.delete(callId);
       emit({
         type: "tool.end",
         callId,
@@ -491,6 +567,7 @@ export const opencodeProvider: Provider = {
   label: "OpenCode",
   binary: "opencode",
   supportsPermissionPrompt: true,
+  capabilities: { transport: "http", steer: true, compact: true, stopShell: false },
   steerHint: "OpenCode adds it to the run in progress.",
   models: [],
   listModels: () => discoverOpenCodeModels(),

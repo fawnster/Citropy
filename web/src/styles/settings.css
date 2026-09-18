@@ -1,24 +1,8 @@
-:is(.section-link, .settings-title)[data-settings-section="general"] > svg {
-  color: var(--file-icon);
-}
-:is(.section-link, .settings-title)[data-settings-section="appearance"] > svg {
-  color: var(--task-icon);
-}
-:is(.section-link, .settings-title)[data-settings-section="providers"] > svg {
-  color: var(--web-icon);
-}
-:is(.section-link, .settings-title)[data-settings-section="notifications"]
-  > svg {
-  color: var(--heat);
-}
-:is(.section-link, .settings-title)[data-settings-section="application"] > svg {
-  color: var(--ok);
-}
-
 .settings {
+  --settings-inset: 20px;
   flex: 1;
   min-width: 0;
-  padding: 44px clamp(24px, calc(var(--viewport-width) * 0.04), 64px) 64px;
+  padding: 32px clamp(24px, calc(var(--viewport-width) * 0.04), 64px) 48px;
 }
 
 .settings-inner {
@@ -30,11 +14,11 @@
   justify-content: space-between;
   align-items: flex-start;
   gap: 24px;
-  margin-bottom: 40px;
+  margin-bottom: 32px;
 }
 .settings-heading h1 {
   font-size: 24px;
-  font-weight: 570;
+  font-weight: 600;
   letter-spacing: -0.03em;
 }
 .settings-title {
@@ -44,10 +28,11 @@
 }
 .settings-title > svg {
   flex: none;
+  color: var(--accent-text);
 }
 .skills-about {
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.7;
 }
 .skills-about summary {
@@ -59,46 +44,45 @@
   margin: 10px 0 0;
 }
 .settings-heading p {
-  margin-top: 10px;
+  margin-top: 8px;
   color: var(--text-3);
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 .settings-heading .btn {
   flex: none;
 }
 .settings-group-heading {
   margin: 0 0 12px;
-  padding: 0 2px;
+  padding: 0;
   color: var(--text-2);
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-weight: 500;
   letter-spacing: 0;
 }
 .settings-group {
-  border: 1px solid var(--line);
-  border-radius: var(--r-lg);
   background: var(--panel);
   overflow: hidden;
+  border-radius: var(--r-lg);
 }
 .settings-group:has(.app-update-settings) {
   overflow: visible;
 }
 
 .settings-group-spaced {
-  margin-top: 36px;
+  margin-top: 24px;
 }
 
 .settings-group + .settings-group-heading {
-  margin-top: 36px;
+  margin-top: 32px;
 }
 
 .setting-row > select {
   flex: 0 1 200px;
   min-width: 130px;
   padding: 0 12px;
-  border: 1px solid var(--line-strong);
+  border: 0;
   border-radius: var(--r-sm);
-  background-color: var(--canvas);
+  background-color: var(--raised);
 }
 
 .assistance-model-row > .menu-wrap {
@@ -113,8 +97,7 @@
 }
 
 .typing-speed-setting {
-  border-top: 1px solid var(--line);
-  padding: 22px;
+  padding: var(--settings-inset);
 }
 
 .typing-speed-setting > div {
@@ -126,7 +109,7 @@
 .typing-speed-setting output,
 .typing-speed-labels {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -140,23 +123,19 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 32px;
-  padding: 22px;
+  gap: 24px;
+  padding: var(--settings-inset);
   cursor: pointer;
 }
-.setting-row + .setting-row,
-.provider-setting + .provider-setting {
-  border-top: 1px solid var(--line);
-}
 .setting-row strong {
-  font-size: 13px;
+  font-size: var(--text-base);
   font-weight: 500;
 }
 .setting-row small {
   display: block;
-  margin-top: 5px;
+  margin-top: 4px;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
 }
 .setting-switch {
@@ -166,13 +145,12 @@
   width: 34px;
   height: 20px;
   margin: 0;
-  border: 1px solid var(--line-bright);
+  border: 0;
   border-radius: 20px;
   background: var(--raised-2);
   cursor: pointer;
   transition:
-    background var(--dur-fast),
-    border-color var(--dur-fast);
+    background var(--dur-fast);
 }
 .setting-switch::before {
   content: "";
@@ -189,7 +167,6 @@
 }
 .setting-switch:checked {
   background: var(--accent);
-  border-color: var(--accent);
 }
 .setting-switch:checked::before {
   background: var(--on-accent);
@@ -197,15 +174,14 @@
 }
 .settings-note {
   margin-top: 16px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.7;
   color: var(--text-3);
 }
 .settings-connection {
   margin-top: 24px;
   padding-top: 18px;
-  border-top: 1px solid var(--line);
-  font-size: 11.5px;
+  font-size: var(--text-xs);
   color: var(--text-3);
 }
 
@@ -216,26 +192,24 @@
 .theme-option {
   width: 220px;
   padding: 5px;
-  border: 1px solid var(--line-strong);
+  border: 0;
   border-radius: var(--r-lg);
   text-align: left;
-  transition:
-    border-color var(--dur-fast),
-    background var(--dur-fast);
-}
-.theme-option:hover {
-  border-color: var(--line-bright);
+  transition: background var(--dur-fast);
   background: var(--panel);
 }
+.theme-option:hover {
+  background: var(--raised);
+}
 .theme-option[aria-pressed="true"] {
-  border-color: var(--accent);
+  background: var(--raised-2);
 }
 .theme-option-label {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 13px 10px 9px;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
 }
 .theme-option-label > svg:last-child:not(:first-child) {
   margin-left: auto;
@@ -243,8 +217,8 @@
 .theme-preview {
   display: flex;
   height: 110px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
+  border: 0;
+  border-radius: var(--r-sm);
   overflow: hidden;
   background: #111;
 }
@@ -254,7 +228,6 @@
   flex-direction: column;
   gap: 7px;
   padding: 16px 8px;
-  border-right: 1px solid #252525;
   background: #0c0c0c;
 }
 .theme-preview-rail i {
@@ -286,14 +259,14 @@
   height: 14px;
   margin-bottom: 8px;
   background: #333;
-  border-radius: 5px;
+  border-radius: var(--r-xs);
 }
 .theme-preview-chat > span {
   align-self: stretch;
   height: 19px;
   margin-top: auto;
-  border: 1px solid #333;
-  border-radius: 5px;
+  border: 0;
+  border-radius: var(--r-xs);
   background: #1a1a1a;
 }
 .theme-preview[data-theme="light"] {
@@ -301,7 +274,6 @@
 }
 .theme-preview[data-theme="light"] .theme-preview-rail {
   background: #f4f4f4;
-  border-color: #e5e5e5;
 }
 .theme-preview[data-theme="light"] .theme-preview-rail i {
   background: #ccc;
@@ -317,7 +289,6 @@
 }
 .theme-preview[data-theme="light"] .theme-preview-chat > span {
   background: #fafafa;
-  border-color: #ddd;
 }
 
 .provider-setting {
@@ -326,7 +297,7 @@
   justify-content: space-between;
   flex-wrap: wrap;
   gap: 16px;
-  padding: 22px;
+  padding: var(--settings-inset);
 }
 .provider-setting-identity {
   display: flex;
@@ -339,18 +310,18 @@
   place-items: center;
   width: 36px;
   height: 36px;
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: var(--r-md);
   background: var(--canvas);
   flex: none;
 }
 .provider-setting-identity strong {
   font-weight: 500;
-  font-size: 13px;
+  font-size: var(--text-base);
 }
 .provider-setting small {
   display: block;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-3);
   margin-top: 4px;
 }
@@ -360,7 +331,7 @@
 }
 .provider-setting-status > span {
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
 }
 .provider-setting-status > span[data-available="true"] {
   color: var(--text-2);
@@ -368,25 +339,28 @@
 .provider-setting-error {
   width: 100%;
   color: var(--warn);
-  font-size: 12px;
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 
 @container application (max-width: 720px) {
   .settings {
-    padding: 28px 18px 40px;
+    --settings-inset: 16px;
+    padding: 24px 20px 40px;
   }
   .settings-heading {
     gap: 14px;
-    margin-bottom: 30px;
+    margin-bottom: 24px;
     flex-wrap: wrap;
   }
   .settings-heading h1 {
     font-size: 22px;
   }
   .setting-row {
-    padding: 18px 16px;
-    gap: 20px;
+    gap: 16px;
+  }
+  .settings-group > .setting-row:nth-child(even) {
+    background: var(--raised);
   }
   .assistance-model-row {
     flex-wrap: wrap;
@@ -406,16 +380,13 @@
   .theme-preview {
     height: 95px;
   }
-  .provider-setting {
-    padding: 18px 16px;
-  }
   .provider-setting-identity {
     gap: 10px;
   }
 }
 
 .size-setting {
-  padding: 22px;
+  padding: var(--settings-inset);
   margin-bottom: 32px;
 }
 .size-setting-heading {
@@ -429,7 +400,7 @@
   font-weight: 500;
 }
 .size-setting-heading p {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-3);
   margin-top: 5px;
 }
@@ -451,7 +422,7 @@
   gap: 12px;
   margin-top: 14px;
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 .size-setting-labels button {
   color: var(--text-2);
@@ -514,7 +485,7 @@
   width: 56px;
   height: 56px;
   background: var(--raised);
-  border: 1px solid var(--line);
+  border: 0;
   border-radius: 15px;
   color: var(--file-icon);
 }
@@ -522,7 +493,7 @@
   font-size: 17px;
 }
 .application-identity p {
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-3);
   margin-top: 5px;
 }
@@ -534,8 +505,14 @@
   display: grid;
   gap: 16px;
 }
+.provider-card {
+  border: 0;
+  border-radius: var(--r-md);
+  background: var(--panel);
+  overflow: hidden;
+}
 .provider-maintenance {
-  padding: 0 22px 16px;
+  padding: 0 var(--settings-inset) 16px;
 }
 .provider-update-row {
   display: flex;
@@ -545,7 +522,7 @@
 .provider-installation {
   flex: 1;
   min-width: 0;
-  font-size: 12px;
+  font-size: var(--text-sm);
   color: var(--text-2);
 }
 .provider-installation small {
@@ -555,7 +532,7 @@
   white-space: nowrap;
   margin-top: 4px;
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
 .provider-update-row .btn {
   flex: none;
@@ -567,7 +544,7 @@
 .provider-update-result {
   margin: 12px 0 0;
   color: var(--text-3);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.6;
 }
 .provider-update-result {
@@ -583,7 +560,7 @@
 }
 .provider-update-output {
   margin-top: 10px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-3);
 }
 .provider-update-output summary {
@@ -609,14 +586,14 @@
   align-items: center;
   gap: 12px;
   width: 100%;
-  padding: 14px 22px;
+  padding: 16px var(--settings-inset);
   text-align: left;
-  border-top: 1px solid var(--line);
+  background: var(--raised);
   color: var(--text-2);
   transition: background var(--dur-instant) var(--ease-out);
 }
 .provider-instructions-link:hover {
-  background: var(--raised);
+  background: var(--raised-2);
 }
 .provider-instructions-link > svg:first-child {
   color: var(--file-icon);
@@ -625,13 +602,13 @@
   flex: 1;
 }
 .provider-instructions-link strong {
-  font-size: 12px;
+  font-size: var(--text-sm);
   font-weight: 500;
 }
 .provider-instructions-link small {
   display: block;
   margin-top: 4px;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-3);
 }
 .citropy-dialog.provider-instructions-dialog {
@@ -645,7 +622,7 @@
   flex-wrap: wrap;
   gap: 8px 16px;
   margin-bottom: 10px;
-  font-size: 12px;
+  font-size: var(--text-sm);
   overflow-wrap: anywhere;
 }
 .instruction-file-label small {
@@ -658,18 +635,18 @@
   height: min(40vh, 400px);
   resize: vertical;
   padding: 14px;
-  border: 1px solid var(--line-strong);
+  border: 0;
   border-radius: var(--r-md);
-  background: var(--canvas);
+  background: var(--raised);
   color: var(--text);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.75;
   tab-size: 2;
 }
 .instruction-note {
   margin: 8px 0;
-  font-size: 11px;
+  font-size: var(--text-xs);
   color: var(--text-3);
   line-height: 1.6;
 }
@@ -678,14 +655,11 @@
 }
 .instruction-save-state {
   color: var(--text-3);
-  font-size: 11px;
+  font-size: var(--text-xs);
 }
-@media (max-width: 720px) {
-  .provider-maintenance {
-    padding: 0 16px 14px;
-  }
+@container application (max-width: 720px) {
   .provider-instructions-link {
-    padding: 12px 16px;
+    padding: 12px var(--settings-inset);
   }
   .provider-instructions-dialog .dialog-footer {
     flex-wrap: wrap;
@@ -697,4 +671,4 @@
 
 .provider-maintenance-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .provider-maintenance-heading .settings-group-heading { margin: 0; }
-.provider-up-to-date { display: inline-flex; align-items: center; gap: 6px; color: var(--ok); font-size: 12px; white-space: nowrap; }
+.provider-up-to-date { display: inline-flex; align-items: center; gap: 6px; color: var(--ok); font-size: var(--text-sm); white-space: nowrap; }

@@ -88,6 +88,22 @@ async function numstat(cwd: string): Promise<Map<string, { added: number; remove
   return map;
 }
 
+export async function workingDiff(cwd: string, staged: boolean, path?: string): Promise<string> {
+  const selection = path ? ["--", path] : [];
+  const env = { GIT_LITERAL_PATHSPECS: "1" };
+  let output = await git(cwd, ["diff", "--no-ext-diff", "--no-color", "--no-renames", ...(staged ? ["--cached"] : []), ...selection], env);
+  if (!staged) {
+    const paths = (await git(cwd, ["ls-files", "--others", "--exclude-standard", "-z", ...selection], env)).split("\0").filter(Boolean);
+    if (paths.length > 20000) throw new Error("Too many untracked files to review. Update .gitignore or stage a smaller set.");
+    for (const entry of paths) {
+      try { output += await git(cwd, ["diff", "--no-index", "--no-ext-diff", "--no-color", "--", "/dev/null", entry]); }
+      catch (error) { if ((error as { code?: number }).code !== 1) throw error; output += String((error as { stdout?: string }).stdout ?? ""); }
+      if (output.length > 16 * 1024 * 1024) throw new Error("The diff is too large. Stage a smaller set of changes to review.");
+    }
+  }
+  return output;
+}
+
 export async function fileDiff(cwd: string, path: string, staged: boolean): Promise<FilePatch | null> {
   const conflicted = !staged && Boolean((await git(cwd, ["ls-files", "--unmerged", "--", path])).trim());
   const args = staged
@@ -212,7 +228,7 @@ async function runOperation(cwd: string, operation: import("../shared/protocol.t
 
 const operations = new Map<string, Promise<unknown>>();
 
-async function serialized<T>(cwd: string, action: () => Promise<T>): Promise<T> {
+export async function serialized<T>(cwd: string, action: () => Promise<T>): Promise<T> {
   const previous = operations.get(cwd) ?? Promise.resolve();
   const next = previous.catch(() => {}).then(action);
   operations.set(cwd, next);
@@ -244,14 +260,19 @@ export function pushCurrentBranch(cwd: string, checkReady: () => void): Promise<
 function commitDiff(diff: string): string {
   const limit = 60000;
   if (diff.length <= limit) return diff;
-  const sections = diff.split(/(?=^diff --git |^@@ )/m).map((text) => {
-    const boundary = text.startsWith("@@ ") ? text.indexOf("\n") + 1 : text.length;
+  const excerpt = fitDiff(diff, /(?=^diff --git |^@@ )/m, "@@ ", limit) ?? fitDiff(diff, /(?=^diff --git )/m, "diff --git ", limit);
+  if (!excerpt) throw new Error("The changes are too large to summarize completely. Stage fewer files or write the commit message in Source control.");
+  return excerpt;
+}
+
+function fitDiff(diff: string, split: RegExp, headed: string, limit: number): string | null {
+  const sections = diff.split(split).map((text) => {
+    const boundary = text.startsWith(headed) ? text.indexOf("\n") + 1 : text.length;
     return { header: text.slice(0, boundary), body: text.slice(boundary) };
   });
   let remaining = limit - sections.reduce((total, section) => total + section.header.length, 0);
   const hunks = sections.filter((section) => section.body).sort((a, b) => a.body.length - b.body.length);
-  if (remaining < hunks.reduce((total, section) => total + Math.min(section.body.length, 200), 0))
-    throw new Error("The changes are too large to summarize completely. Stage fewer files or write the commit message in Source control.");
+  if (remaining < hunks.reduce((total, section) => total + Math.min(section.body.length, 200), 0)) return null;
   const omitted = "\n[... diff excerpt omitted ...]\n";
   for (const [index, section] of hunks.entries()) {
     const allowance = Math.floor(remaining / (hunks.length - index));

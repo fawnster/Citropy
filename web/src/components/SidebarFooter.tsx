@@ -21,7 +21,7 @@ export function SidebarFooter({
 }) {
   const t = useI18n();
   const [compact, setCompact] = useState(
-    () => localStorage.getItem("citropy.compactNavigation") === "1",
+    () => localStorage.getItem("citropy.compactNavigation") !== "0",
   );
   const drag = useRef<number | undefined>(undefined);
   const moved = useRef(false);

@@ -1,4 +1,5 @@
 export interface SshConnection {
+  kind?: "container";
   id: string;
   name: string;
   target: string;

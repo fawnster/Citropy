@@ -26,7 +26,7 @@ test("renderer panels release background work and ignore stale replies", { timeo
     server: { host: "127.0.0.1", port: 0 },
   });
   await server.listen();
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, args: ["--enable-unsafe-swiftshader"] });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors = [];
   const requests = [];
@@ -200,6 +200,46 @@ test("renderer panels release background work and ignore stale replies", { timeo
     await page.waitForFunction(() => window.panelResources.bodyObservers.size === 0 && window.panelResources.listeners.size === 0);
   });
 
+  await t.test("terminal output stays aligned and accepts input across window and text sizes", async () => {
+    await page.getByRole("tab", { name: "Terminal", exact: true }).click();
+    await page.locator(".xterm-screen canvas").first().waitFor();
+    await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+    const terminal = await page.locator(".xterm").elementHandle();
+    for (const width of [1440, 700]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const scale of [100, 120, 150]) {
+        await page.evaluate(async scale => (await import("/web/src/lib/store.ts")).setUiScale(scale), scale);
+        await settle();
+        const geometry = await page.locator(".xterm-screen canvas").last().evaluate(canvas => {
+          const gl = canvas.getContext("webgl2");
+          return {
+            viewport: gl ? [...gl.getParameter(gl.VIEWPORT)] : null,
+            buffer: gl ? [gl.drawingBufferWidth, gl.drawingBufferHeight] : null,
+            screen: canvas.getBoundingClientRect().toJSON(),
+            host: canvas.closest(".term").getBoundingClientRect().toJSON(),
+          };
+        });
+        assert.ok(geometry.viewport, "The terminal must exercise its GPU renderer");
+        assert.deepEqual(geometry.viewport, [0, 0, ...geometry.buffer], `Terminal canvas is scaled incorrectly at ${width}px / ${scale}%`);
+        assert.ok(Math.abs(geometry.screen.x - geometry.host.x) < 1);
+        assert.ok(Math.abs(geometry.screen.y - geometry.host.y) < 1);
+        assert.ok(geometry.screen.right <= geometry.host.right + 1);
+        assert.ok(geometry.screen.bottom <= geometry.host.bottom + 1);
+        assert.equal(await terminal.evaluate(node => node.isConnected), true);
+        await page.locator(".inspector").screenshot({ path: `/tmp/citropy-terminal-${width}-${scale}.png` });
+      }
+    }
+    await page.locator(".xterm-helper-textarea").fill("echo ready");
+    await page.keyboard.press("Enter");
+    assert.equal(requests.filter(event => event.t === "term.data").map(event => event.data).join(""), "echo ready\r");
+    assert.equal(requests.filter(event => event.t === "term.open").length, 1);
+    assert.equal(requests.filter(event => event.t === "term.unsubscribe").length, 0);
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.evaluate(async () => (await import("/web/src/lib/store.ts")).setUiScale(120));
+    await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+    await settle();
+  });
+
   await t.test("terminal tab switching preserves the session and reconnect replays only once", async () => {
     await page.getByRole("tab", { name: "Terminal", exact: true }).click();
     await page.locator(".xterm").waitFor();
@@ -210,12 +250,14 @@ test("renderer panels release background work and ignore stale replies", { timeo
       assert.equal(await page.evaluate(() => window.panelResources.terminalObservers.size), 0);
       await page.getByRole("tab", { name: "Terminal", exact: true }).click();
     }
-    assert.equal(requests.filter((event) => event.t === "term.open").length, 1);
+    assert.equal(requests.filter((event) => event.t === "term.open").length, 11);
+    assert.equal(requests.filter((event) => event.t === "term.unsubscribe").length, 10);
+    assert.ok(requests.filter((event) => event.t === "term.open").every(event => event.flowControl === true));
     connection.close();
     await page.getByText("Reconnecting to your terminal…").waitFor();
     await page.getByText("Reconnecting to your terminal…").waitFor({ state: "hidden" });
     await settle();
-    assert.equal(requests.filter((event) => event.t === "term.open").length, 2);
+    assert.equal(requests.filter((event) => event.t === "term.open").length, 12);
     await page.getByRole("button", { name: "Close Terminal", exact: true }).click();
     await page.locator(".xterm").waitFor({ state: "detached" });
     assert.equal(await page.evaluate(() => window.panelResources.terminalObservers.size), 0);

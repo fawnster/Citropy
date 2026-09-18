@@ -1,7 +1,7 @@
 import { authorizeRemote, remoteId, workspaceDirectory } from "./remote.ts";
 import { assertApplicationReady, lockForAppUpdate, unlockAppUpdate } from "./update-lock.ts";
 import { assistanceBusy } from "./assistance.ts";
-import { providerUpdating, providerMaintenance } from "./providers/maintenance.ts";
+import { providerUpdating, startProviderUpdateChecks } from "./providers/maintenance.ts";
 import { notifyUpdateAvailable } from "./update-notifications.ts";
 import { handleFeatures } from "./features.ts";
 import { computerState, stopComputer } from "./computer.ts";
@@ -10,12 +10,15 @@ import { handleGitHub } from "./github.ts";
 import { searchConversations } from "./conversation-search.ts";
 import { createServer, type IncomingMessage } from "node:http";
 import { spawn } from "node:child_process";
+import { pendingQuestions } from "./questions.ts";
 import { shellList } from "./shells.ts";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, type WebSocket } from "ws";
 import { bus } from "./bus.ts";
+import { eventJournal } from "./event-journal.ts";
+import { randomUUID } from "node:crypto";
 import { dev, setDevelopment, host, origin, port } from "./config.ts";
 import { chooseFolder } from "./folder-picker.ts";
 import * as files from "./files.ts";
@@ -28,6 +31,7 @@ import { toolConnections } from "./mcp-access.ts";
 import * as browser from "./browser.ts";
 import {
   openDesktop,
+  desktopConnected,
   attachDesktop,
   authorizeDesktop,
   desktopRequest,
@@ -54,7 +58,26 @@ let lastProviderRefresh = 0;
 let development: Promise<void> | null = null;
 let shuttingDown = false;
 let activeCommands = 0;
+const connectionEpoch = randomUUID();
 const activeRequests = new Set<IncomingMessage>();
+
+function activeWork(ownCommands = 0): boolean {
+  return (["claude", "codex", "opencode"] as const).some(id => providerBusy(id) || providerUpdating(id)) || assistanceBusy() || activeCommands > ownCommands || activeRequests.size > 0 || pendingRequests().length > 0;
+}
+
+async function restartDevelopmentServer(): Promise<void> {
+  if (!dev || remoteId) throw new Error("Restarting the server is available only in development.");
+  if (activeWork(1) || computerState().status !== "idle") throw new Error("Finish active conversations, updates, Git operations, and computer use before restarting the server.");
+  store.flush();
+  const launcher = spawn(process.execPath, [join(here, "../desktop/start.mjs"), "--dev", `--after=${process.pid}`, ...(desktopConnected() ? [] : ["--server-only"])], {
+    cwd: join(here, ".."),
+    detached: true,
+    stdio: "ignore",
+  });
+  await new Promise<void>((resolve, reject) => { launcher.once("spawn", resolve); launcher.once("error", reject); });
+  launcher.unref();
+  void shutdown();
+}
 
 function startDevelopment(): Promise<void> {
   if (development) return development;
@@ -136,6 +159,8 @@ function snapshot(): Snapshot {
     tools: workspaceTools,
     toolConnections: toolConnections(),
     permissions: pendingRequests(),
+    questions: pendingQuestions(),
+    development: dev,
     projects: [...store.projects.values()].sort((a, b) => b.lastOpened - a.lastOpened),
     threads: store.allMeta().sort((a, b) => b.updatedAt - a.updatedAt),
     providers: providerInfo,
@@ -156,21 +181,23 @@ async function handle(event: ClientEvent, send: (event: ServerEvent) => void): P
       store.configureNotifications(event.preferences);
       return;
     case "desktop.open": await openDesktop(); return;
+    case "server.restart": await restartDevelopmentServer(); return;
     case "panel.open": {
       const source = store.projects.get(event.projectId);
       const project = source ? { ...source, path: workspacePath(source.id, event.threadId) } : undefined;
       if (!project) throw new Error("Open a workspace first");
       if (event.threadId && store.threads.get(event.threadId)?.projectId !== project.id) throw new Error("Conversation belongs to another workspace");
+      if (event.url !== undefined && (event.kind !== "browser" || !["http:", "https:"].includes(new URL(event.url).protocol))) throw new Error("Open a valid HTTP or HTTPS link");
       const panel = openPanel(project.id, event.kind, event.threadId, event.id);
       if (panel.kind === "browser") {
-        try { await browser.openBrowser(project.id, panel.id, event.threadId); }
+        try { await browser.openBrowser(project.id, panel.id, event.threadId, event.url); }
         catch (error) { if (!browser.browserStates().some((tab) => tab.id === panel.id)) { closePanel(panel.id); throw error; } }
       }
       return;
     }
     case "panel.close":
       if (panelList().some((panel) => panel.id === event.id && panel.kind === "computer" && panel.projectId === computerState().projectId)) await stopComputer();
-      terminals.close(event.id);
+      await terminals.close(event.id);
       await browser.closeBrowser(event.id);
       closePanel(event.id);
       return;
@@ -276,7 +303,7 @@ async function handle(event: ClientEvent, send: (event: ServerEvent) => void): P
     case "project.close":
       for (const panel of panelList()) {
         if (panel.projectId !== event.id) continue;
-        terminals.close(panel.id);
+        await terminals.close(panel.id);
         await browser.closeBrowser(panel.id);
         closePanel(panel.id);
       }
@@ -476,14 +503,6 @@ async function handle(event: ClientEvent, send: (event: ServerEvent) => void): P
         return send({ t: "git.diff", requestId: event.requestId, patch: null, error: (error as Error).message });
       }
     }
-    case "git.stage": {
-      const source = store.projects.get(event.projectId);
-      const project = source ? { ...source, path: workspacePath(source.id, event.threadId) } : undefined;
-      if (!project) return;
-      await git.stage(project.path, event.path, event.staged);
-      await refreshGit(event.projectId, true, event.threadId);
-      return;
-    }
     case "git.discard": {
       const source = store.projects.get(event.projectId);
       const project = source ? { ...source, path: workspacePath(source.id, event.threadId) } : undefined;
@@ -529,18 +548,18 @@ async function handle(event: ClientEvent, send: (event: ServerEvent) => void): P
       const project = source ? { ...source, path: workspacePath(source.id, event.threadId) } : undefined;
       if (!project) return;
       if (!panelList().some((panel) => panel.id === event.termId && panel.kind === "terminal" && panel.projectId === project.id)) throw new Error("This terminal tab is closed");
-      terminals.open(event.termId, workspacePath(project.id, panelList().find((panel) => panel.id === event.termId)?.threadId), event.cols, event.rows);
-      send({ t: "term.data", termId: event.termId, data: terminals.read(event.termId) });
+      await terminals.open(event.termId, workspacePath(project.id, panelList().find((panel) => panel.id === event.termId)?.threadId), event.cols, event.rows);
+      send({ t: "term.data", termId: event.termId, data: terminals.read(event.termId), reset: true });
       return;
     }
     case "term.data":
-      terminals.write(event.termId, event.data);
+      await terminals.write(event.termId, event.data);
       return;
     case "term.resize":
-      terminals.resize(event.termId, event.cols, event.rows);
+      await terminals.resize(event.termId, event.cols, event.rows);
       return;
     case "term.close":
-      terminals.close(event.termId);
+      await terminals.close(event.termId);
       return;
   }
 }
@@ -549,8 +568,7 @@ const server = createServer(async (req, res) => {
   const url = req.url ?? "/";
   if (!url.startsWith("/mcp/") && !authorizeRemote(req)) { res.writeHead(401).end(); return; }
   if (remoteId && url === "/api/remote/shutdown" && req.method === "POST") {
-    const busy = (["claude", "codex", "opencode"] as const).some(id => providerBusy(id) || providerUpdating(id)) || assistanceBusy() || activeCommands || activeRequests.size || terminals.hasActiveTerminals() || pendingRequests().length;
-    if (busy) { res.writeHead(409).end("Finish remote tasks and close terminals before updating this environment."); return; }
+    if (activeWork()) { res.writeHead(409).end("Finish remote tasks before updating this environment."); return; }
     res.writeHead(204).end();
     void shutdown();
     return;
@@ -559,10 +577,8 @@ const server = createServer(async (req, res) => {
     if (!authorizeDesktop(String(req.headers["x-citropy-desktop-token"] || ""))) { res.writeHead(403).end(); return; }
     if (url.endsWith("/cancel")) { unlockAppUpdate(); res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ ready: false })); return; }
     try {
-      const busy = (["claude", "codex", "opencode"] as const).some(id => providerBusy(id) || providerUpdating(id));
-      if (busy || assistanceBusy() || activeCommands || activeRequests.size || pendingRequests().length)
+      if (activeWork())
         throw new Error("Finish active conversations, updates, and Git operations before applying the update.");
-      if (terminals.hasActiveTerminals()) throw new Error("Close your terminals before restarting to apply the update.");
       if (computerState().status !== "idle") throw new Error("End computer use before restarting to apply the update.");
       store.flush();
       lockForAppUpdate();
@@ -662,10 +678,27 @@ const wss = new WebSocketServer({
 
 wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
   if (new URL(req.url ?? "/socket", origin).searchParams.has("desktop")) { attachDesktop(socket); return; }
+  const consumer = randomUUID();
+  const subscriptions = new Map<string, { pending: number; flow: boolean; streamId: string }>();
   const send = (event: ServerEvent) => {
+    if (event.t === "term.data") {
+      const subscription = subscriptions.get(event.termId);
+      if (!subscription) return;
+      if (subscription.flow) {
+        subscription.pending += event.data.length;
+        event = { ...event, streamId: subscription.streamId };
+        if (subscription.pending > 131_072) terminals.flow(event.termId, consumer, true);
+      }
+    }
+    if (socket.bufferedAmount > 1024 * 1024) { socket.close(1013, "The connection fell behind. Reconnecting."); return; }
     if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(event));
   };
-  send({ t: "hello", snapshot: snapshot() });
+  const query = new URL(req.url ?? "/socket", origin).searchParams;
+  const replay = query.get("epoch") === connectionEpoch ? eventJournal.replay(Number(query.get("after"))) : null;
+  if (replay) {
+    for (const event of replay) send(event);
+    send({ t: "reconnected", epoch: connectionEpoch, sequence: eventJournal.sequence, shells: shellList(), browsers: browser.browserStates(), computer: computerState() });
+  } else send({ t: "hello", snapshot: snapshot(), epoch: connectionEpoch, sequence: eventJournal.sequence });
   for (const project of store.projects.values()) void refreshGit(project.id, true);
 
   const unsubscribe = bus.subscribe(send);
@@ -677,32 +710,48 @@ wss.on("connection", (socket: WebSocket, req: IncomingMessage) => {
     } catch {
       return;
     }
+    if (event.t === "term.ack") {
+      const subscription = subscriptions.get(event.termId);
+      if (subscription?.flow && subscription.streamId === event.streamId && Number.isSafeInteger(event.count) && event.count > 0 && event.count <= 1024 * 1024) {
+        subscription.pending = Math.max(0, subscription.pending - event.count);
+        if (subscription.pending < 32_768) terminals.flow(event.termId, consumer, false);
+      }
+      return;
+    }
+    if (event.t === "term.unsubscribe") { subscriptions.delete(event.termId); terminals.flow(event.termId, consumer, false); return; }
+    if (event.t === "term.open") {
+      terminals.flow(event.termId, consumer, false);
+      subscriptions.set(event.termId, { pending: 0, flow: event.flowControl === true, streamId: randomUUID() });
+    }
     try {
       assertApplicationReady();
       activeCommands++;
-      try { await handle(event, send); } finally { activeCommands--; }
+      try {
+        if ("requestId" in event && event.requestId) {
+          const replies = await eventJournal.request(event.requestId, event, async () => {
+            const events: ServerEvent[] = [];
+            await handle(event, reply => events.push(reply));
+            return events;
+          });
+          for (const reply of replies) send(reply);
+        } else await handle(event, send);
+      } finally { activeCommands--; }
     } catch (error) {
       if ("requestId" in event && event.requestId)
         send({ t: "request.error", requestId: event.requestId, error: (error as Error).message });
       else send({ t: "toast", level: "error", text: (error as Error).message });
     }
   });
-  socket.on("close", unsubscribe);
+  socket.on("close", () => { unsubscribe(); terminals.release(consumer); });
 });
 
 desktopEvents.on("event", (event) => {
   if (event.type === "update.available" && typeof event.version === "string") notifyUpdateAvailable("Citropy", event.version, "Application");
 });
 
-let lastUpdateCheck = 0;
-const checkUpdates = () => {
-  if (Date.now() - lastUpdateCheck < 4 * 60 * 60 * 1000) return;
-  lastUpdateCheck = Date.now();
-  void providerMaintenance().catch(() => {});
-};
+let stopProviderUpdateChecks: (() => void) | undefined;
 const providerTimer = setInterval(() => {
   if (wss.clients.size) void refreshProviders();
-  if (wss.clients.size) checkUpdates();
 }, 60_000);
 providerTimer.unref();
 
@@ -717,8 +766,9 @@ server.listen(port, host, async () => {
     await startDevelopment().catch((error) =>
       process.stderr.write(`${error.message}\n`),
     );
+  await terminals.restore();
   await refreshProviders();
-  checkUpdates();
+  stopProviderUpdateChecks = startProviderUpdateChecks();
   process.send?.({ t: "ready" });
   const available = providerInfo.filter((entry) => entry.available).map((entry) => entry.label);
   process.stdout.write(`\n  Citropy listening on ${origin}\n`);
@@ -740,9 +790,10 @@ async function shutdown(): Promise<void> {
   shuttingDown = true;
   server.close();
   clearInterval(providerTimer);
+  stopProviderUpdateChecks?.();
   clearInterval(gitTimer);
   disposeAll();
-  terminals.closeAll();
+  terminals.detach();
   store.flush();
   await stopComputer();
   await Promise.all([browser.closeBrowsers(), waitForStoppedProcesses()]);

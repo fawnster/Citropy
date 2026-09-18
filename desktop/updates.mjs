@@ -5,7 +5,6 @@ export function createAppUpdater({
   version,
   unavailable,
   emit,
-  authenticate = async () => {},
   prepareInstall,
   recoverInstall = async () => {},
 }) {
@@ -149,7 +148,6 @@ export function createAppUpdater({
     void (async () => {
       try {
         if (action === "check") {
-          await authenticate();
           const result = await updater.checkForUpdates();
           if (!result) throw new Error("No release feed is available");
         } else if (action === "download") {

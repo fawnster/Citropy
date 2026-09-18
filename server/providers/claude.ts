@@ -9,6 +9,7 @@ import { onJson, onLines } from "../lines.ts";
 import { permissionToolName } from "../permissions.ts";
 import type { AgentEvent, AgentSession, Provider, StartOptions } from "./types.ts";
 import type { Attachment, PermissionMode, TodoItem } from "../../shared/protocol.ts";
+import { normalizeTodos } from "../../shared/todos.ts";
 
 const run = promisify(execFile);
 
@@ -27,6 +28,26 @@ interface StreamEvent {
   content_block?: { type: string; id?: string; name?: string };
   delta?: { type: string; text?: string; thinking?: string; partial_json?: string };
   message?: { model?: string };
+}
+
+interface ClaudeUsage {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+  iterations?: Array<ClaudeUsage & { type?: string }>;
+}
+
+function currentContextTokens(usage: ClaudeUsage): number | undefined {
+  const current = Array.isArray(usage.iterations) && usage.iterations.length
+    ? usage.iterations.findLast((entry) => entry && (!entry.type || entry.type === "message"))
+    : usage;
+  if (!current) return;
+  const counts = [current.input_tokens ?? 0, current.cache_read_input_tokens ?? 0, current.cache_creation_input_tokens ?? 0, current.output_tokens ?? 0];
+  if (counts.some((value) => !Number.isFinite(value) || value < 0)) return;
+  return counts[0]! + counts[1]! + counts[2]! > 0
+    ? counts.reduce((sum, value) => sum + value, 0)
+    : undefined;
 }
 
 function textOf(content: unknown): string {
@@ -60,18 +81,20 @@ class ClaudeSession implements AgentSession {
   #controls = new Map<string, { resolve: () => void; reject: (error: Error) => void; timer: NodeJS.Timeout }>();
   #nextControl = 0;
   #usage: MessageUsage;
-  #initialCost = 0;
+  #initialUsage: MessageUsage["totals"];
+  #model?: string;
   #contextTokens = 0;
   #manualCompaction = false;
   #compacted = false;
-  #compactedTokens: number | undefined;
 
   constructor(options: StartOptions) {
     this.#emit = options.emit;
     this.#usage = new MessageUsage(options.usage);
-    this.#initialCost = options.usage?.costUsd ?? 0;
-    this.#contextTokens = options.usage?.contextTokens ?? 0;
+    this.#initialUsage = { ...this.#usage.totals };
+    this.#model = options.model;
     this.#contextMax = options.contextMax ?? 200_000;
+    const contextTokens = options.usage?.contextTokens ?? 0;
+    this.#contextTokens = contextTokens <= this.#contextMax ? contextTokens : 0;
     const args = [
       "-p",
       "--input-format",
@@ -89,7 +112,7 @@ class ClaudeSession implements AgentSession {
         },
       }),
     ];
-    if (options.mcp) args.push("--permission-prompt-tool", permissionToolName);
+    if (options.mcp) args.push("--permission-prompt-tool", permissionToolName, "--allowedTools", "mcp__citropy__ask_user");
     if (options.effort) args.push("--effort", options.effort);
     if (options.model)
       args.push(
@@ -219,7 +242,7 @@ class ClaudeSession implements AgentSession {
     const input = (rawInput ?? {}) as Record<string, unknown>;
     if (name === "TodoWrite") {
       const items = input.todos;
-      if (Array.isArray(items)) this.#emit({ type: "todos", items: items as TodoItem[] });
+      if (Array.isArray(items)) this.#emit({ type: "todos", items: normalizeTodos(items) });
       return;
     }
     if (name === "TaskCreate" && typeof input.title === "string") {
@@ -263,20 +286,24 @@ class ClaudeSession implements AgentSession {
       return;
     }
     if (type === "assistant") {
-      const response = message.message as { id?: string; usage?: Record<string, number> } | undefined;
+      const response = message.message as { id?: string; model?: string; usage?: ClaudeUsage } | undefined;
       const usage = response?.usage;
       if (response?.id && usage && !message.local_command_source) {
         const current = { input: usage.input_tokens ?? 0, output: usage.output_tokens ?? 0, cacheRead: usage.cache_read_input_tokens ?? 0, cacheWrite: usage.cache_creation_input_tokens ?? 0 };
-        this.#usage.update(response.id, current);
-        if (!message.parent_tool_use_id) this.#contextTokens = current.input + current.output + current.cacheRead + current.cacheWrite;
+        if (Object.values(current).some((value) => value > 0)) this.#usage.update(response.id, current);
+        if (!message.parent_tool_use_id) {
+          if (response.model) this.#model = response.model;
+          const contextTokens = currentContextTokens(usage);
+          if (contextTokens !== undefined) this.#contextTokens = contextTokens;
+        }
         this.#emit({ type: "usage", usage: { ...this.#usage.totals, contextTokens: this.#contextTokens, contextMax: this.#contextMax } });
       }
     }
     if (type === "system" && message.subtype === "compact_boundary") {
       const metadata = message.compact_metadata as { post_tokens?: number } | undefined;
       this.#compacted = true;
-      this.#compactedTokens = metadata?.post_tokens;
-      if (!this.#manualCompaction) this.#emit({ type: "compacted", contextTokens: metadata?.post_tokens });
+      this.#contextTokens = metadata?.post_tokens ?? 0;
+      if (!this.#manualCompaction) this.#emit({ type: "compacted", contextTokens: this.#contextTokens });
       return;
     }
 
@@ -304,6 +331,7 @@ class ClaudeSession implements AgentSession {
     if (message.parent_tool_use_id) return;
 
     if (type === "system" && message.subtype === "init") {
+      if (typeof message.model === "string") this.#model = message.model;
       this.#emit({
         type: "session",
         externalId: String(message.session_id ?? ""),
@@ -366,31 +394,36 @@ class ClaudeSession implements AgentSession {
     }
 
     if (type === "result") {
-      const usage = message.usage as Record<string, number> | undefined;
-      const cost = typeof message.total_cost_usd === "number" ? Math.max(this.#usage.totals.costUsd, this.#initialCost + message.total_cost_usd) : this.#usage.totals.costUsd;
-      const modelUsage = message.modelUsage as Record<string, { contextWindow?: number }> | undefined;
-      const contextMax = modelUsage
-        ? Object.values(modelUsage).find((entry) => entry.contextWindow)?.contextWindow
-        : undefined;
-      if (contextMax) this.#contextMax = contextMax;
+      const usage = message.usage as ClaudeUsage | undefined;
+      const cost = typeof message.total_cost_usd === "number" ? Math.max(this.#usage.totals.costUsd, this.#initialUsage.costUsd + message.total_cost_usd) : this.#usage.totals.costUsd;
+      const modelUsage = message.modelUsage as Record<string, { contextWindow?: number; inputTokens?: number; outputTokens?: number; cacheReadInputTokens?: number; cacheCreationInputTokens?: number }> | undefined;
+      const models = Object.values(modelUsage ?? {});
+      const contextMax = (modelUsage?.[this.#model ?? ""] ?? (models.length === 1 ? models[0] : undefined))?.contextWindow;
+      if (contextMax && Number.isFinite(contextMax) && contextMax > 0) this.#contextMax = contextMax;
+      for (const [key, field] of [["input", "inputTokens"], ["output", "outputTokens"], ["cacheRead", "cacheReadInputTokens"], ["cacheWrite", "cacheCreationInputTokens"]] as const) {
+        const counts = models.map((model) => model[field]);
+        if (counts.length && counts.every((value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0)) {
+          this.#usage.totals[key] = Math.max(this.#usage.totals[key], this.#initialUsage[key] + counts.reduce((sum, value) => sum + value, 0));
+        }
+      }
+      if (Array.isArray(usage?.iterations) && usage.iterations.length && !this.#compacted) {
+        const contextTokens = currentContextTokens(usage);
+        if (contextTokens !== undefined) this.#contextTokens = contextTokens;
+      }
       this.#usage.totals.costUsd = cost;
       this.#emit({
         type: "usage",
         usage: {
           ...this.#usage.totals,
           costUsd: cost,
-          contextTokens: this.#contextTokens ||
-            (usage?.input_tokens ?? 0) +
-            (usage?.cache_read_input_tokens ?? 0) +
-            (usage?.cache_creation_input_tokens ?? 0) +
-            (usage?.output_tokens ?? 0),
+          contextTokens: this.#contextTokens,
           contextMax: this.#contextMax,
         },
       });
       const isError = message.is_error === true;
       if (this.#manualCompaction) {
         this.#manualCompaction = false;
-        if (this.#compacted && !isError) this.#emit({ type: "compacted", contextTokens: this.#compactedTokens });
+        if (this.#compacted && !isError) this.#emit({ type: "compacted", contextTokens: this.#contextTokens });
         else this.#emit({ type: "turn.end", error: String(message.result ?? "The provider could not compact this conversation yet.") });
         return;
       }
@@ -458,6 +491,7 @@ export const claudeProvider: Provider = {
   label: "Claude Code",
   binary: "claude",
   supportsPermissionPrompt: true,
+  capabilities: { transport: "stdio", steer: true, compact: true, stopShell: true },
   steerHint: "Claude Code reads it at its next step.",
   models: [],
   listModels: () => discoverModels("claude"),

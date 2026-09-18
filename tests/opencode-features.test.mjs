@@ -41,8 +41,10 @@ test(
         req.url === "/session/fixture/command" ||
         req.url === "/session/fixture/message" ||
         req.url === "/session/fixture/summarize"
-      )
+      ) {
         pending = res;
+        if (!req.url.endsWith("/summarize")) stream.write(`data: ${JSON.stringify({ type: "session.status", properties: { sessionID: "fixture", status: { type: "busy" } } })}\n\n`);
+      }
       else res.end("true");
     });
     await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -103,6 +105,29 @@ test(
       "file:///tmp/image%20with%20spaces.png",
     );
     assert.match(requests.at(-1).body.parts[0].text, /SKILL.md/);
+    await t.test("plans retain text from tool input and session updates without accepting other sessions", async () => {
+      const todos = [
+        { content: "Inspect the service", status: "in_progress", priority: "high" },
+        { content: "Verify the result", status: "pending", priority: "medium" },
+      ];
+      notify("message.part.updated", { part: { id: "plan", type: "tool", tool: "todowrite", state: { status: "running", input: { todos } } } });
+      await until(() => events.some(event => event.type === "todos"));
+      assert.deepEqual(events.findLast(event => event.type === "todos").items, [
+        { text: "Inspect the service", status: "in_progress" },
+        { text: "Verify the result", status: "pending" },
+      ]);
+      notify("todo.updated", { sessionID: "other", todos: [{ content: "Unrelated plan", status: "pending" }] });
+      notify("todo.updated", { todos: todos.map(todo => ({ ...todo, status: "completed" })) });
+      await until(() => events.filter(event => event.type === "todos").length >= 2);
+      assert.deepEqual(events.filter(event => event.type === "todos").map(event => event.items), [
+        [{ text: "Inspect the service", status: "in_progress" }, { text: "Verify the result", status: "pending" }],
+        [{ text: "Inspect the service", status: "completed" }, { text: "Verify the result", status: "completed" }],
+      ]);
+      notify("message.part.updated", { part: { id: "read-plan", type: "tool", tool: "todoread", state: { status: "running", input: {} } } });
+      notify("todo.updated", { todos: [] });
+      await until(() => events.findLast(event => event.type === "todos").items.length === 0);
+      assert.equal(events.some(event => event.type === "tool.start" && ["plan", "read-plan"].includes(event.callId)), false);
+    });
     notify("message.part.updated", { part: { id: "shell", type: "tool", callID: "shell", tool: "bash", state: { status: "running", input: { command: "npm test" }, metadata: { output: "Starting tests\n" } } } });
     await until(() => events.some(event => event.type === "tool.output" && event.callId === "shell"));
     assert.equal(events.findLast(event => event.type === "tool.output").output, "Starting tests\n");
@@ -114,9 +139,13 @@ test(
     await until(() => events.some(event => event.type === "tool.end" && event.callId === "shell"));
     pending.end("{}");
     pending = undefined;
+    notify("session.status", { status: { type: "idle" } });
     await until(() => events.some((event) => event.type === "turn.end"));
+    const planUpdates = events.filter(event => event.type === "todos").length;
+    notify("todo.updated", { todos: [{ content: "Late update", status: "pending" }] });
     notify("message.updated", { info: { id: "usage-first", role: "assistant", tokens: { total: 8496, input: 8180, output: 11, reasoning: 192, cache: { read: 113, write: 0 } } } });
     await until(() => events.findLast(event => event.type === "usage")?.usage.contextTokens === 8496);
+    assert.equal(events.filter(event => event.type === "todos").length, planUpdates);
     assert.equal(events.findLast(event => event.type === "usage").usage.output, 203);
     notify("message.updated", { info: { id: "usage-pending", role: "assistant", tokens: { input: 0, output: 0, reasoning: 0 } } });
     await until(() => events.findLast(event => event.type === "usage")?.usage.contextTokens === undefined);
@@ -143,6 +172,7 @@ test(
     assert.equal(requests.at(-1).body.parts[0].url, "file:///tmp/notes.txt");
     pending.end("{}");
     pending = undefined;
+    notify("session.status", { status: { type: "idle" } });
     await until(() => events.filter(event => event.type === "turn.end").length > beforeCommand);
     let compact = session.compact();
     await until(() => pending);
@@ -175,6 +205,7 @@ test(
     await assert.rejects(compact, /Provider limit reached/);
     compact = session.compact();
     await until(() => pending);
+    notify("todo.updated", { todos: [{ content: "Internal plan", status: "pending" }] });
     notify("message.part.updated", {
       part: { id: "summary", type: "text", text: "Internal summary" },
     });
@@ -182,6 +213,7 @@ test(
     pending.end("true");
     pending = undefined;
     await compact;
+    assert.equal(events.filter(event => event.type === "todos").length, planUpdates);
     assert.equal(
       events.filter((event) => event.type === "compacted").length,
       1,
@@ -202,6 +234,7 @@ test(
     assert.equal(events.filter((event) => event.type === "turn.end").length, beforeCommand + 1);
     pending.end("{}");
     pending = undefined;
+    notify("session.status", { status: { type: "idle" } });
     await until(
       () => events.filter((event) => event.type === "turn.end").length === beforeCommand + 2,
     );

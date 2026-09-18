@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src file:">
+  <title>Citropy computer use</title>
+  <style>
+    @font-face { font-family: Inter; font-style: normal; font-weight: 100 900; font-display: swap; src: url('../node_modules/@fontsource-variable/inter/files/inter-latin-standard-normal.woff2') format('woff2'); }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; overflow: hidden; background: transparent; }
+    body { padding: 2px; font: 14px Inter, system-ui, sans-serif; color: #ededed; -webkit-font-smoothing: antialiased; user-select: none; }
+    main { display: flex; align-items: center; gap: 9px; height: 44px; padding: 5px 6px 5px 13px; background: #202525; border: 1px solid #4c8d87; border-radius: 12px; }
+    .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #70d4c8; }
+    #status { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; -webkit-app-region: drag; }
+    button { display: flex; align-items: center; justify-content: center; gap: 6px; flex: none; height: 30px; padding: 0 9px; border: 0; border-radius: 7px; background: #323a39; color: #ededed; font: inherit; cursor: pointer; -webkit-app-region: no-drag; }
+    button:hover { background: #424d4b; }
+    button:disabled { opacity: .5; cursor: default; }
+    button:focus-visible { outline: 2px solid #70d4c8; outline-offset: 1px; }
+    svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+    #pause { width: 30px; padding: 0; }
+    .play { display: none; }
+    [data-paused="true"] .pause { display: none; }
+    [data-paused="true"] .play { display: block; }
+    [data-paused="true"] .dot { background: #b9b9a2; }
+    [data-paused="true"] main { border-color: #727468; }
+    #stop { background: #ededed; color: #202525; font-weight: 550; }
+    #stop:hover { background: #d2e7e3; }
+  </style>
+</head>
+<body>
+  <main aria-label="Computer use controls">
+    <span class="dot" aria-hidden="true"></span>
+    <span id="status" role="status">Citropy computer use</span>
+    <button id="pause" type="button" aria-label="Pause computer use" title="Pause computer use"><svg class="pause" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3v10M11 3v10"/></svg><svg class="play" viewBox="0 0 16 16" aria-hidden="true"><path d="m5 3 8 5-8 5z"/></svg></button>
+    <button id="stop" type="button" aria-label="Stop computer use"><svg viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1"/></svg><span id="stop-label">Stop</span></button>
+  </main>
+</body>
+</html>

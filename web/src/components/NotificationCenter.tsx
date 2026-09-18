@@ -1,3 +1,4 @@
+import { SelectionHighlight } from "./SelectionHighlight.tsx";
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "../lib/use-reduced-motion.ts";
 import { currentLocale, useI18n } from "../lib/i18n.ts";
@@ -117,10 +118,11 @@ export function NotificationCenter({
             </button>
           </header>
           <div
-            className="notification-filters"
+            className="notification-filters sliding-selection"
             role="group"
             aria-label={t("Filter notifications")}
           >
+            <SelectionHighlight value={filter} />
             <button
               type="button"
               aria-pressed={filter === "all"}

@@ -286,7 +286,7 @@ test("real SSH launch, remote tasks, disconnect, reconnect, and cleanup", { time
   socket.send(JSON.stringify({ t: "term.data", termId: "ssh-terminal", data: "printf 'remote-shell-marker\\n'\r" }));
   await until(() => messages.some(message => message.t === "term.data" && message.data.includes("remote-shell-marker")));
   const authHeaders = { "x-citropy-remote-token": remote.token };
-  assert.equal((await fetch(`http://127.0.0.1:${remote.port}/api/remote/shutdown`, { method: "POST", headers: authHeaders })).status, 409);
+  assert.equal((await fetch(`http://127.0.0.1:${remote.port}/api/health`, { headers: authHeaders })).status, 200);
   const failedConnection = await manager.save({ name: "Rejected", target: "citropy-missing-test-user@127.0.0.1", port, node: process.execPath });
   await assert.rejects(manager.connect(failedConnection.id), /Permission denied/);
   assert.equal(manager.activeId, connection.id);
@@ -300,8 +300,10 @@ test("real SSH launch, remote tasks, disconnect, reconnect, and cleanup", { time
   await writeFile(join(fixture, "shared/ssh-fixture.ts"), "export {};\n");
   const reconnected = await manager.connect(connection.id);
   assert.equal(reconnected.endpoint, endpoint);
-  assert.match(reconnected.connections[0].message, /Remote work is still running/);
-  assert.equal(JSON.parse(await readFile(join(home, ".citropy/ssh", connection.id, "server.json"), "utf8")).pid, remote.pid);
+  assert.equal(reconnected.connections[0].message, undefined);
+  const previousPid = remote.pid;
+  remote = JSON.parse(await readFile(join(home, ".citropy/ssh", connection.id, "server.json"), "utf8"));
+  assert.notEqual(remote.pid, previousPid);
   socket = new WebSocket(endpoint.replace("http", "ws") + "/socket", { origin: manager.origin });
   const recovered = once(socket, "message");
   await once(socket, "open");
@@ -316,7 +318,7 @@ test("real SSH launch, remote tasks, disconnect, reconnect, and cleanup", { time
   const oldPid = remote.pid;
   const updated = await manager.connect(connection.id);
   remote = JSON.parse(await readFile(join(home, ".citropy/ssh", connection.id, "server.json"), "utf8"));
-  assert.notEqual(remote.pid, oldPid);
+  assert.equal(remote.pid, oldPid);
   assert.equal(updated.connections[0].message, undefined);
   const tunnel = manager.sessions.get(connection.id).child;
   const dropped = once(tunnel, "exit");

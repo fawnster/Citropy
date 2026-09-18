@@ -1,23 +1,26 @@
 import { GitCommitHorizontal, Server } from "lucide-react";
 import { environmentName, isRemote } from "../lib/environment.ts";
 import { useI18n } from "../lib/i18n.ts";
-import { Folder, GitBranch, PanelLeft, PanelRight } from "./icons.ts";
+import { GitBranch, PanelLeft, PanelRight } from "./icons.ts";
 import { toggleInspector, useApp } from "../lib/store.ts";
 import { NotificationCenter } from "./NotificationCenter.tsx";
 import { ComputerIndicator } from "./ComputerPane.tsx";
 import { WindowControls } from "./WindowControls.tsx";
 import { GitActions } from "./GitActions.tsx";
 import { RunningShells } from "./RunningShells.tsx";
+import { WorkspaceSelector } from "./WorkspaceSelector.tsx";
 import type { NotificationTarget } from "../../../shared/protocol.ts";
 
 export function Titlebar({
   view,
   sidebarOpen,
+  workspaceDisabled,
   onToggleSidebar,
   onNotification,
 }: {
   view: "chat" | "git" | "github" | "settings" | "usage";
   sidebarOpen: boolean;
+  workspaceDisabled: boolean;
   onToggleSidebar: () => void;
   onNotification: (target: NotificationTarget) => void;
 }) {
@@ -56,64 +59,47 @@ export function Titlebar({
             height={28}
             aria-hidden="true"
           />
-          Citropy
+          <span>Citropy</span>
         </div>
-        <button
-          className="icon-btn"
-          type="button"
-          onClick={onToggleSidebar}
-          aria-expanded={sidebarOpen}
-          title={t("Toggle sidebar")}
-        >
-          <PanelLeft size={15} />
-        </button>
+        <div className="topbar-navigation">
+          <NotificationCenter onOpen={onNotification} />
+          <button
+            className="icon-btn"
+            type="button"
+            onClick={onToggleSidebar}
+            aria-expanded={sidebarOpen}
+            title={t("Toggle sidebar")}
+          >
+            <PanelLeft size={15} />
+          </button>
+        </div>
       </div>
       <nav
         className="topbar-center breadcrumb"
         aria-label={t("Current workspace and view")}
       >
-        {view === "settings" || view === "github" || view === "usage" ? (
-          <span className="thread-title">
-            {view === "github"
-              ? "GitHub"
-              : view === "usage"
-                ? t("Usage")
-                : t("Settings")}
-          </span>
-        ) : (
-          <>
-            <span
-              className="workspace-breadcrumb"
-              title={thread?.workspacePath ?? project?.path}
-            >
-              {isRemote() && <><Server size={13} /><span className="environment-breadcrumb truncate">{environmentName()}</span><span className="breadcrumb-separator" aria-hidden="true">/</span></>}
-              <Folder size={14} />
-              <span className="truncate">
-                {project?.name ?? t("No workspace")}
-              </span>
-              {(git?.branch || thread?.workspaceBranch) && view === "chat" && (
-                <span className="branch">
-                  <span className="breadcrumb-separator" aria-hidden="true">/</span>
-                  <GitBranch size={12} />
-                  {git?.branch || thread?.workspaceBranch}
-                </span>
-              )}
+        <div className="workspace-breadcrumb">
+          {isRemote() && <span className="environment-breadcrumb" title={environmentName()}><Server size={13} /><span className="truncate">{environmentName()}</span></span>}
+          <WorkspaceSelector disabled={workspaceDisabled} />
+          {(git?.branch || thread?.workspaceBranch) && view === "chat" && (
+            <span className="branch" title={git?.branch || thread?.workspaceBranch}>
+              <GitBranch size={12} />
+              <span className="truncate">{git?.branch || thread?.workspaceBranch}</span>
             </span>
-            {(thread || view === "git") && (
-              <>
-                <span className="breadcrumb-separator">/</span>
-                <span className="thread-title truncate">
-                  {view === "git" ? t("Source control") : thread?.title}
-                </span>
-              </>
-            )}
+          )}
+        </div>
+        {(thread || view !== "chat") && (
+          <>
+            <span className="breadcrumb-separator" aria-hidden="true">/</span>
+            <span className="thread-title truncate">
+              {view === "git" ? t("Source control") : view === "github" ? "GitHub" : view === "usage" ? t("Usage") : view === "settings" ? t("Settings") : thread?.title}
+            </span>
           </>
         )}
       </nav>
 
       <div className="topbar-right">
         <ComputerIndicator />
-        <NotificationCenter onOpen={onNotification} />
         <RunningShells onOpen={onNotification} />
         {project && (project.isGit && gitThread ? <GitActions key={gitThread.id} thread={gitThread} /> : <button type="button" className="icon-btn git-panel-trigger" aria-label={t("Git actions")} title={t("Git actions")} onClick={() => useApp.setState({ activeView: "git", readingThreadId: null })}><GitCommitHorizontal size={16} /><span className="git-trigger-label">Git</span></button>)}
         {view === "chat" && (

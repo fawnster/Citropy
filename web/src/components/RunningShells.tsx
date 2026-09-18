@@ -119,7 +119,12 @@ function ShellsPanel({ id, trigger, onClose, onOpen }: {
       <code className="shell-command">{selected.command || t(selected.panelId ? "Interactive terminal" : "Shell command")}</code>
       <div className="shell-directory" title={selected.cwd}>{selected.cwd}</div>
       <div className="shell-actions">
-        <button type="button" className="btn btn-sm" onClick={() => { onOpen({ view: "chat", projectId: selected.projectId, threadId: selected.threadId }); if (terminal && selected.panelId) selectPanel(selected.panelId); onClose(); }}><ExternalLink size={13} />{t(terminal ? "Open terminal" : "Open task")}</button>
+        <button type="button" className="btn btn-sm" onClick={() => {
+          onOpen({ view: "chat", projectId: selected.projectId, threadId: selected.threadId });
+          if (terminal && selected.panelId) selectPanel(selected.panelId);
+          else if (!selected.panelId && selected.threadId) useApp.setState({ searchMessageId: null, searchShellId: selected.id });
+          onClose();
+        }}><ExternalLink size={13} />{t(terminal ? "Open terminal" : selected.panelId ? "Open task" : "Show command")}</button>
         {active(selected) && <button type="button" className="btn btn-sm" disabled={!connected || Boolean(pending) || selected.status === "stopping"} onClick={() => void stop(selected)}><Square size={12} />{t(selected.status === "stopping" || pending === selected.id ? "Stopping…" : selected.stopMode === "shell" ? "Stop shell" : "Stop task")}</button>}
       </div>
       {active(selected) && selected.stopMode === "task" && <p className="shell-stop-hint">{t("Stopping this shell also stops its AI task.")}</p>}

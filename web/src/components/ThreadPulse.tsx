@@ -3,7 +3,7 @@ import {
   Clock3,
   LoaderCircle,
   Pause,
-  ShieldQuestion,
+  MessageCircleQuestion,
 } from "lucide-react";
 import type { ThreadStatus } from "../../../shared/protocol.ts";
 
@@ -23,7 +23,7 @@ export function ThreadPulse({
       : status === "error"
         ? CircleAlert
         : status === "awaiting"
-          ? ShieldQuestion
+          ? MessageCircleQuestion
           : Pause;
   return (
     <Icon

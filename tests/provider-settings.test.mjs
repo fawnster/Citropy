@@ -22,11 +22,15 @@ test(
     const originalEnv = { ...process.env };
     const originalFetch = globalThis.fetch;
     let latest = "1.1.0";
+    const versionChecks = [];
+    let versionGate = Promise.resolve();
     let installerDownloads = 0;
     let installer = '#!/bin/sh\nexec "$CODEX_INSTALL_DIR/codex" standalone-install';
     globalThis.fetch = (input, options) => {
-      if (String(input).startsWith("https://registry.npmjs.org/"))
-        return Promise.resolve(Response.json({ version: latest }));
+      if (String(input).startsWith("https://registry.npmjs.org/")) {
+        versionChecks.push(String(input));
+        return versionGate.then(() => Response.json({ version: latest }));
+      }
       if (String(input) === "https://chatgpt.com/codex/install.sh") {
         installerDownloads++;
         return Promise.resolve(new Response(installer));
@@ -82,6 +86,7 @@ if (args.includes('--help')) {
       startProviderUpdate,
       providerUpdating,
       assertProviderReady,
+      startProviderUpdateChecks,
     } = await import("../server/providers/maintenance.ts");
     const { store } = await import("../server/store.ts");
     const { handleFeatures } = await import("../server/features.ts");
@@ -210,6 +215,44 @@ if (args.includes('--help')) {
         );
       },
     );
+    await t.test("provider update checks run at startup and every five minutes without overlapping or installing", async (t) => {
+      t.mock.timers.enable({ apis: ["setInterval"] });
+      const before = versionChecks.length;
+      const stop = startProviderUpdateChecks();
+      let release;
+      t.after(() => { stop(); release?.(); versionGate = Promise.resolve(); });
+      const checked = async count => {
+        for (let attempt = 0; attempt < 100 && versionChecks.length < before + count; attempt++)
+          await new Promise(resolve => setTimeout(resolve, 10));
+        assert.equal(versionChecks.length, before + count);
+      };
+      await checked(3);
+      assert.equal(new Set(versionChecks.slice(before)).size, 3);
+      await providerMaintenance();
+      t.mock.timers.tick(299999);
+      await new Promise(resolve => setTimeout(resolve, 20));
+      assert.equal(versionChecks.length, before + 3);
+      t.mock.timers.tick(1);
+      await checked(6);
+      await providerMaintenance();
+      versionGate = new Promise(resolve => { release = resolve; });
+      t.mock.timers.tick(300000);
+      await checked(9);
+      t.mock.timers.tick(300000);
+      await new Promise(resolve => setTimeout(resolve, 20));
+      assert.equal(versionChecks.length, before + 9);
+      release();
+      await providerMaintenance();
+      t.mock.timers.tick(300000);
+      await checked(12);
+      await providerMaintenance();
+      stop();
+      t.mock.timers.tick(600000);
+      await new Promise(resolve => setTimeout(resolve, 20));
+      assert.equal(versionChecks.length, before + 12);
+      assert.equal(installerDownloads, 0);
+      assert.equal(fs.existsSync(join(home, "calls.jsonl")), false);
+    });
     await t.test(
       "updates use the owning installer, run only on request, verify versions, and bound output",
       async () => {

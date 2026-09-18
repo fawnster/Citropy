@@ -25,18 +25,21 @@ test("OpenCode owns and releases its process through startup failure, cancellati
   const sessions = [];
   const prompts = [];
   let abortResponse;
+  let stream;
   let mode = "failure";
   const server = http.createServer((request, response) => {
     if (request.url === "/session") {
       response.writeHead(mode === "failure" ? 503 : 200, { "content-type": "application/json" });
       response.end(JSON.stringify({ id: "session" }));
     } else if (request.url === "/event") {
+      stream = response;
       response.writeHead(200, { "content-type": "text/event-stream" });
       response.write("data: {}\n\n");
       if (mode === "closed") response.end();
     } else if (request.url === "/session/session/message" && mode === "interrupt") {
       request.resume();
       prompts.push(response);
+      stream.write(`data: ${JSON.stringify({ type: "session.status", properties: { sessionID: "session", status: { type: "busy" } } })}\n\n`);
     } else if (request.url === "/session/session/abort" && mode === "interrupt") {
       request.resume();
       abortResponse = response;
@@ -137,6 +140,7 @@ test("OpenCode owns and releases its process through startup failure, cancellati
       assert.equal(thread.error, undefined);
       assert.equal(children.length, 5);
       prompts[1].writeHead(200, { "content-type": "application/json" }).end("{}");
+      stream.write(`data: ${JSON.stringify({ type: "session.status", properties: { sessionID: "session", status: { type: "idle" } } })}\n\n`);
       await waitFor(() => !thread.running);
       assert.equal(thread.status, "idle");
       assert.equal(thread.error, undefined);

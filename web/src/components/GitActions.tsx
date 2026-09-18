@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "../lib/use-reduced-motion.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
+import { TaskReview } from "./TaskReview.tsx";
 import type { AssistanceSettings, WritingModel } from "../../../shared/assistance.ts";
 import { GitCommitHorizontal, GitBranch, FileDiff, ArrowUpFromLine, LoaderCircle, CircleAlert, RefreshCw, ChevronRight, X } from "lucide-react";
 import { selectThread, useApp, viewportWidth } from "../lib/store.ts";
@@ -14,6 +15,7 @@ import { gitActionBusy, type GitActionState } from "../../../shared/assistance.t
 import type { ThreadMeta } from "../../../shared/protocol.ts";
 
 export function GitActions({ thread }: { thread: ThreadMeta }) {
+  const [reviewing, setReviewing] = useState(false);
   const t = useI18n();
   const reducedMotion = useReducedMotion();
   const project = useApp((state) => state.projects.find((project) => project.id === thread.projectId));
@@ -143,6 +145,7 @@ export function GitActions({ thread }: { thread: ThreadMeta }) {
         <ChevronRight size={13} />
       </button>
       <div className="git-panel-body">
+        <button type="button" className="git-panel-combined" disabled={!connected} onClick={() => setReviewing(true)}><FileDiff size={15} />{t("Review task changes")}</button>
         {status && <p className="git-panel-sync">{status.upstream === null ? t("No upstream branch") : status.behind > 0 ? t(status.behind === 1 ? "1 commit behind upstream" : "{count} commits behind upstream", { count: status.behind }) : status.ahead > 0 ? t(status.ahead === 1 ? "1 commit to push" : "{count} commits to push", { count: status.ahead }) : t("No commits to push")}</p>}
         {hasChanges && <p className="git-panel-scope" title={t(scope === "staged" ? "Commit staged changes only" : "Commit all changes in this workspace")}><span>{t("Commit scope")}</span><span>{scope === "staged" ? t(staged === 1 ? "1 staged file" : "{count} staged files", { count: staged }) : t("All changes")}</span></p>}
         {busy && <div className="git-panel-progress" role="status"><LoaderCircle size={14} className="spin" />{activity}</div>}
@@ -164,6 +167,6 @@ export function GitActions({ thread }: { thread: ThreadMeta }) {
           <p>{state.message || t("Push finished")}</p>
         </details>}
       </footer>
-    </motion.section>}</AnimatePresence>
+    </motion.section>}{reviewing && <TaskReview thread={thread} onClose={() => setReviewing(false)} />}</AnimatePresence>
   </div>;
 }

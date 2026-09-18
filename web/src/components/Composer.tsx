@@ -6,7 +6,7 @@ import { QueueList } from "./QueueList.tsx";
 import { api, reportError } from "../lib/api.ts";
 import type { Attachment, QueuedMessage } from "../../../shared/protocol.ts";
 import type { ComposerDraft } from "../../../shared/features.ts";
-import type { PanelTab } from "../../../shared/workbench.ts";
+import type { WritingModel } from "../../../shared/assistance.ts";
 import { useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
@@ -27,27 +27,28 @@ import {
   LoaderCircle,
   LockKeyhole,
   UnlockKeyhole,
-  Play,
+  CheckCircle2,
 } from "lucide-react";
 import {
   effectiveEffort,
   selectedModel,
 } from "../../../shared/model-options.ts";
 import { ContextUsage } from "./ContextUsage.tsx";
-import { send } from "../lib/socket.ts";
 import { Menu } from "./Menu.tsx";
 import {
   configureThread,
   sendMessage,
   stopThread,
   loadThread,
+  finishThread,
 } from "../lib/actions.ts";
-import { selectThread, selectPanel, useApp } from "../lib/store.ts";
+import { confirmAction, selectThread, useApp } from "../lib/store.ts";
 import {
   effortLabel as formatEffort,
+  tokens,
 } from "../lib/format.ts";
 import type { PermissionMode } from "../../../shared/protocol.ts";
-import { useI18n } from "../lib/i18n.ts";
+import { currentLocale, useI18n } from "../lib/i18n.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
 
 const MODES: Array<{
@@ -83,7 +84,7 @@ const MODES: Array<{
 ];
 
 const contextLabel = (size: number) =>
-  size >= 1_000_000 ? `${size / 1_000_000}M` : `${Math.round(size / 1000)}k`;
+  tokens(size).replace(/\.00M$/, "M");
 
 export function Composer({
   onUsage,
@@ -102,9 +103,6 @@ export function Composer({
   const connected = useApp((state) => state.connected);
   const providers = useApp((state) => state.providers);
   const hasMessages = useApp((state) => Boolean(threadId && state.order[threadId]?.length));
-  const project = useApp((state) =>
-    state.projects.find((entry) => entry.id === thread?.projectId),
-  );
   const [draft] = useState<ComposerDraft>(() => {
     try {
       const saved = JSON.parse(
@@ -133,6 +131,7 @@ export function Composer({
   );
   const [uploading, setUploading] = useState("");
   const [sending, setSending] = useState(false);
+  const [transferring, setTransferring] = useState(false);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const uploadAbort = useRef(new AbortController());
@@ -181,6 +180,22 @@ export function Composer({
         method: "POST",
       }).catch(reportError);
   };
+  const transfer = async (choice: WritingModel) => {
+    if (!thread || transferring) return;
+    const target = providers.find((entry) => entry.id === choice.provider);
+    const name = selectedModel(target?.models ?? [], choice.model)?.label ?? choice.model;
+    if (!await confirmAction({
+      title: t("Transfer to {model}?", { model: name }),
+      description: t("A new agent will read the conversation and continue here. This consumes extra usage on the selected provider, and may incur additional costs. Your chat history, workspace and draft stay in place."),
+      context: target?.label,
+      label: t("Transfer and continue"),
+    }) || scopeSignal.aborted || !useApp.getState().connected) return;
+    setTransferring(true);
+    try {
+      await api(`threads/transfer?threadId=${thread.id}`, { method: "POST", body: JSON.stringify(choice) });
+    } catch (error) { reportError(error); }
+    finally { if (!scopeSignal.aborted) setTransferring(false); }
+  };
   const restore = (item: QueuedMessage) => {
     setValue((previous) =>
       previous.trim() ? `${item.text}\n\n${previous}` : item.text,
@@ -194,6 +209,7 @@ export function Composer({
   const provider = providers.find((entry) => entry.id === thread?.provider);
   const canSend =
     !sending &&
+    !transferring &&
     !thread?.compacting &&
     !gitActionBusy(thread?.gitAction) &&
     !uploading &&
@@ -205,6 +221,9 @@ export function Composer({
   const effort = effectiveEffort(model, thread?.effort);
   const effortLabel = effort ? formatEffort(effort) : t("Model options");
   const contextWindow = thread?.contextWindow ?? model?.contextMax;
+  const contextDescription = contextWindow
+    ? t("Context window: {count} tokens", { count: contextWindow.toLocaleString(currentLocale()) })
+    : undefined;
   const ModeIcon = mode?.icon ?? ShieldCheck;
 
   const commands = [
@@ -279,21 +298,6 @@ export function Composer({
       icon: <ShieldCheck size={16} />,
       run: () => permissionButton.current?.click(),
     },
-    ...(project?.settings?.actions ?? []).map((action) => ({
-      id: action.id,
-      label: `/run ${action.name}`,
-      hint: t("Run in this conversation's workspace"),
-      icon: <Play size={16} />,
-      run: () => {
-        if (!thread) return;
-        void api<PanelTab>(
-          `projects/action?projectId=${thread.projectId}&threadId=${thread.id}`,
-          { method: "POST", body: JSON.stringify({ id: action.id }) },
-        )
-          .then((panel) => selectPanel(panel.id))
-          .catch(reportError);
-      },
-    })),
   ];
   const submit = async () => {
     const text = value.trim();
@@ -357,11 +361,6 @@ export function Composer({
           </button>
         </div>
       )}
-      {thread.finished && (
-        <div className="composer-finished" role="status">
-          {t("This conversation is finished. Send a message to reopen it.")}
-        </div>
-      )}
       {provider && !provider.enabled && (
         <div className="models-warning" role="status">
           {t("{provider} is disabled. Enable it in Settings > Providers to continue this conversation.", { provider: provider.label })}
@@ -389,6 +388,28 @@ export function Composer({
           void upload(Array.from(event.dataTransfer.files));
         }}
       >
+        <svg className="composer-focus-ring" aria-hidden="true">
+          <rect className="composer-focus-track" x="0.5" y="0.5" width="calc(100% - 1px)" height="calc(100% - 1px)" rx="14" />
+          <rect className="composer-focus-trace" x="0.5" y="0.5" width="calc(100% - 1px)" height="calc(100% - 1px)" rx="14" pathLength="100" />
+        </svg>
+        {thread.finished && !running && (
+          <div className="composer-finished" role="status">
+            <CheckCircle2 size={14} aria-hidden="true" />
+            <div className="composer-finished-copy">
+              <strong>{t("Conversation finished")}</strong>
+              <span>{t("Send a message to reopen it.")}</span>
+            </div>
+            <button
+              className="btn"
+              data-variant="ghost"
+              type="button"
+              disabled={!connected}
+              onClick={() => finishThread(thread.id, false)}
+            >
+              {t("Reopen")}
+            </button>
+          </div>
+        )}
         <input
           ref={fileInput}
           type="file"
@@ -436,8 +457,10 @@ export function Composer({
             label={t("Model")}
             buttonRef={modelButton}
             className="composer-select composer-model"
-            disabled={running || !connected || sending}
+            disabled={running || !connected || sending || transferring}
             lockedProvider={hasMessages || thread.externalId || thread.usage.turns || thread.queue?.length ? thread.provider : undefined}
+            onTransfer={hasMessages && !thread.parentThreadId ? (choice) => void transfer(choice) : undefined}
+            transferDisabled={Boolean(thread.queue?.length || thread.compacting || gitActionBusy(thread.gitAction))}
             onChange={(choice) => { if (choice) configureThread(thread.id, { ...choice, effort: null }); }}
           />
 
@@ -493,10 +516,10 @@ export function Composer({
                   aria-expanded={open}
                   className="composer-select"
                   type="button"
-                  disabled={running}
+                  disabled={running || transferring}
                   onClick={toggle}
                   ref={effortButton}
-                  title={t("Model options")}
+                  title={contextDescription ? `${t("Model options")} · ${contextDescription}` : t("Model options")}
                   aria-label={`${t("Model options")}: ${effortLabel}${contextWindow ? `, ${contextLabel(contextWindow)} ${t("context")}` : ""}${thread.fastMode ? `, ${t("fast mode on")}` : ""}`}
                 >
                   {thread.fastMode ? (
@@ -512,7 +535,7 @@ export function Composer({
                         : t("Options")}
                   </span>
                   {effort && contextWindow && (
-                    <span className="composer-context">
+                    <span className="composer-context" title={contextDescription}>
                       {contextLabel(contextWindow)}
                     </span>
                   )}
@@ -546,7 +569,7 @@ export function Composer({
                 aria-expanded={open}
                 className="composer-select"
                 type="button"
-                disabled={running}
+                disabled={running || transferring}
                 onClick={toggle}
                 ref={permissionButton}
                 data-tone={thread.permissionMode}
@@ -562,7 +585,7 @@ export function Composer({
           />
 
           <div className="composer-actions">
-            <ContextUsage onCompact={compact} />
+            <ContextUsage onCompact={compact} draft={value} />
             <button
               className="icon-btn"
               type="button"
@@ -587,25 +610,27 @@ export function Composer({
                   {t("Queue")}
                 </button>
                 <button
-                  className="btn"
+                  className="btn composer-stop"
                   type="button"
                   data-variant="danger"
+                  aria-label={t("Stop")}
+                  title={t("Stop")}
                   onClick={stopThread}
                 >
-                  <Square size={11} fill="currentColor" />
-                  {t("Stop")}
+                  <Square size={11} fill="currentColor" aria-hidden="true" />
                 </button>
               </>
             ) : (
               <button
-                className="btn"
+                className="btn composer-send"
                 type="button"
                 data-variant="primary"
+                aria-label={t("Send")}
+                title={t("Send")}
                 onClick={submit}
                 disabled={(!value.trim() && !attachments.length) || !canSend}
               >
-                <ArrowUp size={13} />
-                {t("Send")}
+                <ArrowUp size={17} aria-hidden="true" />
               </button>
             )}
           </div>

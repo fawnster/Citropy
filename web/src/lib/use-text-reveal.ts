@@ -18,12 +18,22 @@ export function useTextReveal(
 
   useLayoutEffect(() => {
     const element = root.current;
-    if (!id || pending || !ready || !element) return;
+    if (!id || (pending && !streaming) || !ready || !element) return;
+    if (useApp.getState().parts[id]?.kind === "reasoning") {
+      markTextPresented(id);
+      return;
+    }
     const fresh = started.current || useApp.getState().reveals[id];
     markTextPresented(id);
     if (streaming || !animation || reducedMotion || !fresh) {
       started.current = false;
       setRevealing(false);
+      if (fresh && !reducedMotion) {
+        const entrance = element.animate([{ opacity: 0 }, { opacity: 1 }], {
+          duration: 180, easing: "ease-out",
+        });
+        return () => entrance.cancel();
+      }
       return;
     }
     started.current = true;

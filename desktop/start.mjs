@@ -2,7 +2,22 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const development = process.argv.includes("--dev");
+const serverOnly = process.argv.includes("--server-only");
+const previous = Number(process.argv.find((arg) => arg.startsWith("--after="))?.slice(8));
 const origin = `http://127.0.0.1:${process.env.CITROPY_PORT ?? 4177}`;
+function running(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error.code === "EPERM";
+  }
+}
+if (previous) {
+  for (let i = 0; i < 300 && running(previous); i++)
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  if (running(previous)) throw new Error(`The previous Citropy server (process ${previous}) did not stop.`);
+}
 async function healthy() {
   try {
     const response = await fetch(`${origin}/api/health`, {
@@ -31,6 +46,7 @@ if (!(await healthy())) {
   for (let i = 0; i < 50 && !(await healthy()); i++)
     await new Promise((resolve) => setTimeout(resolve, 100));
 }
+if (serverOnly) process.exit(0);
 const response = await fetch(
   `${origin}/api/desktop${development ? "?development=1" : ""}`,
   {

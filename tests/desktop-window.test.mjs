@@ -38,7 +38,7 @@ test("new windows fit the display and oversized saved windows stay on screen", {
         fs.rmSync(directory, { recursive: true, force: true });
       });
       desktop = await electron.launch({
-        args: ["--no-sandbox", "--ozone-platform=x11", "desktop/main.mjs"],
+        args: ["--no-sandbox", "--ozone-platform=x11", "desktop/entry.mjs"],
         env: { ...process.env, DISPLAY: `:${String(number).trim()}`, CITROPY_URL: url, CITROPY_UI_URL: url, CITROPY_DESKTOP_DATA: directory, CITROPY_DESKTOP_TOKEN: "fixture" },
       });
       await (await desktop.firstWindow()).waitForLoadState();
@@ -92,7 +92,7 @@ test(
       fs.rmSync(directory, { recursive: true, force: true });
     });
     desktop = await electron.launch({
-      args: ["--no-sandbox", "--ozone-platform=x11", "desktop/main.mjs"],
+      args: ["--no-sandbox", "--ozone-platform=x11", "desktop/entry.mjs"],
       env: {
         ...process.env,
         DISPLAY: `:${String(number).trim()}`,
@@ -104,6 +104,16 @@ test(
     });
     const page = await desktop.firstWindow();
     await page.waitForLoadState();
+    await desktop.evaluate(({ shell }) => {
+      globalThis.externalLinks = [];
+      shell.openExternal = async url => { globalThis.externalLinks.push(url); };
+    });
+    await page.evaluate(() => {
+      for (const url of ["https://example.test/guide?q=one#section", "mailto:hello@example.test", "file:///tmp/private.txt", "javascript:alert(1)"])
+        window.open(url, "_blank", "noopener,noreferrer");
+    });
+    assert.deepEqual(await desktop.evaluate(() => globalThis.externalLinks), ["https://example.test/guide?q=one#section", "mailto:hello@example.test"]);
+    assert.equal(await desktop.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
     assert.deepEqual(await page.evaluate(() => window.citropyDesktop.configureProjectDefaults()), { permissionMode: "plan" });
     const settings = { permissionMode: "manual", provider: "opencode", model: "remote/model", effort: "high" };
     assert.deepEqual(await page.evaluate(settings => window.citropyDesktop.configureProjectDefaults(settings), settings), settings);

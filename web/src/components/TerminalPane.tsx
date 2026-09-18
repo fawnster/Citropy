@@ -9,10 +9,10 @@ import { environmentSignal } from "../lib/environment.ts";
 import type { PanelTab } from "../../../shared/workbench.ts";
 
 const DARK = {
-  background: "#101010",
+  background: "#191919",
   foreground: "#dedede",
   cursor: "#ededed",
-  cursorAccent: "#101010",
+  cursorAccent: "#191919",
   selectionBackground: "rgba(255,255,255,0.18)",
   black: "#1e1e1e",
   red: "#f4657a",
@@ -34,10 +34,10 @@ const DARK = {
 
 const LIGHT = {
   ...DARK,
-  background: "#f8f8f8",
+  background: "#f0f0f0",
   foreground: "#262626",
   cursor: "#252525",
-  cursorAccent: "#f8f8f8",
+  cursorAccent: "#f0f0f0",
   selectionBackground: "rgba(0,0,0,0.15)",
   black: "#303030",
   white: "#525252",
@@ -85,9 +85,14 @@ export function TerminalPane({
   const projectId = panel.projectId;
   const connected = useApp((state) => state.connected);
   const theme = useApp((state) => state.theme);
+  const uiScale = useApp((state) => state.uiScale);
 
   useEffect(() => {
     if (!connected) attached.current = false;
+    if (!active && attached.current) {
+      send({ t: "term.unsubscribe", termId: panel.id });
+      attached.current = false;
+    }
     if (term.current) term.current.options.cursorBlink = active && connected;
     if (!active || !connected || !host.current || signal.aborted) return;
     if (term.current) {
@@ -101,6 +106,7 @@ export function TerminalPane({
           projectId,
           cols: term.current.cols,
           rows: term.current.rows,
+          flowControl: true,
         });
       }
       if (!document.activeElement?.matches('[role="tab"]:focus-visible')) term.current.focus();
@@ -117,9 +123,12 @@ export function TerminalPane({
         ]);
       if (disposed || signal.aborted || !host.current) return;
 
+      await document.fonts.load('13px "Geist Mono Variable"').catch(() => []);
+      if (disposed || signal.aborted || !host.current) return;
+
       const instance = new Xterm({
-        fontFamily: "'JetBrains Mono Variable', ui-monospace, monospace",
-        fontSize: 12,
+        fontFamily: getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim(),
+        fontSize: 13 * useApp.getState().uiScale / 100,
         lineHeight: 1.35,
         letterSpacing: 0,
         cursorBlink: true,
@@ -163,6 +172,7 @@ export function TerminalPane({
         projectId,
         cols: instance.cols,
         rows: instance.rows,
+        flowControl: true,
       });
 
       instance.onData((data) => {
@@ -182,7 +192,11 @@ export function TerminalPane({
   useEffect(() => {
     return onTerminal((event) => {
       if (event.termId !== panel.id) return;
-      if (event.t === "term.data") term.current?.write(event.data);
+      if (event.t === "term.data") {
+        term.current?.write((event.reset ? "\x1bc" : "") + event.data, () => {
+          if (event.streamId && !signal.aborted) send({ t: "term.ack", termId: panel.id, count: event.data.length, streamId: event.streamId });
+        });
+      }
       else
         term.current?.writeln(`\r\n${t("[process exited with code {code}]", { code: event.code ?? "?" })}`);
     });
@@ -192,6 +206,12 @@ export function TerminalPane({
     if (!term.current) return;
     term.current.options.theme = theme === "light" ? LIGHT : DARK;
   }, [theme]);
+
+  useEffect(() => {
+    if (!term.current) return;
+    term.current.options.fontSize = 13 * uiScale / 100;
+    fit.current?.fit();
+  }, [uiScale]);
 
   useEffect(() => {
     if (!active || !connected || !host.current) return;
@@ -216,6 +236,7 @@ export function TerminalPane({
 
   useEffect(() => {
     return () => {
+      if (attached.current && !signal.aborted) send({ t: "term.unsubscribe", termId: panel.id });
       term.current?.dispose();
       term.current = null;
       fit.current = null;

@@ -12,7 +12,7 @@ import { ConversationMenu } from "./ConversationMenu.tsx";
 import { Collapsible } from "./Collapsible.tsx";
 import { api, reportError } from "../lib/api.ts";
 import { send } from "../lib/socket.ts";
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
 import {
   MessageSquarePlus,
@@ -26,9 +26,9 @@ import {
 import { ThreadChildren } from "./ThreadChildren.tsx";
 import type { ThreadMeta } from "../../../shared/protocol.ts";
 import { ThreadPulse } from "./ThreadPulse.tsx";
+import { ThreadPreview } from "./ThreadPreview.tsx";
 import { ResizeHandle } from "./ResizeHandle.tsx";
 import { ProviderIcon } from "./ProviderIcon.tsx";
-import { WorkspaceSelector } from "./WorkspaceSelector.tsx";
 import {
   createThread,
   loadThread,
@@ -36,7 +36,7 @@ import {
   finishThread,
 } from "../lib/actions.ts";
 import { selectProject, selectThread, useApp } from "../lib/store.ts";
-import { modelLabel, providerLabels } from "../lib/format.ts";
+import { modelLabel, threadActivity } from "../lib/format.ts";
 import { currentLocale, useI18n } from "../lib/i18n.ts";
 
 export function Sidebar({
@@ -70,6 +70,30 @@ export function Sidebar({
   const dragHeight = useRef(0);
   const suppressClick = useRef(false);
   const uiScale = useApp((state) => state.uiScale);
+  const [preview, setPreview] = useState<{ threadId: string; anchor: HTMLButtonElement }>();
+  const previewId = useId();
+  const previewTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const clearPreviewTimer = useCallback(() => {
+    clearTimeout(previewTimer.current);
+    previewTimer.current = undefined;
+  }, []);
+  const hidePreview = useCallback(() => {
+    clearPreviewTimer();
+    setPreview(undefined);
+  }, [clearPreviewTimer]);
+  const leavePreview = () => {
+    clearPreviewTimer();
+    previewTimer.current = setTimeout(hidePreview, 120);
+  };
+  const showPreview = (anchor: HTMLButtonElement, threadId: string, immediate = false) => {
+    clearPreviewTimer();
+    if (preview?.threadId === threadId || dragging) return;
+    setPreview(undefined);
+    previewTimer.current = setTimeout(() => {
+      previewTimer.current = undefined;
+      if (anchor.isConnected && (anchor.matches(":hover") || anchor.matches(":focus-visible"))) setPreview({ threadId, anchor });
+    }, immediate ? 0 : 500);
+  };
   let activeRoot = activeThreadId ? threadMap[activeThreadId] : undefined;
   while (activeRoot?.parentThreadId)
     activeRoot = threadMap[activeRoot.parentThreadId];
@@ -90,6 +114,7 @@ export function Sidebar({
   const searchResult = useApp((state) => state.searchResult);
   const [allProjects, setAllProjects] = useState(false);
   const [query, setQuery] = useState("");
+  useEffect(() => setQuery(""), [activeProjectId]);
   const searchProject = allProjects
     ? undefined
     : (activeProjectId ?? undefined);
@@ -144,6 +169,10 @@ export function Sidebar({
     ...(group.open || query ? group.threads.map((thread) => ({ key: thread.id, group, thread })) : []),
   ]), [groups, query]);
   const rowOrder = rows.map(row => row.key).join("\0");
+  useEffect(() => {
+    hidePreview();
+    return clearPreviewTimer;
+  }, [activeProjectId, activeThreadId, query, rowOrder, uiScale, hidePreview, clearPreviewTimer]);
   useEffect(() => () => dragCleanup.current(), [activeProjectId, query, connected, uiScale, rowOrder]);
   const viewport = useRef<HTMLDivElement>(null);
   const [focusedRow, setFocusedRow] = useState<string>();
@@ -383,7 +412,8 @@ export function Sidebar({
   const renderThread = (thread: (typeof threads)[number]) => {
     const provider = providers.find((entry) => entry.id === thread.provider);
     const name = modelLabel(provider?.models ?? [], thread.model);
-    const providerName = provider?.label ?? providerLabels[thread.provider];
+    const { status, label } = threadActivity(thread);
+    const statusLabel = t(label);
     return (
       <div
         className="thread-entry"
@@ -403,14 +433,21 @@ export function Sidebar({
           }
         }}
       >
-        <div className="thread-card" data-active={thread.id === activeThreadId}>
+        <div className="thread-card" data-active={thread.id === activeThreadId} onPointerDownCapture={hidePreview}>
           <button
             type="button"
             className="thread-row"
             data-active={thread.id === activeThreadId}
-            title={thread.title}
+            aria-label={thread.title}
+            aria-description={new Date(thread.updatedAt).toLocaleString(currentLocale())}
+            aria-describedby={preview?.threadId === thread.id ? previewId : undefined}
             aria-current={thread.id === activeThreadId ? "page" : undefined}
+            onPointerEnter={(event) => { if (event.pointerType !== "touch") showPreview(event.currentTarget, thread.id); }}
+            onPointerLeave={leavePreview}
+            onFocus={(event) => { if (event.currentTarget.matches(":focus-visible")) showPreview(event.currentTarget, thread.id, true); }}
+            onBlur={hidePreview}
             onClick={() => {
+              hidePreview();
               onConversation();
               if (thread.projectId !== activeProjectId)
                 selectProject(thread.projectId);
@@ -427,24 +464,16 @@ export function Sidebar({
               <span className="thread-row-heading">
                 <ProviderIcon provider={thread.provider} />
                 <span className="thread-row-title">{thread.title}</span>
-              </span>
-              <span className="thread-row-summary">
-                <span className="thread-provider truncate" title={`${providerName} · ${name}`}>{name}</span>
-                {thread.workspaceBranch && <span className="thread-row-branch" title={thread.workspaceBranch}><GitBranch size={11} /><span className="truncate">{thread.workspaceBranch}</span></span>}
+                {status !== "idle" && status !== "stopped" && (
+                  <span className="thread-status" data-status={status} role="img" aria-label={statusLabel}>
+                    <ThreadPulse status={status} />
+                  </span>
+                )}
               </span>
               {query.trim() && allProjects && (
                 <span className="thread-row-meta">
                   <Folder size={12} />
                   {projects.find((entry) => entry.id === thread.projectId)?.name}
-                </span>
-              )}
-              {(thread.changedFiles || thread.status !== "idle") && (
-                <span className="thread-row-details">
-                  {Boolean(thread.changedFiles) && <span>{thread.changedFiles} {thread.changedFiles === 1 ? t("file") : t("files")}</span>}
-                  {thread.status !== "idle" && <span className="thread-status" title={thread.status}>
-                    <ThreadPulse status={thread.status} />
-                    {thread.status === "error" ? t("Failed") : thread.status === "awaiting" ? t("Approval") : t(thread.status)}
-                  </span>}
                 </span>
               )}
               {thread.snoozedUntil && (
@@ -469,23 +498,13 @@ export function Sidebar({
               )}
             </span>
             <span className="thread-row-footer">
-              <time
-                dateTime={new Date(thread.updatedAt).toISOString()}
-                title={new Date(thread.updatedAt).toLocaleString(currentLocale())}
-              >
-                {new Date(thread.updatedAt).toLocaleDateString(currentLocale(), {
-                  month: "short",
-                  day: "numeric",
-                })}{" "}
-                ·{" "}
-                {new Date(thread.updatedAt).toLocaleTimeString(currentLocale(), {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </time>
+              <span className="thread-row-summary">
+                <span className="thread-provider truncate">{name}</span>
+                {thread.workspaceBranch && <span className="thread-row-branch"><GitBranch size={11} /><span className="truncate">{thread.workspaceBranch}</span></span>}
+              </span>
             </span>
           </button>
-          <div className="thread-row-actions">
+          <div className="thread-row-actions" onPointerEnter={hidePreview}>
             <ConversationMenu
               thread={thread}
               onMove={(direction) => {
@@ -562,9 +581,6 @@ export function Sidebar({
 
   return (
     <aside className="rail" aria-label={t("Conversations")}>
-      <div className="rail-head">
-        <WorkspaceSelector onSelect={() => setQuery("")} />
-      </div>
       <div className="thread-toolbar">
         <label className="thread-search">
           <Search size={14} aria-hidden="true" />
@@ -596,37 +612,51 @@ export function Sidebar({
           {t("All workspaces")}
         </label>
       )}
-      <div className="rail-list scroll" ref={viewport}
-        onFocusCapture={(event) => {
-          const index = event.target.closest<HTMLElement>("[data-index]")?.dataset.index;
-          if (index !== undefined) setFocusedRow(rows[Number(index)]?.key);
-        }}
-        onBlurCapture={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget)) setFocusedRow(undefined);
-        }}
-      >
-        <div className="thread-list" data-virtualized={virtualized} data-dragging={Boolean(dragging)} style={virtualized ? { height: list.getTotalSize(), position: "relative" } : undefined}>
-          {groups.map((group) => <section className="thread-category" data-category={group.id} key={group.id} style={virtualized ? { display: "contents" } : undefined}>
-            {virtualized ? virtualRows.filter((item) => rows[item.index]?.group.id === group.id).map((item) => {
-              const row = rows[item.index]!;
-              return <div key={item.key} data-index={item.index} ref={list.measureElement} className="thread-list-item" style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start}px)` }}>
-                {row.thread ? renderThread(row.thread) : renderHeading(group)}
-              </div>;
-            }) : <>{renderHeading(group)}<Collapsible open={group.open || Boolean(query)} className="thread-category-content">{(group.open || query) && group.threads.map((thread) => <div className="thread-list-item" key={thread.id}>{renderThread(thread)}</div>)}</Collapsible></>}
-          </section>)}
-        </div>
-        {threads.length === 0 && (
-          <div className="rail-empty">
-            {query
-              ? !connected
-                ? t("Reconnect to search conversations.")
-                : !matches
-                  ? t("Searching…")
-                  : t("No matching conversations.")
-              : t("Your conversations will appear here.")}
+      <div className="rail-scroll">
+        <div className="rail-list scroll" ref={viewport}
+          onScroll={(event) => {
+            hidePreview();
+            event.currentTarget.parentElement?.toggleAttribute("data-scrolled", event.currentTarget.scrollTop > 0);
+          }}
+          onFocusCapture={(event) => {
+            const index = event.target.closest<HTMLElement>("[data-index]")?.dataset.index;
+            if (index !== undefined) setFocusedRow(rows[Number(index)]?.key);
+          }}
+          onBlurCapture={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setFocusedRow(undefined);
+          }}
+        >
+          <div className="thread-list" data-virtualized={virtualized} data-dragging={Boolean(dragging)} style={virtualized ? { height: list.getTotalSize(), position: "relative" } : undefined}>
+            {groups.map((group) => <section className="thread-category" data-category={group.id} key={group.id} style={virtualized ? { display: "contents" } : undefined}>
+              {virtualized ? virtualRows.filter((item) => rows[item.index]?.group.id === group.id).map((item) => {
+                const row = rows[item.index]!;
+                return <div key={item.key} data-index={item.index} ref={list.measureElement} className="thread-list-item" style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start}px)` }}>
+                  {row.thread ? renderThread(row.thread) : renderHeading(group)}
+                </div>;
+              }) : <>{renderHeading(group)}<Collapsible open={group.open || Boolean(query)} className="thread-category-content">{(group.open || query) && group.threads.map((thread) => <div className="thread-list-item" key={thread.id}>{renderThread(thread)}</div>)}</Collapsible></>}
+            </section>)}
           </div>
-        )}
+          {threads.length === 0 && (
+            <div className="rail-empty">
+              {query
+                ? !connected
+                  ? t("Reconnect to search conversations.")
+                  : !matches
+                    ? t("Searching…")
+                    : t("No matching conversations.")
+                : t("Your conversations will appear here.")}
+            </div>
+          )}
+        </div>
       </div>
+      {preview && threadMap[preview.threadId] && <ThreadPreview
+        id={previewId}
+        thread={threadMap[preview.threadId]!}
+        anchor={preview.anchor}
+        onClose={hidePreview}
+        onPointerEnter={clearPreviewTimer}
+        onPointerLeave={leavePreview}
+      />}
       <SidebarFooter
         onGit={onGit}
         onGitHub={onGitHub}

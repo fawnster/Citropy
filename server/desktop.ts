@@ -9,7 +9,7 @@ import { dev, origin } from "./config.ts";
 
 const token = process.env.CITROPY_DESKTOP_TOKEN || randomBytes(32).toString("hex");
 const require = createRequire(import.meta.url);
-const entry = fileURLToPath(new URL("../desktop/main.mjs", import.meta.url));
+const entry = fileURLToPath(new URL("../desktop/entry.mjs", import.meta.url));
 export const desktopEvents = new EventEmitter();
 let connection: WebSocket | null = null;
 let child: ChildProcess | null = null;
@@ -23,6 +23,10 @@ const pending = new Map<
     timer: NodeJS.Timeout;
   }
 >();
+
+export function desktopConnected(): boolean {
+  return Boolean(connection);
+}
 
 export function authorizeDesktop(value: string | null): boolean {
   if (!value) return false;
@@ -79,7 +83,7 @@ export function desktopRequest<T>(
     const timer = setTimeout(() => {
       pending.delete(id);
       reject(new Error(`Desktop ${method} timed out`));
-    }, method === "computer.start" ? 130_000 : method === "computer.action" ? 85_000 : method === "profiles.import" ? 120_000 : 30000);
+    }, method === "computer.start" ? 140_000 : method === "computer.action" ? 85_000 : method === "profiles.import" ? 120_000 : 30000);
     pending.set(id, { resolve, reject, timer });
     connection!.send(JSON.stringify({ id, method, params }));
   });

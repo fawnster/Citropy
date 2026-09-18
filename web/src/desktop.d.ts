@@ -20,6 +20,7 @@ declare global {
       saveEnvironment(connection: Omit<import("../../shared/environments.ts").SshConnection, "id"> & { id?: string }): Promise<import("../../shared/environments.ts").SshConnection>;
       connectEnvironment(id: string): Promise<import("../../shared/environments.ts").EnvironmentState>;
       disconnectEnvironment(id: string): Promise<void>;
+      stopEnvironment(id: string): Promise<void>;
       removeEnvironment(id: string): Promise<void>;
       chooseWorkspaceFolder(id: string, path?: string): Promise<string | null>;
       onEnvironmentsState(callback: (state: import("../../shared/environments.ts").EnvironmentState) => void): () => void;

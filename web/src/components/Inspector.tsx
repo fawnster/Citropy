@@ -1,3 +1,5 @@
+import { SelectionHighlight } from "./SelectionHighlight.tsx";
+import { AnimatedText } from "./AnimatedText.tsx";
 import { isRemote } from "../lib/environment.ts";
 import { useI18n } from "../lib/i18n.ts";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
@@ -88,8 +90,8 @@ export function Inspector({ visible }: { visible: boolean }) {
     projectId && tabs.some((panel) => panel.id === activePanels[projectId])
       ? activePanels[projectId]
       : tabs[0]?.id;
-  const tabLimit = tabWidth > 0 && tabs.length * 58 - 2 > tabWidth
-    ? Math.max(1, Math.floor((tabWidth - 32) / 58))
+  const tabLimit = tabWidth > 0 && tabs.length * 52 - 4 > tabWidth
+    ? Math.max(1, Math.floor((tabWidth - 32) / 52))
     : tabs.length;
   const visibleTabs = tabs.slice(0, tabLimit);
   const selectedTab = tabs.find(panel => panel.id === activeId);
@@ -135,7 +137,110 @@ export function Inspector({ visible }: { visible: boolean }) {
       aria-label={t("Workspace panels")}
     >
       <div className="workbench-heading">
-        <span>{t("Workspace")}</span>
+        <div
+          className="workbench-tabs sliding-selection"
+          ref={tabStrip}
+          role="tablist"
+          aria-label={t("Open workspace panels")}
+          onKeyDown={(event) => {
+            if (!(event.target instanceof HTMLElement) || !event.target.closest('[role="tab"]')) return;
+            if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
+              return;
+            event.preventDefault();
+            const index = tabs.findIndex((panel) => panel.id === activeId);
+            const next =
+              event.key === "Home"
+                ? 0
+                : event.key === "End"
+                  ? tabs.length - 1
+                  : (index +
+                      (event.key === "ArrowRight" ? 1 : -1) +
+                      tabs.length) %
+                    tabs.length;
+            const panel = tabs[next];
+            if (panel) {
+              focusTab.current = panel.id !== activeId;
+              selectPanel(panel.id);
+            }
+          }}
+        >
+          <SelectionHighlight value={activeId} selector='.workbench-tab[data-active="true"]' />
+          {visibleTabs.map((panel) => {
+            const Icon = options.find(
+              (option) => option.kind === panel.kind,
+            )!.icon;
+            const title = panel.kind === "browser" || panel.kind === "terminal" ? panel.title : t(panel.title);
+            return (
+              <div
+                className="workbench-tab"
+                key={panel.id}
+                data-active={activeId === panel.id}
+              >
+                <button
+                  type="button"
+                  id={`panel-tab-${panel.id}`}
+                  role="tab"
+                  aria-label={title}
+                  aria-selected={activeId === panel.id}
+                  aria-controls={`panel-body-${panel.id}`}
+                  tabIndex={activeId === panel.id ? 0 : -1}
+                  title={title}
+                  onClick={() => selectPanel(panel.id)}
+                >
+                  <Icon size={14} className={`panel-icon-${panel.kind}`} />
+                  <AnimatedText className="truncate" text={title} />
+                </button>
+                <button
+                  type="button"
+                  className="workbench-close"
+                  disabled={!connected}
+                  aria-label={t("Close {name}", { name: title })}
+                  title={t("Close {name}", { name: title })}
+                  onClick={() => send({ t: "panel.close", id: panel.id })}
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            );
+          })}
+          {hiddenTabs.length > 0 && <Menu
+            header={t("Open workspace panels")}
+            align="end"
+            width={300}
+            items={hiddenTabs.map(panel => {
+              const Icon = options.find(option => option.kind === panel.kind)!.icon;
+              const title = panel.kind === "browser" || panel.kind === "terminal" ? panel.title : t(panel.title);
+              return {
+                id: panel.id,
+                label: title,
+                icon: <Icon size={16} className={`panel-icon-${panel.kind}`} />,
+                onSelect: () => {
+                  focusTab.current = true;
+                  selectPanel(panel.id);
+                },
+                action: connected ? {
+                  label: t("Close {name}", { name: title }),
+                  icon: <X size={13} />,
+                  onSelect: () => send({ t: "panel.close", id: panel.id }),
+                } : undefined,
+              };
+            })}
+            trigger={({ id, open, toggle }) => (
+              <button
+                id={id}
+                type="button"
+                className="workbench-overflow"
+                aria-label={t("More panels")}
+                title={t("More panels")}
+                aria-haspopup="menu"
+                aria-expanded={open}
+                onClick={toggle}
+              >
+                <MoreHorizontal size={16} />
+              </button>
+            )}
+          />}
+        </div>
         <Menu
           header={t("Open a panel")}
           width={292}
@@ -157,116 +262,14 @@ export function Inspector({ visible }: { visible: boolean }) {
               onClick={toggle}
               disabled={!connected}
               aria-label={t("Open panel")}
+              title={t("Open panel")}
               aria-haspopup="menu"
               aria-expanded={open}
             >
-              <Plus size={15} />{t("Open panel")}
+              <Plus size={17} />
             </button>
           )}
         />
-      </div>
-      <div
-        className="workbench-tabs"
-        ref={tabStrip}
-        role="tablist"
-        aria-label={t("Open workspace panels")}
-        onKeyDown={(event) => {
-          if (!(event.target instanceof HTMLElement) || !event.target.closest('[role="tab"]')) return;
-          if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key))
-            return;
-          event.preventDefault();
-          const index = tabs.findIndex((panel) => panel.id === activeId);
-          const next =
-            event.key === "Home"
-              ? 0
-              : event.key === "End"
-                ? tabs.length - 1
-                : (index +
-                    (event.key === "ArrowRight" ? 1 : -1) +
-                    tabs.length) %
-                  tabs.length;
-          const panel = tabs[next];
-          if (panel) {
-            focusTab.current = panel.id !== activeId;
-            selectPanel(panel.id);
-          }
-        }}
-      >
-        {visibleTabs.map((panel) => {
-          const Icon = options.find(
-            (option) => option.kind === panel.kind,
-          )!.icon;
-          const title = panel.kind === "browser" || panel.kind === "terminal" ? panel.title : t(panel.title);
-          return (
-            <div
-              className="workbench-tab"
-              key={panel.id}
-              data-active={activeId === panel.id}
-            >
-              <button
-                type="button"
-                id={`panel-tab-${panel.id}`}
-                role="tab"
-                aria-label={title}
-                aria-selected={activeId === panel.id}
-                aria-controls={`panel-body-${panel.id}`}
-                tabIndex={activeId === panel.id ? 0 : -1}
-                title={title}
-                onClick={() => selectPanel(panel.id)}
-              >
-                <Icon size={14} className={`panel-icon-${panel.kind}`} />
-                <span className="truncate">{title}</span>
-              </button>
-              <button
-                type="button"
-                className="workbench-close"
-                disabled={!connected}
-                aria-label={t("Close {name}", { name: title })}
-                title={t("Close {name}", { name: title })}
-                onClick={() => send({ t: "panel.close", id: panel.id })}
-              >
-                <X size={12} />
-              </button>
-            </div>
-          );
-        })}
-        {hiddenTabs.length > 0 && <Menu
-          header={t("Open workspace panels")}
-          align="end"
-          width={300}
-          items={hiddenTabs.map(panel => {
-            const Icon = options.find(option => option.kind === panel.kind)!.icon;
-            const title = panel.kind === "browser" || panel.kind === "terminal" ? panel.title : t(panel.title);
-            return {
-              id: panel.id,
-              label: title,
-              icon: <Icon size={16} className={`panel-icon-${panel.kind}`} />,
-              onSelect: () => {
-                focusTab.current = true;
-                selectPanel(panel.id);
-              },
-              action: connected ? {
-                label: t("Close {name}", { name: title }),
-                icon: <X size={13} />,
-                onSelect: () => send({ t: "panel.close", id: panel.id }),
-              } : undefined,
-            };
-          })}
-          trigger={({ id, open, toggle }) => (
-            <button
-              id={id}
-              type="button"
-              className="workbench-overflow"
-              aria-label={t("More panels")}
-              title={t("More panels")}
-              aria-haspopup="menu"
-              aria-expanded={open}
-              onClick={toggle}
-            >
-              <MoreHorizontal size={16} />
-            </button>
-          )}
-        />}
       </div>
       <div className="inspector-body">
         {panels.map((panel) => {

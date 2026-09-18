@@ -1,12 +1,12 @@
 .environment-settings { display: flex; flex-direction: column; gap: 16px; }
-.environment-row { display: flex; align-items: center; gap: 14px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.environment-row { display: flex; align-items: center; gap: 14px; padding: 18px 0; }
 .environment-row > svg { flex: none; color: var(--text-3); }
 .environment-row > div:first-of-type { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
 .environment-row strong { font-weight: 500; overflow-wrap: anywhere; }
 .environment-row small { color: var(--text-3); overflow-wrap: anywhere; }
 .environment-row[data-active="true"] > svg { color: var(--accent); }
 .environment-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
-.environment-heading h2 { font-size: 14px; font-weight: 500; }
+.environment-heading h2 { font-size: var(--text-body); font-weight: 500; }
 .environment-actions { display: flex; align-items: center; gap: 6px; }
 .ssh-form, .ssh-options { display: flex; flex-direction: column; gap: 9px; }
 .ssh-form > label:not(:first-child) { margin-top: 6px; }
@@ -19,15 +19,16 @@
 .ssh-progress > svg { flex: none; }
 .workspace-menu .menu-option[data-group] { margin-top: 6px; background: var(--raised); border-radius: 6px; }
 .workspace-menu .menu-option[data-group]:first-child { margin-top: 0; }
-.workspace-menu .menu-option[data-group] .menu-label { font-weight: 550; }
+.workspace-menu .menu-option[data-group] > .menu-item { min-height: 50px; }
+.workspace-menu .menu-option[data-group] .menu-label { font-weight: 500; }
 .menu-group-chevron { flex: none; margin-left: auto; color: var(--text-3); transition: transform 160ms ease; }
 .menu-group-chevron[data-expanded="true"] { transform: rotate(90deg); }
-.remote-connection-banner { display: flex; align-items: center; flex: none; gap: 10px; padding: 8px 14px; background: var(--panel); border-bottom: 1px solid var(--line); }
-.remote-connection-banner > span { flex: 1; min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
+.remote-connection-banner { display: flex; align-items: center; flex: none; gap: 10px; padding: 8px 14px; background: var(--panel); }
+.remote-connection-banner > span { flex: 1; min-width: 0; font-size: var(--text-sm); overflow-wrap: anywhere; }
 .remote-connection-banner > svg { flex: none; }
 .environment-breadcrumb { max-width: 130px; }
 .icon-btn.git-panel-trigger { display: inline-flex; align-items: center; width: auto; gap: 5px; padding-inline: 8px; }
-.git-trigger-label { font-size: 12px; }
+.git-trigger-label { font-size: var(--text-sm); }
 @media (max-width: 720px) {
   .environment-row { flex-wrap: wrap; }
   .environment-actions { margin-left: auto; }

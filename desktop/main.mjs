@@ -1,8 +1,6 @@
 import { SshEnvironments, sshHosts } from "./ssh.mjs";
 import { chooseNativeFolder } from "./folder-picker.mjs";
 import { randomBytes } from "node:crypto";
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import { createAppUpdater } from "./updates.mjs";
 import { packagedBackend } from "./backend.mjs";
 import { initializeProfiles, browserProfile, handleProfiles } from "./browser-profiles.mjs";
@@ -16,6 +14,7 @@ import {
   Menu,
   Notification,
   screen,
+  shell,
   session,
   webContents,
 } from "electron";
@@ -614,6 +613,10 @@ async function action(tab, input) {
 }
 
 async function request(method, params) {
+  if (method === "computer.start" && window && !window.isDestroyed()) {
+    const language = await window.webContents.executeJavaScript("localStorage.getItem('citropy.language')").catch(() => "en");
+    params = { ...params, language: language === "es" ? "es" : "en" };
+  }
   if (method.startsWith("computer.")) return computerRequest(method, params);
   if (method === "ui.development") {
     if (ui.port === "5177") return;
@@ -787,10 +790,12 @@ app
       },
       disconnect: id => environments.disconnect(id),
       remove: id => environments.remove(id),
+      stop: id => environments.stop(id),
       "choose-folder": async input => {
         if (folderChoice) throw new Error("Finish choosing the current folder first.");
         const connection = input?.id === "local" ? undefined : environments.connections.find(entry => entry.id === input?.id);
         if (input?.id !== "local" && !connection) throw new Error("This SSH connection was removed.");
+        if (connection?.kind === "container") return "/workspace";
         const controller = new AbortController();
         folderChoice = controller;
         try { return await chooseNativeFolder({ connection, path: typeof input.path === "string" ? input.path : undefined, signal: controller.signal }, options => dialog.showOpenDialog(window, options)); }
@@ -813,13 +818,6 @@ app
       emit: (state) => {
         if (!window.isDestroyed()) window.webContents.send("updates:state", state);
         if (state.status === "available") emit({ type: "update.available", version: state.version });
-      },
-      authenticate: async () => {
-        let token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
-        if (!token) {
-          token = await promisify(execFile)("gh", ["auth", "token", "--hostname", "github.com"], { timeout: 8000, maxBuffer: 16000 }).then(result => result.stdout.trim()).catch(() => undefined);
-        }
-        autoUpdater.setFeedURL({ provider: "github", owner: "tinuxongit", repo: "Citropy", private: Boolean(token), ...(token ? { token } : {}) });
       },
       prepareInstall: async () => {
         const response = await fetch(new URL("/api/updates/prepare", base), { method: "POST", headers: { "x-citropy-desktop-token": token }, signal: AbortSignal.timeout(10000) });
@@ -918,7 +916,12 @@ app
     window.webContents.on("will-navigate", (event, url) => {
       if (new URL(url).origin !== ui.origin) event.preventDefault();
     });
-    window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    window.webContents.setWindowOpenHandler(({ url }) => {
+      try {
+        if (["http:", "https:", "mailto:"].includes(new URL(url).protocol)) void shell.openExternal(url).catch(() => {});
+      } catch {}
+      return { action: "deny" };
+    });
     ipcMain.on("browser:ready", (event) => {
       if (
         event.sender === window.webContents &&

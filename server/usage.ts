@@ -124,14 +124,14 @@ export async function usageReport(
 ): Promise<UsageReport> {
   const conversations = [...store.threads.values()]
     .filter((thread) => !thread.nativeAgentId)
-    .map((thread) => ({
-      id: thread.id,
+    .flatMap((thread) => [...(thread.transfers ?? []), { provider: thread.provider, model: thread.model, usage: thread.usage, at: thread.updatedAt }].map((session, index) => ({
+      id: index === (thread.transfers?.length ?? 0) ? thread.id : `${thread.id}:${index}`,
       title: thread.title,
-      provider: thread.provider,
-      model: thread.model,
-      usage: thread.usage,
-      updatedAt: thread.updatedAt,
-    }))
+      provider: session.provider,
+      model: session.model,
+      usage: session.usage,
+      updatedAt: session.at,
+    })))
     .sort((a, b) => b.updatedAt - a.updatedAt);
   const totals = emptyUsage();
   for (const thread of conversations) {

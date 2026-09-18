@@ -9,6 +9,7 @@ export interface AssistanceSettings {
   automaticTitles: boolean;
   titleModel: WritingModel | null;
   commitModel: WritingModel | null;
+  reviewModel?: WritingModel | null;
 }
 
 export const defaultAssistance: AssistanceSettings = {

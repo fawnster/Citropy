@@ -154,6 +154,9 @@ class Portal:
             source.set_property("path", str(node))
             size = properties.get("logical_size", properties.get("size", [0, 0]))
             entry = {"id": str(node), "name": "Screen " + str(index + 1), "width": int(size[0]), "height": int(size[1]), "pipeline": pipeline, "sink": pipeline.get_by_name("sink"), "fd": fd, "sample": None}
+            position = properties.get("position")
+            if position is not None:
+                entry.update(x=int(position[0]), y=int(position[1]))
             self.streams[str(node)] = entry
             pipeline.set_state(self.Gst.State.PLAYING)
             self.sample(entry)
@@ -164,7 +167,7 @@ class Portal:
         print(json.dumps({"event": "closed", "reason": "Screen sharing ended on the desktop."}), flush=True)
 
     def displays(self):
-        return [{key: value[key] for key in ["id", "name", "width", "height"]} for value in self.streams.values()]
+        return [{key: value[key] for key in ["id", "name", "width", "height", "x", "y"] if key in value} for value in self.streams.values()]
 
     def sample(self, entry):
         from gi.repository import GstVideo

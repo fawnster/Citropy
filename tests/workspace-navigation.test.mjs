@@ -102,6 +102,8 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
 
   await t.test("workspace actions and pinned, active, and finished categories are distinct", async test => {
     const { page, emit } = await fixture(test);
+    assert.equal(await page.locator(".topbar .workspace-select").count(), 1);
+    assert.equal(await page.locator(".rail .workspace-select").count(), 0);
     await page.getByRole("button", { name: "Active 1", exact: true }).waitFor();
     emit({ t: "thread.upsert", thread: { ...thread, id: "pinned", title: "Pinned conversation", pinned: true } });
     emit({ t: "thread.upsert", thread: { ...thread, id: "finished", title: "Finished conversation", finished: true } });
@@ -120,9 +122,9 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     await page.getByRole("button", { name: "Finished 1", exact: true }).click();
     await page.getByText("Finished conversation", { exact: true }).waitFor();
     assert.deepEqual(await page.locator(".thread-category").evaluateAll(nodes => nodes.map(node => node.dataset.category)), ["pinned", "active", "finished"]);
-    const headings = await page.locator('.finished-toggle').evaluateAll(nodes => nodes.map(node => ({ background: getComputedStyle(node).backgroundColor, height: node.getBoundingClientRect().height })));
+    const headings = await page.locator('.finished-toggle').evaluateAll(nodes => nodes.map(node => ({ height: node.getBoundingClientRect().height })));
     assert.equal(headings.length, 3);
-    assert.ok(headings.every(heading => heading.background !== "rgba(0, 0, 0, 0)" && heading.height < 44));
+    assert.ok(headings.every(heading => heading.height < 44));
     const searchBox = await page.locator(".thread-toolbar").boundingBox();
     const firstHeading = await pinned.locator(".finished-toggle").boundingBox();
     assert.ok(firstHeading.y - searchBox.y - searchBox.height < 12);
@@ -170,6 +172,8 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
       const boxes = await strip.evaluate(element => ({ width: element.clientWidth, scroll: element.scrollWidth, bounds: element.getBoundingClientRect().toJSON(), tabs: [...element.querySelectorAll('[role="tab"], .workbench-close, .workbench-overflow')].map(tab => tab.getBoundingClientRect().toJSON()) }));
       assert.ok(boxes.scroll <= boxes.width, JSON.stringify(boxes));
       assert.ok(boxes.tabs.every(tab => tab.left >= boxes.bounds.left && tab.right <= boxes.bounds.right + 1 && tab.width >= 18), JSON.stringify(boxes));
+      const add = await page.getByRole("button", { name: "Open panel", exact: true }).boundingBox();
+      assert.ok(Math.abs(boxes.bounds.y + boxes.bounds.height / 2 - add.y - add.height / 2) < 2);
     };
     for (const width of [1440, 960]) {
       await page.setViewportSize({ width, height: 1000 });
@@ -216,7 +220,7 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     await contained();
     assert.equal(await active.getAttribute("aria-selected"), "true");
     await page.evaluate(async panels => (await import("/web/src/lib/store.ts")).useApp.setState({ panels: panels.slice(0, 2) }), panels);
-    await strip.getByRole("tab", { name: "Files", exact: true }).locator("span").waitFor();
+    await strip.getByRole("tab", { name: "Files", exact: true }).locator(".truncate").waitFor();
     await contained();
     assert.equal(await more.count(), 0);
     await page.screenshot({ path: "/tmp/citropy-workspace-tabs-wide.png", animations: "disabled" });
@@ -286,11 +290,11 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     await page.getByRole("button", { name: "Model: Codex Extended", exact: true }).waitFor();
     assert.equal(requests.filter(event => event.t === "create").at(-1).effort, "low");
     await page.route("**/api/threads", route => route.fulfill({ status: 500, json: { error: "Workspace unavailable" } }));
-    const previous = await page.locator('.thread-row[data-active="true"]').getAttribute("title");
-    await page.getByRole("button", { name: "New thread", exact: true }).click();
+    const previous = await page.locator('.thread-row[data-active="true"]').getAttribute("aria-label");
+    await page.locator(".thread-toolbar").getByRole("button", { name: "New thread", exact: true }).click();
     await page.getByText("Workspace unavailable", { exact: true }).waitFor();
-    assert.equal(await page.locator('.thread-row[data-active="true"]').getAttribute("title"), previous);
-    assert.equal(await page.getByRole("button", { name: "New thread", exact: true }).isEnabled(), true);
+    assert.equal(await page.locator('.thread-row[data-active="true"]').getAttribute("aria-label"), previous);
+    assert.equal(await page.locator(".thread-toolbar").getByRole("button", { name: "New thread", exact: true }).isEnabled(), true);
   });
 
   await t.test("global and folder defaults take precedence while automatic selection remembers the last model", async test => {
@@ -408,7 +412,7 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     await page.setViewportSize({ width: 1440, height: 1000 });
     await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
     emit({ t: "thread.upsert", thread });
-    await page.locator('.thread-row[title="Current conversation"]').click();
+    await page.locator('.thread-row[aria-label="Current conversation"]').click();
     await page.getByRole("button", { name: "Model: Claude Fast", exact: true }).click();
     await menu.getByRole("button", { name: "Claude Code · Provider locked", exact: true }).waitFor();
     await menu.getByRole("button", { name: "Favorite models", exact: true }).click();
@@ -438,6 +442,7 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     await page.getByRole("button", { name: "Git actions", exact: true }).click();
     const panel = page.locator(".git-panel");
     await panel.getByRole("button", { name: "Commit model: Claude Fast", exact: true }).click();
+    assert.equal(await page.getByRole("button", { name: "Transfer to another agent", exact: true }).count(), 0);
     const provider = page.getByRole("group", { name: "Commit model · Provider", exact: true });
     await provider.getByRole("button", { name: "Codex", exact: true }).click();
     await page.getByRole("menuitem", { name: /^Codex Extended/ }).click();
@@ -480,14 +485,109 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     await page.getByRole("button", { name: "Model: Claude Extended", exact: true }).click();
     await page.keyboard.press("Escape");
     await page.getByRole("menu").waitFor({ state: "detached" });
-    const borders = await page.locator(".composer-shell, .agent-card").evaluateAll(nodes => nodes.map(node => { const style = getComputedStyle(node); return { border: style.borderTopWidth, shadow: style.boxShadow }; }));
-    assert.ok(borders.every(style => style.border === "0px" && style.shadow === "none"));
+    const surfaces = await page.locator(".composer-shell, .agent-card").evaluateAll(nodes => nodes.map(node => {
+      const style = getComputedStyle(node);
+      return {
+        borderless: ["Top", "Right", "Bottom", "Left"].every(side => parseFloat(style[`border${side}Width`]) === 0 || style[`border${side}Color`] === "rgba(0, 0, 0, 0)"),
+        background: style.backgroundColor,
+        canvas: getComputedStyle(document.body).backgroundColor,
+        outline: style.outlineStyle,
+      };
+    }));
+    assert.ok(surfaces.length > 0 && surfaces.every(style => style.borderless && style.outline === "none" && style.background !== style.canvas));
     emit({ t: "thread.upsert", thread: { ...thread, id: "pinned", title: "Pinned example", pinned: true } });
     for (const width of [1440, 600]) {
       await page.setViewportSize({ width, height: 1000 });
       if (width > 720) await page.locator(".canvas").click();
       await page.screenshot({ path: `/tmp/citropy-chat-refined-${width}.png`, animations: "disabled" });
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    }
+  });
+
+  await t.test("chat transfers require an explicit usage confirmation and preserve the draft and agent identities", async test => {
+    const { page, requests, emit } = await fixture(test);
+    let fail = false;
+    await page.route("**/api/threads/transfer?*", route => {
+      const input = route.request().postDataJSON();
+      requests.push({ t: "transfer", threadId: new URL(route.request().url()).searchParams.get("threadId"), ...input });
+      if (fail) return route.fulfill({ status: 400, json: { error: "Transfer fixture failed" } });
+      emit({ t: "thread.messages", threadId: "chat", messages: [{ id: "reply", provider: "claude", model: "claude-fast", role: "assistant", ts: 1, parts: [{ id: "reply-text", kind: "text", text: "Your changes are ready to review.", complete: true }] }] });
+      emit({ t: "thread.upsert", thread: { ...thread, ...input, externalId: undefined, running: true, status: "thinking", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0, contextTokens: 0, contextMax: 0, turns: 0 }, transfers: [{ provider: thread.provider, model: thread.model, usage: thread.usage, at: 2 }] } });
+      return route.fulfill({ json: { ok: true } });
+    });
+    const draft = page.getByRole("textbox", { name: "Message", exact: true });
+    await draft.fill("Keep this unsent draft.");
+    for (const width of [1440, 420]) {
+      await page.setViewportSize({ width, height: 900 });
+      if (width === 420) {
+        await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+        await page.locator(".rail").waitFor({ state: "detached" });
+      }
+      await page.locator(".composer-model").click();
+      const menu = page.getByRole("menu");
+      assert.equal(await menu.getByRole("button", { name: "Codex", exact: true }).count(), 0);
+      await menu.getByRole("button", { name: "Transfer to another agent", exact: true }).click();
+      await menu.getByText("Choose a model for a new agent in this chat. Reading the conversation again consumes extra usage.", { exact: true }).waitFor();
+      assert.equal(await menu.getByRole("menuitem", { name: /^Claude Fast/ }).isDisabled(), true);
+      await menu.getByRole("button", { name: "Codex", exact: true }).click();
+      await page.screenshot({ path: `/tmp/citropy-transfer-picker-${width}.png`, animations: "disabled" });
+      await menu.getByRole("menuitem", { name: /^Codex Extended/ }).click();
+      const dialog = page.getByRole("dialog", { name: "Transfer to Codex Extended?", exact: true });
+      await dialog.waitFor();
+      assert.match(await dialog.textContent(), /extra usage.*additional costs/);
+      assert.equal(requests.filter(event => event.t === "transfer").length, 0);
+      const bounds = await dialog.boundingBox();
+      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width && bounds.y >= 0 && bounds.y + bounds.height <= 900, JSON.stringify(bounds));
+      await page.screenshot({ path: `/tmp/citropy-transfer-confirm-${width}.png`, animations: "disabled" });
+      await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+      await dialog.waitFor({ state: "detached" });
+      assert.equal(await draft.inputValue(), "Keep this unsent draft.");
+    }
+    const choose = async () => {
+      await page.locator(".composer-model").click();
+      await page.getByRole("button", { name: "Transfer to another agent", exact: true }).click();
+      await page.getByRole("button", { name: "Codex", exact: true }).click();
+      await page.getByRole("menuitem", { name: /^Codex Extended/ }).click();
+      await page.getByRole("button", { name: "Transfer and continue", exact: true }).click();
+    };
+    fail = true;
+    await choose();
+    await page.getByText("Transfer fixture failed", { exact: true }).waitFor();
+    assert.equal(await page.locator(".composer-model").isEnabled(), true);
+    assert.equal(await draft.inputValue(), "Keep this unsent draft.");
+    fail = false;
+    await choose();
+    await page.getByRole("button", { name: "Model: Codex Extended", exact: true }).waitFor();
+    assert.equal(await page.locator(".composer-model").isDisabled(), true);
+    assert.equal(await draft.inputValue(), "Keep this unsent draft.");
+    assert.equal(await page.locator(".turn-agent .turn-provider").first().textContent(), "Claude Code");
+    assert.equal(await page.locator(".turn-agent .turn-heading strong").first().textContent(), "Claude Fast");
+    assert.deepEqual(requests.filter(event => event.t === "transfer"), [1, 2].map(() => ({ t: "transfer", threadId: "chat", provider: "codex", model: "codex-extended" })));
+    assert.equal(requests.some(event => event.t === "thread.config" || event.t === "create"), false);
+    await page.locator(".context-ring").hover();
+    assert.equal(await page.locator(".context-totals summary strong").textContent(), "384k");
+  });
+
+  await t.test("notifications stay reachable beside the sidebar controls at every window size", async test => {
+    const { page } = await fixture(test);
+    const sidebar = page.getByRole("button", { name: "Toggle sidebar", exact: true });
+    for (const platform of ["linux", "darwin"]) {
+      await page.evaluate(platform => document.documentElement.dataset.platform = platform, platform);
+      for (const width of [1440, 900, 600, 420]) {
+        await page.setViewportSize({ width, height: 1000 });
+        for (const open of [false, true]) {
+          if ((await sidebar.getAttribute("aria-expanded") === "true") !== open) await sidebar.click();
+          await page.getByRole("button", { name: "Notifications", exact: true }).click();
+          const panel = page.getByRole("dialog", { name: "Notifications", exact: true });
+          await page.waitForFunction(() => getComputedStyle(document.querySelector(".notification-center")).opacity === "1");
+          const bounds = await panel.boundingBox();
+          assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width + 1, `${platform} notifications overflow at ${width}px`);
+          assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+          if (!open) await page.keyboard.press("Escape");
+          else await page.mouse.click(width - 4, 600);
+          await panel.waitFor({ state: "detached" });
+        }
+      }
     }
   });
 
@@ -566,6 +666,23 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     await page.screenshot({ path: "/tmp/citropy-github-workspace.png", animations: "disabled" });
   });
 
+  await t.test("irregular context limits stay compact, explain their exact capacity, and keep effort on one line", async test => {
+    const catalogs = [{ ...providers[2], models: [{ id: "muse", label: "Muse Spark 1.3 Free", efforts: ["xhigh"], defaultEffort: "xhigh", contextMax: 1048576 }] }];
+    const { page, emit } = await fixture(test, { catalogs });
+    emit({ t: "thread.upsert", thread: { ...thread, provider: "opencode", model: "muse", effort: "xhigh", contextWindow: 1048576 } });
+    const options = page.getByRole("button", { name: "Model options: Extra high, 1.05M context", exact: true });
+    await options.waitFor();
+    assert.equal(await options.locator(".composer-context").textContent(), "1.05M");
+    assert.equal(await options.locator(".composer-context").getAttribute("title"), "Context window: 1,048,576 tokens");
+    for (const width of [1440, 700, 420]) {
+      await page.setViewportSize({ width, height: 900 });
+      const text = await options.locator("span").first().evaluate(node => ({ height: node.getBoundingClientRect().height, lineHeight: parseFloat(getComputedStyle(node).lineHeight) * 1.2 }));
+      assert.ok(text.height < text.lineHeight + 1, JSON.stringify(text));
+      assert.ok(await options.evaluate(node => node.scrollWidth <= node.clientWidth));
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    }
+  });
+
   await t.test("context hover crosses into the panel, never latches on click, and uses reported capacity during the first turn", async test => {
     const { page, emit } = await fixture(test);
     for (const width of [1440, 600]) {
@@ -579,6 +696,7 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
       const panel = page.getByRole("group", { name: "Context usage", exact: true });
       await panel.waitFor();
       await page.waitForFunction(() => getComputedStyle(document.querySelector(".context-details")).opacity === "1");
+      assert.equal(await panel.evaluate(node => node.matches(":popover-open")), true);
       await page.screenshot({ path: `/tmp/citropy-context-hover-${width}.png`, animations: "disabled" });
       const box = await panel.boundingBox();
       const ring = await meter.boundingBox();
@@ -612,10 +730,37 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     emit({ t: "thread.upsert", thread: { ...thread, running: true, contextWindow: 1000000, usage: { ...thread.usage, turns: 0 } } });
     await page.getByRole("button", { name: "41% context used", exact: true }).hover();
     await page.getByText("82k of 200k tokens", { exact: true }).waitFor();
-    await page.getByText("Conversation totals", { exact: true }).waitFor();
+    await page.getByText("Total processed", { exact: true }).waitFor();
     emit({ t: "thread.upsert", thread: { ...thread, externalId: undefined, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0, contextTokens: 0, contextMax: 0, turns: 0 }, contextWindow: 1000000 } });
     await page.getByRole("button", { name: "0% context used", exact: true }).waitFor();
     assert.equal(await page.locator(".context-ring text").textContent(), "0");
+  });
+
+  await t.test("context meters distinguish missing usage from empty threads and never count cache twice", async test => {
+    const { page, emit } = await fixture(test);
+    const panel = page.getByRole("group", { name: "Context usage", exact: true });
+    for (const contextTokens of [0, 44200000]) {
+      emit({ t: "thread.upsert", thread: { ...thread, usage: { input: 1662, output: 253163, cacheRead: 72274757, cacheWrite: 1446282, costUsd: 56.94, contextTokens, contextMax: 1000000, turns: 18 } } });
+      await page.locator(".context-ring").hover();
+      await panel.getByText("Not reported yet", { exact: true }).waitFor();
+      assert.equal(await page.locator(".context-ring text").textContent(), "");
+      assert.equal(await panel.getByText("Window size: 1.00M tokens", { exact: true }).isVisible(), true);
+      assert.equal(await panel.getByText("Total processed", { exact: true }).isVisible(), true);
+      assert.equal(await panel.getByText("Uncached input", { exact: true }).isVisible(), false);
+      await page.mouse.move(600, 200);
+      await panel.waitFor({ state: "detached" });
+    }
+    for (const provider of ["claude", "codex", "opencode"]) {
+      emit({ t: "thread.upsert", thread: { ...thread, provider, usage: { input: provider === "codex" ? 1300 : 200, output: 300, cacheRead: 1000, cacheWrite: 100, costUsd: 0, contextTokens: 60000, contextMax: 1000000, turns: 2 } } });
+      await page.getByRole("button", { name: "6% context used", exact: true }).hover();
+      await panel.getByText("60k of 1.00M tokens", { exact: true }).waitFor();
+      assert.equal(await panel.locator("summary strong").textContent(), "1.6k");
+      await panel.locator("summary").click();
+      assert.equal(await panel.locator("dl > div").filter({ has: page.getByText("Uncached input", { exact: true }) }).locator("dd").textContent(), "200");
+      assert.equal(await panel.locator("dl > div").filter({ has: page.getByText("Cache read", { exact: true }) }).locator("dd").textContent(), "1k");
+      await page.keyboard.press("Escape");
+      await panel.waitFor({ state: "detached" });
+    }
   });
 
   await t.test("compaction has one conversation status and a spaced usage action", async test => {
@@ -637,6 +782,7 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     await page.getByRole("button", { name: "41% context used", exact: true }).hover();
     const compact = page.getByRole("button", { name: "Compact context", exact: true });
     await compact.waitFor();
+    await page.locator(".context-totals summary").click();
     const action = await compact.boundingBox();
     const stats = await page.locator(".context-details dl").boundingBox();
     assert.equal(await page.locator(".context-connection").count(), 0);

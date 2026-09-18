@@ -4,8 +4,10 @@ import { randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join, basename, resolve } from "node:path";
 import { bus } from "./bus.ts";
+import { eventJournal } from "./event-journal.ts";
 import { uid } from "./ids.ts";
 import { emptyUsage } from "../shared/protocol.ts";
+import { normalizeTodos } from "../shared/todos.ts";
 import { defaultAssistance, gitActionBusy, type AssistanceSettings } from "../shared/assistance.ts";
 import type {
   ProviderId,
@@ -58,7 +60,7 @@ export class Store {
   disabledProviders = new Set<ProviderId>();
   computerEnabled = false;
   assistance: AssistanceSettings = { ...defaultAssistance };
-  projectDefaults: Omit<ProjectSettings, "actions"> = {};
+  projectDefaults: ProjectSettings = {};
   notifications: AppNotification[] = [];
   notificationPreferences: NotificationPreferences = {
     toasts: true,
@@ -71,6 +73,28 @@ export class Store {
 
   constructor() {
     this.#load();
+    eventJournal.importThreads(this.threads.values());
+    this.threads = new Map(eventJournal.threads().map(thread => {
+      const original = JSON.stringify(thread);
+      const interrupted = thread.running || thread.compacting;
+      if (gitActionBusy(thread.gitAction)) thread.gitAction = { ...thread.gitAction!, status: "error", message: "Citropy restarted during the Git action. Check source control before retrying." };
+      thread.running = false;
+      thread.compacting = false;
+      thread.activeTool = undefined;
+      if (interrupted) { thread.status = "stopped"; thread.error = "Citropy restarted before this turn finished. Your conversation was recovered."; }
+      for (const message of thread.messages) for (const part of message.parts) {
+        if (part.kind === "question" && part.status === "pending") part.status = "dismissed";
+        if (part.kind === "todo") part.items = normalizeTodos(part.items);
+        if (part.kind === "text" || part.kind === "reasoning") part.complete = true;
+        if (part.kind === "tool" && part.status === "running") { part.status = "error"; part.output ||= "The provider stopped before returning a tool result."; }
+      }
+      if (JSON.stringify(thread) !== original) {
+        const { messages, ...meta } = thread;
+        eventJournal.append({ t: "thread.upsert", thread: meta });
+        eventJournal.append({ t: "thread.messages", threadId: thread.id, messages });
+      }
+      return [thread.id, thread];
+    }));
   }
 
   #load(): void {
@@ -81,7 +105,7 @@ export class Store {
           this.projectDefaults = settings.projectDefaults;
         this.computerEnabled = settings.computerEnabled === true;
         if (typeof settings.assistance?.automaticTitles === "boolean") this.assistance.automaticTitles = settings.assistance.automaticTitles;
-        for (const key of ["titleModel", "commitModel"] as const) {
+        for (const key of ["titleModel", "commitModel", "reviewModel"] as const) {
           const model = settings.assistance?.[key];
           if (model && ["claude", "codex", "opencode"].includes(model.provider) && typeof model.model === "string" && model.model.trim())
             this.assistance[key] = { provider: model.provider, model: model.model };
@@ -129,13 +153,6 @@ export class Store {
       if (!name.endsWith(".json")) continue;
       try {
         const thread = JSON.parse(readFileSync(join(threadsDir, name), "utf8")) as Thread;
-        thread.running = false;
-        thread.compacting = false;
-        thread.activeTool = undefined;
-        if (gitActionBusy(thread.gitAction)) thread.gitAction = { ...thread.gitAction!, status: "error", message: "Citropy restarted during the Git action. Check source control before retrying." };
-        for (const message of thread.messages) for (const part of message.parts)
-          if ((part.kind === "text" || part.kind === "reasoning") && part.complete === false)
-            part.complete = true;
         if (thread.status !== "idle" && thread.status !== "error") thread.status = "idle";
         this.threads.set(thread.id, thread);
       } catch (error) {
@@ -261,7 +278,7 @@ export class Store {
     bus.emit({ t: "assistance.settings", settings });
   }
 
-  configureProjectDefaults(settings: Omit<ProjectSettings, "actions">): void {
+  configureProjectDefaults(settings: ProjectSettings): void {
     save(settingsFile, {
       disabledProviders: [...this.disabledProviders],
       notifications: this.notificationPreferences,
@@ -342,6 +359,8 @@ export class Store {
     this.#dirty.delete(id);
     rmSync(join(threadsDir, `${id}.json`), { force: true });
     rmSync(join(root, "attachments", id), { recursive: true, force: true });
+    rmSync(join(root, "transfers", id), { recursive: true, force: true });
+    rmSync(join(root, "checkpoints", `${id}-redo.json`), { force: true });
     bus.emit({ t: "thread.remove", id });
   }
 
@@ -421,11 +440,20 @@ export class Store {
   addMessage(threadId: string, message: Message): Message {
     const thread = this.threads.get(threadId);
     if (!thread) throw new Error(`unknown thread ${threadId}`);
+    if (message.role === "assistant") message.provider ??= thread.provider;
     thread.messages.push(message);
     thread.updatedAt = message.ts;
     bus.emit({ t: "message.add", threadId, message });
     this.#schedule(threadId);
     return message;
+  }
+
+  replaceMessages(threadId: string, messages: Message[]): void {
+    const thread = this.threads.get(threadId);
+    if (!thread) throw new Error("Conversation not found.");
+    thread.messages = messages;
+    bus.emit({ t: "thread.messages", threadId, messages });
+    this.#schedule(threadId);
   }
 
   addPart(threadId: string, messageId: string, part: Part): Part {

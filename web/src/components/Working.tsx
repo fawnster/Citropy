@@ -1,9 +1,7 @@
-import { useEffect, useState } from "react";
-import { motion } from "motion/react";
+import { useEffect, useState, type CSSProperties } from "react";
 import type { ThreadStatus } from "../../../shared/protocol.ts";
 import { duration } from "../lib/format.ts";
 import { useI18n } from "../lib/i18n.ts";
-import { useReducedMotion } from "../lib/use-reduced-motion.ts";
 
 interface Props {
   status: ThreadStatus | undefined;
@@ -16,11 +14,11 @@ const LABEL: Partial<Record<ThreadStatus, string>> = {
   queued: "Queued",
   thinking: "Thinking",
   working: "Working",
+  awaiting: "Needs input",
 };
 
 export function Working({ status, tool, compacting, startedAt }: Props) {
   const t = useI18n();
-  const reducedMotion = useReducedMotion();
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -43,19 +41,12 @@ export function Working({ status, tool, compacting, startedAt }: Props) {
   const text = compacting ? t("Compacting context") : tool ? `${t("Running")} ${tool}` : t((status && LABEL[status]) || "Working");
 
   return (
-    <motion.div
-      className="working"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: reducedMotion ? 0 : 0.24, ease: [0.16, 1, 0.3, 1] }}
-    >
-      <span className="working-weave" aria-hidden="true">
-        <i />
-        <i />
-        <i />
+    <span className="working">
+      <span className="working-grid" aria-hidden="true">
+        {Array.from({ length: 9 }, (_, index) => <i key={index} style={{ "--pixel-delay": `${(Math.floor(index / 3) + index % 3) * -120}ms` } as CSSProperties} />)}
       </span>
       <span className="working-text" role="status">{text}</span>
       <span className="working-time mono">{duration(Math.max(0, now - startedAt))}</span>
-    </motion.div>
+    </span>
   );
 }

@@ -1,3 +1,5 @@
+import { QuestionPanel } from "./components/QuestionPanel.tsx";
+import { LinkActions } from "./components/LinkActions.tsx";
 import { RemoteConnectionBanner } from "./components/EnvironmentSettings.tsx";
 import { environmentStorage, selectEnvironment, useEnvironments } from "./lib/environment.ts";
 import { AnimatePresence } from "motion/react";
@@ -62,6 +64,7 @@ export function App() {
   const view = useApp((state) => state.activeView);
   const setView = (activeView: typeof view) => useApp.setState({ activeView });
   const [settingsSection, setSettingsSection] = useState("General");
+  const [gitBusy, setGitBusy] = useState(false);
   const [sectionSidebarOpen, setSectionSidebarOpen] = useState(
     viewportWidth() > 720,
   );
@@ -229,6 +232,7 @@ export function App() {
         onNotification={openNotification}
         view={view}
         sidebarOpen={navigationOpen}
+        workspaceDisabled={view === "git" && gitBusy}
         onToggleSidebar={toggleNavigation}
       />
       <RemoteConnectionBanner />
@@ -270,6 +274,7 @@ export function App() {
             ) : view === "git" ? (
               <GitManager
                 navigation={navigation}
+                onBusyChange={setGitBusy}
                 key={`${environment}:${activeProjectId}:${activeThreadId}`}
                 sidebarOpen={sectionSidebarOpen}
                 onCloseSidebar={() => setSectionSidebarOpen(false)}
@@ -296,6 +301,7 @@ export function App() {
             ) : hasProject && activeThreadId ? (
               <Fragment key={`${environment}:${activeThreadId}`}>
                 <Conversation />
+                <QuestionPanel />
                 <Composer
                   onUsage={() => openView("usage")}
                   onSkills={() => {
@@ -318,6 +324,7 @@ export function App() {
       )}</AnimatePresence>
       <PermissionLayer />
       <ConfirmationDialog />
+      <LinkActions />
       <Toasts onOpen={openNotification} />
     </div>
   );
