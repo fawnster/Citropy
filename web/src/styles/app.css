@@ -319,7 +319,7 @@
 }
 .model-picker-toolbar button:hover { background: var(--raised); color: var(--text); }
 .model-picker-toolbar button[aria-pressed="true"] { background: transparent; color: var(--text); }
-.model-picker-toolbar .provider-icon { width: 18px; height: 18px; }
+.model-picker-toolbar .provider-icon { width: 20px; height: 20px; }
 .model-picker-toolbar .model-picker-locked { width: 51px; gap: 7px; }
 .model-picker-favorites[aria-pressed="true"] svg { color: var(--warn); }
 .menu.model-picker-menu { height: 360px; }

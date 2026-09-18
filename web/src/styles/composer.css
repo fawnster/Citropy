@@ -289,8 +289,8 @@
   text-align: left;
 }
 .menu-hint .provider-icon {
-  width: 13px;
-  height: 13px;
+  width: 15px;
+  height: 15px;
 }
 .menu-copy {
   display: grid;
@@ -765,4 +765,98 @@
 .composer-queue-actions .icon-btn:disabled {
   opacity: 0.42;
   pointer-events: none;
+}
+.permission-panel {
+  flex-shrink: 0;
+  min-width: 0;
+  padding: 8px 28px 0;
+}
+.permission-card {
+  width: min(var(--reading), 100%);
+  margin: 0 auto;
+  border-radius: var(--r-md);
+  background: var(--panel);
+  overflow: hidden;
+}
+.permission-row {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.permission-toggle {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: 1;
+  min-width: 0;
+  min-height: 38px;
+  padding: 7px 12px;
+  text-align: left;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  transition: background var(--dur-instant) var(--ease-out);
+}
+.permission-toggle:hover {
+  background: var(--raised);
+}
+.permission-toggle > svg,
+.permission-toggle > strong {
+  flex: none;
+}
+.permission-toggle strong {
+  color: var(--text-2);
+  font-weight: 500;
+}
+.permission-count {
+  flex: none;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.permission-text {
+  flex: 1;
+}
+.permission-chevron {
+  flex: none;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.permission-toggle[aria-expanded="true"] .permission-chevron {
+  transform: rotate(180deg);
+}
+.permission-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding-right: 6px;
+}
+.permission-actions .btn {
+  height: 27px;
+  font-size: var(--text-xs);
+}
+.permission-details {
+  padding: 10px 12px 12px;
+  background: var(--raised);
+}
+.permission-details .permission-context {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  margin-bottom: 12px;
+}
+.permission-details .permission-context .provider-icon {
+  width: 18px;
+  height: 18px;
+}
+.permission-details .ask-code,
+.permission-details .ask-diff {
+  max-height: calc(var(--viewport-height) * 0.4);
+}
+@container conversation (max-width: 600px) {
+  .permission-panel {
+    padding: 8px 16px 0;
+  }
 }

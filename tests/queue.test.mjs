@@ -367,4 +367,23 @@ test("follow-ups wait in a visible queue and each provider can take one mid-run"
       store.disabledProviders.delete("claude");
     }
   });
+
+  await t.test("an accepted plan leaves plan mode and asks the provider to build it", async () => {
+    const thread = store.createThread({ projectId: project.id, provider: "cursor", title: "Plan", permissionMode: "plan" });
+    const runtime = runtimeFor(thread.id);
+    await runtime.send("Plan a pizza file");
+    const planning = sessions.at(-1);
+    assert.equal(planning.options.permissionMode, "plan");
+    planning.options.emit({ type: "plan.accepted" });
+    planning.options.emit({ type: "turn.end" });
+    const building = await waitFor(() => sessions.at(-1) !== planning && sessions.at(-1));
+    assert.equal(planning.disposed, true);
+    assert.equal(building.options.permissionMode, "manual");
+    assert.equal(store.threads.get(thread.id).permissionMode, "manual");
+    await waitFor(() => building.sent.length);
+    assert.match(building.sent[0], /Build the plan\./);
+    assert.deepEqual(userTexts(store.threads.get(thread.id)), ["Plan a pizza file", "Build the plan."]);
+    building.options.emit({ type: "turn.end" });
+    await settle();
+  });
 });

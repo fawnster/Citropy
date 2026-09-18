@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { providerControl } from "./providers/control.ts";
+import { cursorCommands } from "./providers/cursor.ts";
 import { discoverOpenCodeCommands } from "./providers/opencode.ts";
 import type { ProviderCommand } from "../shared/features.ts";
 import type { ProviderId } from "../shared/protocol.ts";
@@ -56,6 +57,7 @@ export function listCommands(
         },
         ...(await codexPrompts()).map(({ template, ...command }) => command),
       ];
+    if (provider === "cursor") return cursorCommands(cwd);
     const result =
       provider === "claude"
         ? (await providerControl("claude", "initialize", {}, cwd)).commands

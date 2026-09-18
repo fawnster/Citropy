@@ -256,7 +256,7 @@ export function ProviderSettings() {
                 <span>
                   <strong>{t("Global instructions")}</strong>
                   <small>
-                    {provider.id === "claude" ? "CLAUDE.md" : "AGENTS.md"}
+                    {provider.id === "claude" ? "CLAUDE.md" : provider.id === "cursor" ? "citropy.mdc" : "AGENTS.md"}
                     <span>{" "}{t("· Guidance for all projects")}</span>
                   </small>
                 </span>

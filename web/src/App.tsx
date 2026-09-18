@@ -20,7 +20,7 @@ import { Conversation } from "./components/Conversation.tsx";
 import { Composer } from "./components/Composer.tsx";
 import { Inspector } from "./components/Inspector.tsx";
 import { SlidingPanel } from "./components/SlidingPanel.tsx";
-import { PermissionLayer } from "./components/PermissionLayer.tsx";
+import { PermissionPanel } from "./components/PermissionPanel.tsx";
 import { Toasts } from "./components/Toasts.tsx";
 import { ConfirmationDialog } from "./components/ConfirmationDialog.tsx";
 import type { NotificationTarget } from "../../shared/protocol.ts";
@@ -303,6 +303,7 @@ export function App() {
               <Fragment key={`${environment}:${activeThreadId}`}>
                 <Conversation />
                 <QuestionPanel />
+                <PermissionPanel />
                 <Composer
                   onUsage={() => openView("usage")}
                   onSkills={() => {
@@ -323,7 +324,6 @@ export function App() {
       <AnimatePresence>{newThreadProvider && (
         <NewConversation key={`${environment}:${activeProjectId}:${newThreadProvider}`} />
       )}</AnimatePresence>
-      <PermissionLayer />
       <ConfirmationDialog />
       <LinkActions />
       <Toasts onOpen={openNotification} />

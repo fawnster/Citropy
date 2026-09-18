@@ -76,6 +76,9 @@ test("provider boundaries normalize plans and reject malformed lifecycle events"
   assert.equal(receiveAgentEvent("opencode", "thread", { type: "tool.end", callId: "a", ok: "false", output: "SECRET" }), null);
   assert.match(protocolLog().at(-1).issue, /boolean/);
   assert.ok(!JSON.stringify(protocolLog()).includes("SECRET"));
+  assert.deepEqual(validateAgentEvent({ type: "tool.end", callId: "b", ok: true, output: "", images: [{ mime: "image/png", data: "aGVsbG8=" }] }).images, [{ mime: "image/png", data: "aGVsbG8=" }]);
+  assert.throws(() => validateAgentEvent({ type: "tool.end", callId: "b", ok: true, output: "", images: [{ mime: "text/html", data: "x" }] }), /image type/);
+  assert.throws(() => validateAgentEvent({ type: "tool.end", callId: "b", ok: true, output: "", images: [{ mime: "image/png", data: "" }] }), /image data/);
   assert.equal(receiveAgentEvent("opencode", "thread", { type: "turn.end", error: null }).type, "turn.end");
   assert.match(receiveAgentEvent("opencode", "thread", { type: "turn.end", error: null }).error, /invalid completion event/);
 });

@@ -22,6 +22,8 @@ test(
     const originalEnv = { ...process.env };
     const originalFetch = globalThis.fetch;
     let latest = "1.1.0";
+    let cursorLatest = "1.0.0";
+    let cursorChecks = 0;
     const versionChecks = [];
     let versionGate = Promise.resolve();
     let installerDownloads = 0;
@@ -35,6 +37,10 @@ test(
         installerDownloads++;
         return Promise.resolve(new Response(installer));
       }
+      if (String(input) === "https://cursor.com/install") {
+        cursorChecks++;
+        return Promise.resolve(new Response(`FINAL_DIR="$HOME/.local/share/cursor-agent/versions/${cursorLatest}"`));
+      }
       return originalFetch(input, options);
     };
     os.homedir = () => home;
@@ -47,9 +53,10 @@ test(
     const files = [
       join(home, ".local/share/claude/versions/1.0.0"),
       join(home, ".local/bin/codex"),
+      join(home, ".local/share/cursor-agent/versions/1.0.0/cursor-agent"),
       join(home, ".opencode/bin/opencode"),
     ];
-    for (const [index, provider] of ["claude", "codex", "opencode"].entries()) {
+    for (const [index, provider] of ["claude", "codex", "cursor", "opencode"].entries()) {
       const path = files[index];
       fs.mkdirSync(dirname(path), { recursive: true });
       fs.writeFileSync(
@@ -78,6 +85,7 @@ if (args.includes('--help')) {
       );
     }
     fs.symlinkSync(files[0], join(home, ".local/bin/claude"));
+    fs.symlinkSync(files[2], join(home, ".local/bin/cursor-agent"));
     const { readGlobalInstructions, saveGlobalInstructions } = await import(
       "../server/providers/instructions.ts"
     );
@@ -87,6 +95,7 @@ if (args.includes('--help')) {
       providerUpdating,
       assertProviderReady,
       startProviderUpdateChecks,
+      cursorVersionNewer,
     } = await import("../server/providers/maintenance.ts");
     const { store } = await import("../server/store.ts");
     const { handleFeatures } = await import("../server/features.ts");
@@ -145,8 +154,9 @@ if (args.includes('--help')) {
           claude: join(home, "claude-custom/CLAUDE.md"),
           codex: join(home, "codex-custom/AGENTS.md"),
           opencode: join(home, "config-custom/opencode/AGENTS.md"),
+          cursor: join(home, ".cursor/rules/citropy.mdc"),
         };
-        for (const provider of ["claude", "codex", "opencode"]) {
+        for (const provider of ["claude", "codex", "opencode", "cursor"]) {
           const first = readGlobalInstructions(provider);
           assert.equal(first.path, expected[provider]);
           assert.equal(first.exists, false);
@@ -154,12 +164,22 @@ if (args.includes('--help')) {
           const text =
             "# Guidelines\r\n\r\nKeep unicode 🍋 and $LITERALS exactly.\r\n";
           const saved = saveGlobalInstructions(provider, text, first.revision);
-          assert.equal(fs.readFileSync(first.path, "utf8"), text);
           assert.equal(saved.exists, true);
+          assert.equal(saved.content, text);
+          if (provider === "cursor") {
+            assert.equal(
+              fs.readFileSync(first.path, "utf8"),
+              `---\ndescription: Citropy global instructions\nalwaysApply: true\n---\n${text}`,
+            );
+          } else {
+            assert.equal(fs.readFileSync(first.path, "utf8"), text);
+          }
           saveGlobalInstructions(provider, "Next draft", saved.revision);
           assert.equal(
             fs.readFileSync(`${first.path}.citropy-backup`, "utf8"),
-            text,
+            provider === "cursor"
+              ? `---\ndescription: Citropy global instructions\nalwaysApply: true\n---\n${text}`
+              : text,
           );
         }
       },
@@ -258,7 +278,7 @@ if (args.includes('--help')) {
       async () => {
         const maintenance = await providerMaintenance();
         assert.ok(maintenance.every((entry) => entry.available));
-        assert.deepEqual(maintenance.map((entry) => entry.method), ["Native updater", "Standalone installer", "Native updater"]);
+        assert.deepEqual(maintenance.map((entry) => entry.method), ["Native updater", "Standalone installer", "Native updater", "Native updater"]);
         await providerMaintenance(true);
         assert.equal(installerDownloads, 0);
         assert.equal(fs.existsSync(join(home, "calls.jsonl")), false);
@@ -266,7 +286,7 @@ if (args.includes('--help')) {
         assert.ok(store.notifications.every((entry) => entry.target?.view === "settings" && entry.target.section === "Providers"));
         let prepared = 0;
         let refreshed = 0;
-        for (const provider of ["claude", "codex", "opencode"]) {
+        for (const provider of ["claude", "codex", "cursor", "opencode"]) {
           const listeners = process.listenerCount("exit");
           const state = startProviderUpdate(
             provider,
@@ -291,14 +311,19 @@ if (args.includes('--help')) {
           const done = await settle(provider);
           assert.equal(done.status, "success", done.message);
           assert.equal(done.version, `${provider} 1.1.0`);
-          assert.equal(done.updateStatus, "current");
-          assert.equal(done.latestVersion, "1.1.0");
+          if (provider === "cursor") {
+            assert.equal(done.updateStatus, "unknown");
+            assert.equal(done.latestVersion, "1.0.0");
+          } else {
+            assert.equal(done.updateStatus, "current");
+            assert.equal(done.latestVersion, "1.1.0");
+          }
           assert.ok(done.output.length <= 10000);
           assert.equal(done.output.includes("\x1b"), false);
           assert.equal(process.listenerCount("exit"), listeners);
         }
-        assert.equal(prepared, 3);
-        assert.equal(refreshed, 3);
+        assert.equal(prepared, 4);
+        assert.equal(refreshed, 4);
         const calls = fs
           .readFileSync(join(home, "calls.jsonl"), "utf8")
           .trim()
@@ -306,9 +331,13 @@ if (args.includes('--help')) {
           .map(JSON.parse);
         assert.deepEqual(
           calls.map(({ args }) => args),
-          [["update"], ["standalone-install"], ["upgrade"]],
+          [["update"], ["standalone-install"], ["update"], ["upgrade"]],
         );
         assert.equal(installerDownloads, 1);
+        assert.ok(cursorChecks >= 1, "the Cursor install manifest is checked");
+        assert.equal(cursorVersionNewer("2026.08.31-4057e58", "2026.09.15-d2fe57e"), true);
+        assert.equal(cursorVersionNewer("2026.09.15-d2fe57e", "2026.09.15-d2fe57e"), false);
+        assert.equal(cursorVersionNewer("cursor 1.0.0", "1.1.0"), undefined);
       },
     );
     await t.test("invalid installer downloads leave the installed CLI untouched and release the update lock", async () => {

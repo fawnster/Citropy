@@ -17,13 +17,14 @@ export type AgentEvent =
   | { type: "block.delta"; blockId: string; text: string }
   | { type: "block.end"; blockId: string }
   | { type: "tool.start"; callId: string; name: string; input: unknown }
-  | { type: "tool.input"; callId: string; input: unknown }
-  | { type: "tool.end"; callId: string; ok: boolean; output: string }
+  | { type: "tool.input"; callId: string; input: unknown; name?: string }
+  | { type: "tool.end"; callId: string; ok: boolean; output: string; images?: Array<{ mime: string; data: string }> }
   | { type: "tool.output"; callId: string; output: string; append?: boolean }
   | { type: "shell.background"; callId: string; taskId: string; command?: string; cwd?: string }
   | { type: "shell.end"; callId: string; ok: boolean; output?: string; stopped?: boolean }
   | { type: "todos"; items: TodoItem[] }
   | { type: "usage"; usage: Partial<Usage> }
+  | { type: "plan.accepted" }
   | { type: "turn.end"; error?: string }
   | { type: "notice"; level: "info" | "warn" | "error"; text: string }
   | { type: "exit"; code: number };

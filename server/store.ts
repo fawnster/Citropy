@@ -6,6 +6,7 @@ import { homedir } from "node:os";
 import { join, basename, resolve } from "node:path";
 import { bus } from "./bus.ts";
 import { eventJournal } from "./event-journal.ts";
+import { removeToolImages } from "./tool-images.ts";
 import { uid } from "./ids.ts";
 import { emptyUsage } from "../shared/protocol.ts";
 import { normalizeTodos } from "../shared/todos.ts";
@@ -108,7 +109,7 @@ export class Store {
         if (typeof settings.assistance?.automaticTitles === "boolean") this.assistance.automaticTitles = settings.assistance.automaticTitles;
         for (const key of ["titleModel", "commitModel", "reviewModel"] as const) {
           const model = settings.assistance?.[key];
-          if (model && ["claude", "codex", "opencode"].includes(model.provider) && typeof model.model === "string" && model.model.trim())
+          if (model && ["claude", "codex", "opencode", "cursor"].includes(model.provider) && typeof model.model === "string" && model.model.trim())
             this.assistance[key] = { provider: model.provider, model: model.model };
         }
         for (const key of ["toasts", "desktop", "sound"] as const) {
@@ -117,7 +118,7 @@ export class Store {
         }
         if (Array.isArray(settings.disabledProviders)) {
           for (const id of settings.disabledProviders) {
-            if (["claude", "codex", "opencode"].includes(id)) this.disabledProviders.add(id);
+            if (["claude", "codex", "opencode", "cursor"].includes(id)) this.disabledProviders.add(id);
           }
         }
       } catch (error) {
@@ -189,7 +190,7 @@ export class Store {
   }
 
   setProviderEnabled(id: ProviderId, enabled: boolean): void {
-    if (!["claude", "codex", "opencode"].includes(id) || typeof enabled !== "boolean") throw new Error("Invalid provider setting");
+    if (!["claude", "codex", "opencode", "cursor"].includes(id) || typeof enabled !== "boolean") throw new Error("Invalid provider setting");
     const disabled = new Set(this.disabledProviders);
     if (enabled) disabled.delete(id);
     else disabled.add(id);
@@ -360,6 +361,7 @@ export class Store {
     this.#dirty.delete(id);
     rmSync(join(threadsDir, `${id}.json`), { force: true });
     rmSync(join(root, "attachments", id), { recursive: true, force: true });
+    removeToolImages(id);
     rmSync(join(root, "transfers", id), { recursive: true, force: true });
     rmSync(join(root, "checkpoints", `${id}-redo.json`), { force: true });
     bus.emit({ t: "thread.remove", id });

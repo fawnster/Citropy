@@ -8,10 +8,12 @@ import { cancelQuestions, hasPendingQuestion } from "./questions.ts";
 import { cancelThread } from "./permissions.ts";
 import { store } from "./store.ts";
 import { removeAttachment, validateAttachments } from "./assets.ts";
+import { saveToolImages } from "./tool-images.ts";
 import { workspacePath } from "./workspaces.ts";
 import { listSkills } from "./skills.ts";
 import { expandCommand } from "./commands.ts";
 import { describeTool } from "./tools.ts";
+import { inside } from "./files.ts";
 import { providers } from "./providers/index.ts";
 import { receiveAgentEvent } from "./providers/events.ts";
 import { beginCheckpoint, finishCheckpoint, checkpointBusy, historyPrompt } from "./checkpoints.ts";
@@ -33,6 +35,7 @@ import type {
   Attachment,
   QueuedMessage,
   ProviderInfo,
+  ImageFile,
 } from "../shared/protocol.ts";
 
 const MAX_OUTPUT = 24_000;
@@ -42,6 +45,19 @@ const COMMAND = /^\/[\w.:-]+(?:\s|$)/;
 function clip(text: string): string {
   if (text.length <= MAX_OUTPUT) return text;
   return `${text.slice(0, MAX_OUTPUT)}\n… ${text.length - MAX_OUTPUT} more characters`;
+}
+
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|avif|svg|bmp|ico)$/i;
+
+function imageFilesFor(raw: unknown, cwd: string): ImageFile[] | undefined {
+  const input = (raw ?? {}) as Record<string, unknown>;
+  for (const key of ["file_path", "filePath", "path", "notebook_path"]) {
+    const value = input[key];
+    if (typeof value !== "string" || !IMAGE_FILE.test(value)) continue;
+    const path = inside(cwd, value);
+    if (path) return [{ path, label: basename(value) }];
+  }
+  return undefined;
 }
 
 interface PartRef {
@@ -75,6 +91,7 @@ export class ThreadRuntime {
   #enqueuing: Promise<void> | undefined;
   #stopGeneration = 0;
   #resume = false;
+  #buildPlan = false;
   #compactionTimer: NodeJS.Timeout | undefined;
   #stopping: { promise: Promise<void>; ended: () => void; release: () => void } | null = null;
 
@@ -601,6 +618,7 @@ export class ThreadRuntime {
           detail: described.detail,
           input: event.input,
           status: "running",
+          imageFiles: imageFilesFor(event.input, this.#cwd),
           startedAt: Date.now(),
         };
         this.#tools.set(event.callId, this.#add(part));
@@ -613,14 +631,18 @@ export class ThreadRuntime {
         const thread = store.threads.get(this.#thread.id);
         const message = thread?.messages.find((m) => m.id === ref.messageId);
         const part = message?.parts.find((p) => p.id === ref.partId) as ToolPart | undefined;
-        if (part && ["Bash", "Shell", "Monitor"].includes(part.name)) this.#trackShell(event.callId, event.input);
-        const described = describeTool(part?.name ?? "tool", event.input, this.#cwd);
+        const name = event.name ?? part?.name;
+        if (name && ["Bash", "Shell", "Monitor"].includes(name)) this.#trackShell(event.callId, event.input);
+        const described = describeTool(name ?? "tool", event.input, this.#cwd);
+        const imageFiles = imageFilesFor(event.input, this.#cwd);
         store.patchPart(this.#thread.id, ref.messageId, ref.partId, {
+          ...(event.name ? { name: event.name } : {}),
           input: event.input,
           shape: described.shape,
           headline: described.headline,
           detail: described.detail,
-          patch: previewPatch(part?.name ?? "", event.input),
+          patch: previewPatch(name ?? "", event.input),
+          ...(imageFiles ? { imageFiles } : {}),
         });
         return;
       }
@@ -635,6 +657,14 @@ export class ThreadRuntime {
             output: clip(event.output),
             endedAt: Date.now(),
           });
+          if (event.images?.length) {
+            void saveToolImages(this.#thread.id, event.images).then((images) => {
+              if (!images.length) return;
+              try {
+                store.patchPart(this.#thread.id, ref.messageId, ref.partId, { images });
+              } catch {}
+            }).catch(() => {});
+          }
           this.#tools.delete(event.callId);
         }
         if (this.#running.size === 0 && this.#thread.status === "working") {
@@ -657,6 +687,9 @@ export class ThreadRuntime {
         store.setUsage(this.#thread.id, { ...this.#thread.usage, ...event.usage });
         return;
       }
+      case "plan.accepted":
+        this.#buildPlan = true;
+        return;
       case "turn.end": {
         if (!this.#thread.running && !this.#stopping) return;
         cancelQuestions(this.#thread.id);
@@ -669,9 +702,22 @@ export class ThreadRuntime {
           ...this.#thread.usage,
           turns: this.#thread.usage.turns + 1,
         });
+        const messageId = this.#messageId ?? undefined;
         this.#messageId = null;
         this.#finishParts();
+        const build = this.#buildPlan && completed && !event.error;
+        this.#buildPlan = false;
+        if (build) {
+          this.#sessionGeneration += 1;
+          this.#session?.dispose();
+          this.#session = null;
+          disconnectTools(this.id);
+        }
         store.patchThread(this.#thread.id, {
+          ...(build ? {
+            permissionMode: "manual" as const,
+            queue: [{ id: uid("que"), text: "Build the plan.", createdAt: Date.now() }, ...(this.#thread.queue ?? [])],
+          } : {}),
           status: stopped ? "stopped" : event.error ? "error" : "idle",
           running: false,
           compacting: false,
@@ -695,7 +741,7 @@ export class ThreadRuntime {
             },
           });
         this.#resume = completed && !event.error;
-        this.#checkpointCompletion = finishCheckpoint(this.#thread).catch(() => {}).finally(() => {
+        this.#checkpointCompletion = finishCheckpoint(this.#thread, messageId).catch(() => {}).finally(() => {
           this.#checkpointCompletion = null;
           this.#pump();
         });

@@ -78,4 +78,18 @@ test("file restore refuses an active agent sharing the workspace", async () => {
   store.patchThread(other.id, { running: false });
 });
 
+test("a finished turn lists the image files it created", async () => {
+  await beginCheckpoint(thread, "message2");
+  store.addMessage(thread.id, { id: "message2", role: "user", parts: [{ id: "prompt2", kind: "text", text: "Draw a chart" }], ts: Date.now() });
+  store.addMessage(thread.id, { id: "assistant2", role: "assistant", parts: [], ts: Date.now() });
+  await writeFile(join(cwd, "chart.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  await writeFile(join(cwd, "logo.svg"), '<svg xmlns="http://www.w3.org/2000/svg"/>');
+  await writeFile(join(cwd, "notes.txt"), "Not an image");
+  await finishCheckpoint(thread, "assistant2");
+  const part = thread.messages.find(message => message.id === "assistant2")?.parts.at(-1);
+  assert.equal(part?.kind, "images");
+  assert.deepEqual(part.files.map(file => file.path).sort(), ["chart.png", "logo.svg"]);
+  assert.ok(part.files.every(file => file.label && !file.label.includes("/")));
+});
+
 test.after(async () => { store.flush(); eventJournal.close(); await rm(root, { recursive: true, force: true }); });

@@ -94,6 +94,14 @@ async function limits(provider: ProviderId): Promise<ProviderUsage> {
           error:
             "OpenCode does not expose a combined remaining allowance. Check the connected model service.",
         };
+      if (provider === "cursor")
+        return {
+          provider,
+          windows: [],
+          updatedAt: Date.now(),
+          error:
+            "Cursor does not report a subscription allowance through its CLI. Check your Cursor account for usage.",
+        };
       return parseProviderLimits(
         provider,
         await providerControl(

@@ -21,6 +21,16 @@ import type { ProviderId } from "../../shared/protocol.ts";
 import type { GlobalInstructions } from "../../shared/provider-settings.ts";
 
 const MAX_BYTES = 64 * 1024;
+const CURSOR_FRONTMATTER =
+  "---\ndescription: Citropy global instructions\nalwaysApply: true\n---\n";
+
+function cursorBody(content: string): string {
+  return content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "");
+}
+
+function cursorFile(content: string): string {
+  return `${CURSOR_FRONTMATTER}${content}`;
+}
 
 export function globalInstructionLocation(
   provider: ProviderId,
@@ -47,6 +57,10 @@ export function globalInstructionLocation(
     );
     note =
       "OpenCode uses this file for global rules. Creating it replaces the Claude Code fallback, if your OpenCode version uses that fallback.";
+  } else if (provider === "cursor") {
+    path = join(homedir(), ".cursor", "rules", "citropy.mdc");
+    note =
+      "Cursor applies machine-local user rules from this folder to every project under your home directory. Citropy manages the frontmatter that makes this rule always apply.";
   } else {
     throw new Error("Unknown provider.");
   }
@@ -57,7 +71,7 @@ export function readGlobalInstructions(
   provider: ProviderId,
 ): GlobalInstructions {
   const { path, note } = globalInstructionLocation(provider);
-  let content = "";
+  let raw = "";
   let exists = false;
   let target = path;
   try {
@@ -71,7 +85,7 @@ export function readGlobalInstructions(
         throw new Error(
           "This instruction file is larger than 64 KB. Edit it in your file editor.",
         );
-      content = readFileSync(file, "utf8");
+      raw = readFileSync(file, "utf8");
       exists = true;
     } finally {
       closeSync(file);
@@ -84,8 +98,9 @@ export function readGlobalInstructions(
       );
   }
   const revision = createHash("sha256")
-    .update(JSON.stringify([path, target, exists, content]))
+    .update(JSON.stringify([path, target, exists, raw]))
     .digest("hex");
+  const content = provider === "cursor" ? cursorBody(raw) : raw;
   return { provider, path, exists, content, revision, note };
 }
 
@@ -96,8 +111,9 @@ export function saveGlobalInstructions(
 ): GlobalInstructions {
   if (
     typeof content !== "string" ||
-    Buffer.byteLength(content, "utf8") > MAX_BYTES ||
-    content.includes("\0")
+    content.includes("\0") ||
+    Buffer.byteLength(provider === "cursor" ? cursorFile(content) : content, "utf8") >
+      MAX_BYTES
   )
     throw new Error("Instructions must be text smaller than 64 KB.");
   const current = readGlobalInstructions(provider);
@@ -114,7 +130,7 @@ export function saveGlobalInstructions(
   );
   const backup = `${temporary}-backup`;
   try {
-    writeFileSync(temporary, content, {
+    writeFileSync(temporary, provider === "cursor" ? cursorFile(content) : content, {
       flag: "wx",
       mode: current.exists ? statSync(target).mode & 0o777 : 0o600,
     });

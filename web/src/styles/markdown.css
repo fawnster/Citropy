@@ -9,14 +9,14 @@
 .link-site-icon {
   display: inline-block;
   position: relative;
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
   margin-inline-end: 5px;
-  vertical-align: -2px;
+  vertical-align: -3px;
   color: var(--text-3);
 }
 .link-site-icon > svg,
-.link-site-icon > img { position: absolute; inset: 0; width: 14px; height: 14px; }
+.link-site-icon > img { position: absolute; inset: 0; width: 16px; height: 16px; }
 .link-site-icon > img { opacity: 0; object-fit: contain; }
 .link-site-icon[data-loaded] > svg { visibility: hidden; }
 .link-site-icon[data-loaded] > img { opacity: 1; }

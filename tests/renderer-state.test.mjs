@@ -153,3 +153,13 @@ test("concurrent Markdown rendering keeps each requested theme", async () => {
   assert.match(dark, /citropy-dark/);
   assert.match(light, /citropy-light/);
 });
+
+test("Markdown images resolve workspace paths and leave remote sources alone", async () => {
+  const { renderMarkdown } = await import("../web/src/lib/markdown.ts");
+  const assets = { projectId: "project", threadId: "thr_chat" };
+  const html = await renderMarkdown("![chart](charts/out.png)\n\n![remote](https://example.test/a.png)", "dark", undefined, assets);
+  assert.match(html, /<img src="\/api\/assets\?projectId=project&amp;threadId=thr_chat&amp;path=charts%2Fout\.png" alt="chart"/);
+  assert.match(html, /<img src="https:\/\/example\.test\/a\.png" alt="remote"/);
+  const bare = await renderMarkdown("![chart](charts/out.png)", "dark");
+  assert.match(bare, /<img src="charts\/out\.png" alt="chart"/);
+});
