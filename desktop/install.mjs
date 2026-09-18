@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, chmodSync, existsSync, readFileSync, unlinkSync } from "node:fs";
+import { mkdirSync, writeFileSync, chmodSync, existsSync, readFileSync, unlinkSync, copyFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,17 +8,18 @@ if (process.platform !== "linux")
     "Use npm run desktop on this platform. The application-menu installer currently supports Linux.",
   );
 const root = fileURLToPath(new URL("..", import.meta.url));
-const directory = join(
-  process.env.XDG_DATA_HOME ?? join(homedir(), ".local/share"),
-  "applications",
-);
+const data = process.env.XDG_DATA_HOME ?? join(homedir(), ".local/share");
+const directory = join(data, "applications");
+const icons = join(data, "icons/hicolor/512x512/apps");
 mkdirSync(directory, { recursive: true });
+mkdirSync(icons, { recursive: true });
 const quote = (value) =>
   `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("`", "\\`").replaceAll("$", "\\$").replaceAll("%", "%%")}"`;
 const development = process.argv.includes("--dev");
 const name = development ? "Citropy Dev" : "Citropy";
 const mode = development ? " --dev" : "";
-const icon = join(root, "desktop/assets", development ? "citropy-dev.png" : "citropy.png");
+const icon = development ? "citropy-dev" : "citropy";
+copyFileSync(join(root, "desktop/assets", `${icon}.png`), join(icons, `${icon}.png`));
 const path = join(directory, development ? "citropy-dev.desktop" : "citropy.desktop");
 writeFileSync(
   path,
