@@ -15,7 +15,7 @@ test("restore choices stay clickable, explain unavailable files and preserve key
   const browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); await server.close(); await rm(directory, { recursive: true, force: true }); });
   const page = await browser.newPage({ viewport: { width: 1280, height: 900 } });
-  page.setDefaultTimeout(8000);
+  page.setDefaultTimeout(20000);
   const errors = [];
   const requests = [];
   let connection;

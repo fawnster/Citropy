@@ -1,4 +1,5 @@
 import { GitCommitHorizontal, Server } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { environmentName, isRemote } from "../lib/environment.ts";
 import { useI18n } from "../lib/i18n.ts";
 import { GitBranch, PanelLeft, PanelRight } from "./icons.ts";
@@ -9,6 +10,7 @@ import { WindowControls } from "./WindowControls.tsx";
 import { GitActions } from "./GitActions.tsx";
 import { RunningShells } from "./RunningShells.tsx";
 import { WorkspaceSelector } from "./WorkspaceSelector.tsx";
+import { ChannelBadge } from "./ChannelBadge.tsx";
 import type { NotificationTarget } from "../../../shared/protocol.ts";
 
 export function Titlebar({
@@ -46,9 +48,25 @@ export function Titlebar({
   const inspectorOpen = useApp((state) => state.inspectorOpen);
 
   const project = projects.find((entry) => entry.id === activeProjectId);
+  const header = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = header.current;
+    const report = window.citropyDesktop?.titlebarHeight;
+    if (!element || !report) return;
+    let last = 0;
+    const observer = new ResizeObserver(() => {
+      const height = element.getBoundingClientRect().height;
+      if (height > 0 && height !== last) {
+        last = height;
+        report(height);
+      }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   return (
-    <header className="topbar" data-desktop={Boolean(window.citropyDesktop)}>
+    <header ref={header} className="topbar" data-desktop={Boolean(window.citropyDesktop)}>
       <div className="topbar-left">
         <div className="brand">
           <img
@@ -60,6 +78,7 @@ export function Titlebar({
             aria-hidden="true"
           />
           <span>Citropy</span>
+          <ChannelBadge />
         </div>
         <div className="topbar-navigation">
           <NotificationCenter onOpen={onNotification} />

@@ -17,6 +17,8 @@ files:
   - '!desktop/install.mjs'
   - '!desktop/start.mjs'
   - '!desktop/smoke.mjs'
+  - '!desktop/smoke-mac.mjs'
+  - '!desktop/smoke-win.mjs'
 linux:
   target: AppImage
   category: Development
@@ -24,6 +26,30 @@ linux:
   executableName: citropy
   syncDesktopName: true
   artifactName: Citropy-${version}-${arch}.AppImage
+mac:
+  target:
+    - target: zip
+      arch:
+        - arm64
+        - x64
+  category: public.app-category.developer-tools
+  icon: desktop/assets/citropy.png
+  identity: '-'
+  hardenedRuntime: false
+  artifactName: Citropy-${version}-${arch}.zip
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: desktop/assets/citropy.png
+  artifactName: Citropy-${version}-${arch}-Setup.exe
+nsis:
+  oneClick: true
+  perMachine: false
+  createDesktopShortcut: false
+  runAfterFinish: false
+  deleteAppDataOnUninstall: false
 publish:
   provider: github
   owner: tinuxongit

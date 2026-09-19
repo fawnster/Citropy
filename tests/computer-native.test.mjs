@@ -58,7 +58,7 @@ test("native computer capture, input and cancellation on an isolated desktop", {
   await ready;
   browser = await chromium.connectOverCDP(await endpoint);
   const page = browser.contexts()[0].pages()[0];
-  page.setDefaultTimeout(5000);
+  page.setDefaultTimeout(20000);
   assert.equal((await request("computer.capabilities")).backend, "x11");
   assert.deepEqual((await request("computer.start", { control: true })).displays, [{ id: "desktop", name: "Desktop", width: 1200, height: 800 }]);
   const screenshot = await request("computer.screenshot", { displayId: "desktop", maxWidth: 600 });

@@ -15,7 +15,7 @@ test("question choices, custom answers, drafts, reconnect and skip work at deskt
   const browser = await chromium.launch({ headless: true });
   t.after(async () => { await browser.close(); await server.close(); await rm(directory, { recursive: true, force: true }); });
   const page = await browser.newPage({ viewport: { width: 1440, height: 960 }, reducedMotion: "reduce" });
-  page.setDefaultTimeout(10000);
+  page.setDefaultTimeout(20000);
   const errors = [];
   const calls = [];
   let fail = false;

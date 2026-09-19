@@ -4,6 +4,7 @@ export function createAppUpdater({
   updater,
   version,
   unavailable,
+  external,
   emit,
   prepareInstall,
   recoverInstall = async () => {},
@@ -54,7 +55,7 @@ export function createAppUpdater({
     updater.on(name, handler);
     listeners.push([name, handler]);
   };
-  if (!unavailable) {
+  if (!unavailable && !external) {
     updater.autoDownload = false;
     updater.autoInstallOnAppQuit = false;
     updater.allowDowngrade = false;
@@ -147,16 +148,41 @@ export function createAppUpdater({
     });
     void (async () => {
       try {
-        if (action === "check") {
+        if (action === "check" && external) {
+          const next = await external.check();
+          if (!valid(next) || !gt(next, version)) {
+            publish({
+              status: "current",
+              version: undefined,
+              checkedAt: Date.now(),
+              message: undefined,
+            });
+          } else {
+            publish({
+              status: "available",
+              version: next,
+              checkedAt: Date.now(),
+              percent: undefined,
+              message: `The installer will download Citropy ${next} and reopen the app.`,
+            });
+          }
+        } else if (action === "check") {
           const result = await updater.checkForUpdates();
           if (!result) throw new Error("No release feed is available");
+        } else if (action === "download" && external) {
+          publish({
+            status: "ready",
+            percent: 100,
+            message: "Click again to quit Citropy and apply the update. It reopens automatically when the installer finishes.",
+          });
         } else if (action === "download") {
           await updater.downloadUpdate();
           if (state.status === "downloading")
             throw new Error("The download did not pass verification");
         } else {
           await prepareInstall();
-          updater.quitAndInstall(false, true);
+          if (external) await external.install();
+          else updater.quitAndInstall(false, true);
         }
       } catch (error) {
         await fail(error, action);

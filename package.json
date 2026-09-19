@@ -19,12 +19,15 @@
     "serve": "node --experimental-strip-types server/main.ts",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --test --test-concurrency=2 tests/*.test.mjs",
+    "test:ci": "node --experimental-strip-types --test --test-concurrency=1 tests/*.test.mjs",
     "desktop": "npm run build && node desktop/start.mjs",
     "setup:desktop": "node node_modules/electron/install.js",
     "desktop:dev": "node desktop/start.mjs --dev",
     "desktop:install": "node desktop/install.mjs",
     "desktop:package": "node desktop/package.mjs",
     "desktop:smoke": "node desktop/smoke.mjs",
+    "desktop:smoke:mac": "node desktop/smoke-mac.mjs",
+    "desktop:smoke:win": "node desktop/smoke-win.mjs",
     "screenshots": "node tests/screenshots.mjs"
   },
   "dependencies": {

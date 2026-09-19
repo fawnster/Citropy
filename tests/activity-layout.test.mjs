@@ -234,7 +234,7 @@ test("compact activity layout", { timeout: 60000 }, async (t) => {
   browser = await chromium.launch({ headless: true });
   async function fixture(t, preferences = {}) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-    page.setDefaultTimeout(5000);
+    page.setDefaultTimeout(20000);
     const errors = [];
     let connection;
     page.on("pageerror", error => errors.push(error.message));

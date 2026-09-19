@@ -41,16 +41,36 @@ await writeFile(
   join(staging, "package.json"),
   `${JSON.stringify(manifest, null, 2)}\n`,
 );
+const npm = process.env.npm_execpath;
+if (!npm && process.platform === "win32")
+  throw new Error("Run desktop packaging through npm run so that npm's CLI path is available.");
 await run(
-  process.platform === "win32" ? "npm.cmd" : "npm",
-  ["ci", "--omit=dev", "--no-audit", "--no-fund"],
+  npm ? process.execPath : "npm",
+  [...(npm ? [npm] : []), "ci", "--omit=dev", "--no-audit", "--no-fund"],
   staging,
 );
+const platform =
+  ["--linux", "--mac", "--win"].find((flag) =>
+    process.argv.includes(flag),
+  ) ?? "--linux";
+const channelArgs =
+  process.env.CITROPY_CHANNEL === "lemon"
+    ? [
+        "-c.productName=Citropy Lemon",
+        "-c.appId=com.citropy.desktop.lemon",
+        "-c.extraMetadata.name=citropy-lemon",
+        "-c.linux.executableName=citropy-lemon",
+        "-c.linux.artifactName=Citropy-lemon-${arch}.AppImage",
+        "-c.mac.artifactName=Citropy-lemon-${arch}.zip",
+        "-c.win.artifactName=Citropy-lemon-${arch}-Setup.exe",
+      ]
+    : [];
 await run(process.execPath, [
   join(root, "node_modules/electron-builder/cli.js"),
   "--config",
   "desktop/electron-builder.yml",
-  "--linux",
+  platform,
+  ...channelArgs,
   ...(process.argv.includes("--dir") ? ["--dir"] : []),
   "--publish",
   "never",

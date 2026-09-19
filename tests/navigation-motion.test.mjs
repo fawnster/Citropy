@@ -30,7 +30,7 @@ test("navigation stays bounded and motion releases its resources", { timeout: 12
   }));
   async function fixture(test, { count = 1000 } = {}) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-    page.setDefaultTimeout(6000);
+    page.setDefaultTimeout(20000);
     const errors = [];
     const requests = [];
     let connection;

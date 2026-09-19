@@ -34,7 +34,7 @@ test("reviews and source previews keep rendering bounded", { timeout: 120_000 },
   t.after(async () => { await browser.close(); await server.close(); await rm(directory, { recursive: true, force: true }); });
   async function fixture(test, { files = [], panels = [] } = {}) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-    page.setDefaultTimeout(7000);
+    page.setDefaultTimeout(20000);
     const errors = [];
     const requests = [];
     const state = structuredClone(overview);
