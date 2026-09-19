@@ -714,7 +714,7 @@
   color: white;
 }
 :root[data-platform="darwin"] .topbar-left {
-  padding-left: 82px;
+  padding-left: calc(76px / var(--ui-scale) + 6px);
 }
 :root[data-platform="darwin"] .brand > span:not(.channel-badge) {
   display: none;
