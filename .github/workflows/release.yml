@@ -163,6 +163,7 @@ jobs:
           }
       - run: |
           if (-not (Test-Path release/latest.yml)) { throw "latest.yml is missing." }
+          if (-not (Get-ChildItem release/*.exe.blockmap)) { throw "The installer blockmap is missing." }
         shell: pwsh
       - uses: actions/upload-artifact@v7
         with:

@@ -129,18 +129,38 @@ jobs:
           try {
             $env:CITROPY_VERSION = $version
             $env:CITROPY_BASE_URL = "http://127.0.0.1:8794"
+            $env:CITROPY_RELAUNCH = "1"
             ./scripts/install.ps1
             if (-not (Test-Path $installed)) { throw "PowerShell 7 install failed: $installed is missing." }
+            Start-Sleep -Seconds 5
+            if (-not (Get-Process -Name Citropy -ErrorAction SilentlyContinue)) { throw "CITROPY_RELAUNCH did not start Citropy." }
+            Get-Process -Name Citropy -ErrorAction SilentlyContinue | Stop-Process -Force
+            Remove-Item Env:\CITROPY_RELAUNCH
             ./scripts/install.ps1 -Uninstall
             if (Test-Path $installDir) { throw "The uninstaller left $installDir behind." }
             powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1
             if (-not (Test-Path $installed)) { throw "PowerShell 5.1 install failed." }
-            $output = powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((Get-Content -Raw scripts/install.ps1))); Write-Output CITROPY_SESSION_ALIVE" 2>&1 | Out-String
+            powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Uninstall
+            if (Test-Path $installDir) { throw "The PowerShell 5.1 uninstall left $installDir behind." }
+            $output = powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Expression (Get-Content -Raw scripts/install.ps1); Write-Output CITROPY_SESSION_ALIVE; if (Get-Variable -Name Channel -ErrorAction SilentlyContinue) { Write-Output CITROPY_LEAKED_CHANNEL }; if (Get-Command Invoke-CitropyInstall -ErrorAction SilentlyContinue) { Write-Output CITROPY_LEAKED_FUNCTION }" 2>&1 | Out-String
             if ($output -notmatch "CITROPY_SESSION_ALIVE") { throw "The installer ended the calling session instead of returning." }
+            if ($output -match "CITROPY_LEAKED_CHANNEL") { throw "The installer leaked its Channel variable into the calling session." }
+            if ($output -match "CITROPY_LEAKED_FUNCTION") { throw "The installer leaked its function into the calling session." }
+            if (-not (Test-Path $installed)) { throw "The invoker-scope install failed: $installed is missing." }
+            powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Channel nope 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) { throw "The installer accepted an unknown channel." }
+            powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Version 99.99.99 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) { throw "The installer accepted a missing release." }
           }
           finally {
+            Get-Process -Name Citropy -ErrorAction SilentlyContinue | Stop-Process -Force
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           }
+      - name: Check the update metadata
+        shell: pwsh
+        run: |
+          if (-not (Test-Path release/latest.yml)) { throw "latest.yml is missing." }
+          if (-not (Get-ChildItem release/*.exe.blockmap)) { throw "The installer blockmap is missing." }
       - uses: actions/upload-artifact@v7
         if: always()
         with:

@@ -27,90 +27,92 @@ function Invoke-CitropyInstall {
   function Say([string]$Message) { Write-Host $Message }
   function Fail([string]$Message) { throw "Citropy install: $Message" }
 
-  if (-not $Channel) { $Channel = "stable" }
-  if ($Channel -ne "stable" -and $Channel -ne "lemon") { Fail "Unknown channel: $Channel. Use stable or lemon." }
-  if ($Channel -eq "lemon" -and $Version) { Fail "The Lemon channel always installs the newest build, so -Version does not apply." }
+  $temp = $null
+  $exe = $null
+  try {
+    if (-not $Channel) { $Channel = "stable" }
+    if ($Channel -ne "stable" -and $Channel -ne "lemon") { Fail "Unknown channel: $Channel. Use stable or lemon." }
+    if ($Channel -eq "lemon" -and $Version) { Fail "The Lemon channel always installs the newest build, so -Version does not apply." }
 
-  $architecture = $env:PROCESSOR_ARCHITEW6432
-  if (-not $architecture) { $architecture = $env:PROCESSOR_ARCHITECTURE }
-  if ($architecture -eq "AMD64") {
-    $arch = "x64"
-  }
-  elseif ($architecture -eq "ARM64") {
-    $arch = "x64"
-    Say "No native ARM64 build yet; installing the x64 build, which needs Windows 11 on ARM."
-  }
-  else {
-    Fail "Unsupported processor: $architecture"
-  }
-
-  if ($Channel -eq "lemon") {
-    $name = "Citropy Lemon"
-    $folder = "citropy-lemon"
-    $stateHint = "$env:USERPROFILE\.citropy-lemon"
-  }
-  else {
-    $name = "Citropy"
-    $folder = "citropy"
-    $stateHint = "$env:USERPROFILE\.citropy"
-  }
-  $installDir = Join-Path $env:LOCALAPPDATA "Programs\$folder"
-  $exe = Join-Path $installDir "$name.exe"
-  $uninstaller = Join-Path $installDir "Uninstall $name.exe"
-
-  if ($Uninstall) {
-    if (Test-Path $uninstaller) {
-      $process = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
-      for ($attempt = 0; $attempt -lt 60 -and (Test-Path $installDir); $attempt++) { Start-Sleep -Milliseconds 500 }
-      if (Test-Path $installDir) { Fail "The uninstaller did not remove $installDir." }
-      if ($process.ExitCode -ne 0) { Say "The uninstaller exited with code $($process.ExitCode), but $installDir is gone." }
-      Say "Removed $name"
+    $architecture = $env:PROCESSOR_ARCHITEW6432
+    if (-not $architecture) { $architecture = $env:PROCESSOR_ARCHITECTURE }
+    if ($architecture -eq "AMD64") {
+      $arch = "x64"
+    }
+    elseif ($architecture -eq "ARM64") {
+      $arch = "x64"
+      Say "No native ARM64 build yet; installing the x64 build, which needs Windows 11 on ARM."
     }
     else {
-      Say "$name is not installed in $installDir."
+      Fail "Unsupported processor: $architecture"
     }
-    Say "Your conversations and settings stay in $stateHint and the $name profile."
-    return
-  }
 
-  if (-not $BaseUrl) { $BaseUrl = "$github/releases/download" }
-  if ($BaseUrl -match "@") { Fail "Refusing to download from an address with embedded credentials." }
-  if ($BaseUrl -match "^http://" -and $BaseUrl -notmatch "^http://(127\.0\.0\.1|localhost)(:\d+)?(/|$)") {
-    Fail "Refusing to download over plain HTTP from a remote host."
-  }
+    if ($Channel -eq "lemon") {
+      $name = "Citropy Lemon"
+      $folder = "citropy-lemon"
+      $stateHint = "$env:USERPROFILE\.citropy-lemon"
+    }
+    else {
+      $name = "Citropy"
+      $folder = "citropy"
+      $stateHint = "$env:USERPROFILE\.citropy"
+    }
+    $installDir = Join-Path $env:LOCALAPPDATA "Programs\$folder"
+    $exe = Join-Path $installDir "$name.exe"
+    $uninstaller = Join-Path $installDir "Uninstall $name.exe"
 
-  if ($Channel -eq "lemon") {
-    $tag = "lemon"
-    $asset = "Citropy-lemon-$arch-Setup.exe"
-    $label = "Citropy Lemon"
-  }
-  else {
-    if (-not $Version) {
-      try {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ "User-Agent" = "Citropy" }
+    if ($Uninstall) {
+      if (Test-Path $uninstaller) {
+        $process = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
+        for ($attempt = 0; $attempt -lt 60 -and (Test-Path $installDir); $attempt++) { Start-Sleep -Milliseconds 500 }
+        if (Test-Path $installDir) { Fail "The uninstaller did not remove $installDir." }
+        if ($process.ExitCode -ne 0) { Say "The uninstaller exited with code $($process.ExitCode), but $installDir is gone." }
+        Say "Removed $name"
       }
-      catch {
-        Fail "Could not read the latest release from GitHub. Pass -Version or set CITROPY_VERSION. ($($_.Exception.Message))"
+      else {
+        Say "$name is not installed in $installDir."
       }
-      $Version = $release.tag_name -replace "^v", ""
+      Say "Your conversations and settings stay in $stateHint and the $name profile."
+      return
     }
-    if ($Version -notmatch "^\d+\.\d+\.\d+$") { Fail "Version $Version does not look like a release. Use a version like 0.2.0." }
-    $tag = "v$Version"
-    $asset = "Citropy-$Version-$arch-Setup.exe"
-    $label = "Citropy $Version"
-  }
 
-  $waitFor = $env:CITROPY_PARENT_PID
-  if ($waitFor) {
-    for ($attempt = 0; $attempt -lt 60; $attempt++) {
-      if (-not (Get-Process -Id ([int]$waitFor) -ErrorAction SilentlyContinue)) { break }
-      Start-Sleep -Seconds 1
+    if (-not $BaseUrl) { $BaseUrl = "$github/releases/download" }
+    if ($BaseUrl -match "@") { Fail "Refusing to download from an address with embedded credentials." }
+    if ($BaseUrl -match "^http://" -and $BaseUrl -notmatch "^http://(127\.0\.0\.1|localhost)(:\d+)?(/|$)") {
+      Fail "Refusing to download over plain HTTP from a remote host."
     }
-  }
 
-  $temp = Join-Path ([System.IO.Path]::GetTempPath()) ("citropy-install-" + ([guid]::NewGuid().ToString("N")))
-  New-Item -ItemType Directory -Path $temp | Out-Null
-  try {
+    if ($Channel -eq "lemon") {
+      $tag = "lemon"
+      $asset = "Citropy-lemon-$arch-Setup.exe"
+      $label = "Citropy Lemon"
+    }
+    else {
+      if (-not $Version) {
+        try {
+          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ "User-Agent" = "Citropy" }
+        }
+        catch {
+          Fail "Could not read the latest release from GitHub. Pass -Version or set CITROPY_VERSION. ($($_.Exception.Message))"
+        }
+        $Version = $release.tag_name -replace "^v", ""
+      }
+      if ($Version -notmatch "^\d+\.\d+\.\d+$") { Fail "Version $Version does not look like a release. Use a version like 0.2.0." }
+      $tag = "v$Version"
+      $asset = "Citropy-$Version-$arch-Setup.exe"
+      $label = "Citropy $Version"
+    }
+
+    $waitFor = $env:CITROPY_PARENT_PID
+    if ($waitFor) {
+      for ($attempt = 0; $attempt -lt 60; $attempt++) {
+        if (-not (Get-Process -Id ([int]$waitFor) -ErrorAction SilentlyContinue)) { break }
+        Start-Sleep -Seconds 1
+      }
+    }
+
+    $temp = Join-Path ([System.IO.Path]::GetTempPath()) ("citropy-install-" + ([guid]::NewGuid().ToString("N")))
+    New-Item -ItemType Directory -Path $temp | Out-Null
     $setup = Join-Path $temp $asset
     Say "Downloading $label for windows ($arch)..."
     Invoke-WebRequest -Uri "$BaseUrl/$tag/$asset" -OutFile $setup -UseBasicParsing
@@ -141,9 +143,22 @@ function Invoke-CitropyInstall {
     Say "Installed $label at $installDir"
   }
   finally {
-    Remove-Item -Path $temp -Recurse -Force -ErrorAction SilentlyContinue
-    if ($env:CITROPY_RELAUNCH -eq "1" -and (Test-Path $exe)) { Start-Process -FilePath $exe }
+    if ($temp) { Remove-Item -Path $temp -Recurse -Force -ErrorAction SilentlyContinue }
+    if (-not $Uninstall -and $env:CITROPY_RELAUNCH -eq "1" -and $exe -and (Test-Path $exe)) { Start-Process -FilePath $exe }
   }
 }
 
-Invoke-CitropyInstall
+try {
+  Invoke-CitropyInstall
+}
+catch {
+  throw
+}
+finally {
+  $assigned = @{ Channel = $Channel; Version = $Version; BaseUrl = $BaseUrl; Uninstall = $Uninstall }
+  foreach ($name in $assigned.Keys) {
+    $current = Get-Variable -Name $name -ErrorAction SilentlyContinue
+    if ($current -and $current.Value -eq $assigned[$name]) { Remove-Variable -Name $name -ErrorAction SilentlyContinue }
+  }
+  Remove-Item -Path "Function:\Invoke-CitropyInstall" -ErrorAction SilentlyContinue
+}

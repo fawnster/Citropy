@@ -18,17 +18,25 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: '22.18.0'
           cache: npm
+      - name: Install desktop test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xdotool dbus-x11 python3-dbus python3-gi gir1.2-gst-plugins-base-1.0 gir1.2-gdkpixbuf-2.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good libxtst6 libfuse2 openssh-server
       - run: npm ci
+      - run: npx playwright install --with-deps chromium
       - run: npm run typecheck
       - run: npm run test:ci
-      - name: Check the installer script
+      - name: Check the installer scripts
         run: |
           sh -n scripts/install.sh
           shellcheck -s sh scripts/install.sh
+          pwsh -NoProfile -Command '$errors = $null; [System.Management.Automation.Language.Parser]::ParseFile("scripts/install.ps1", [ref]$null, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }'
 
   linux:
     needs: check
@@ -36,10 +44,16 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: '22.18.0'
           cache: npm
+      - name: Install desktop test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfuse2
       - run: npm ci
       - name: Set version
         run: |
@@ -74,6 +88,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: '22.18.0'
@@ -118,6 +134,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: '22.18.0'
@@ -125,7 +143,6 @@ jobs:
       - run: npm ci
       - name: Set version
         run: |
-          CURRENT=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
           NEXT=$(node -e "const v = JSON.parse(require('fs').readFileSync('package.json','utf8')).version.split('.').map(Number); v[2] += 1; console.log(v.join('.'))")
           npm version "$NEXT-lemon.${GITHUB_RUN_NUMBER}" --no-git-tag-version
         shell: bash
@@ -149,13 +166,18 @@ jobs:
           Set-Content -Path "$dir/version.json" -Value "{`"version`":`"$version`"}"
           $server = Start-Process python -ArgumentList "-m","http.server","8795","--directory","windist" -PassThru
           Start-Sleep -Seconds 2
-          $env:CITROPY_BASE_URL = "http://127.0.0.1:8795"
-          ./scripts/install.ps1 -Channel lemon
-          $installed = Join-Path $env:LOCALAPPDATA "Programs\citropy-lemon\Citropy Lemon.exe"
-          if (-not (Test-Path $installed)) { throw "The installer finished but $installed is missing." }
-          $stable = Join-Path $env:LOCALAPPDATA "Programs\citropy\Citropy.exe"
-          if (Test-Path $stable) { throw "Lemon installed into the stable folder." }
-          Stop-Process -Id $server.Id -Force
+          try {
+            $env:CITROPY_CHANNEL = "lemon"
+            $env:CITROPY_BASE_URL = "http://127.0.0.1:8795"
+            ./scripts/install.ps1
+            $installed = Join-Path $env:LOCALAPPDATA "Programs\citropy-lemon\Citropy Lemon.exe"
+            if (-not (Test-Path $installed)) { throw "The installer finished but $installed is missing." }
+            $stableFolder = Join-Path $env:LOCALAPPDATA "Programs\citropy"
+            if (Test-Path $stableFolder) { throw "Lemon installed into the stable folder." }
+          }
+          finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
       - uses: actions/upload-artifact@v7
         with:
           name: lemon-windows
@@ -170,6 +192,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
       - uses: actions/setup-node@v7
         with:
           node-version: '22.18.0'
@@ -180,7 +204,6 @@ jobs:
           merge-multiple: true
       - name: Write the version file
         run: |
-          CURRENT=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
           NEXT=$(node -e "const v = JSON.parse(require('fs').readFileSync('package.json','utf8')).version.split('.').map(Number); v[2] += 1; console.log(v.join('.'))")
           printf '{"version":"%s-lemon.%s"}\n' "$NEXT" "${GITHUB_RUN_NUMBER}" > dist/version.json
           cat dist/version.json
