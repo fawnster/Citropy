@@ -716,6 +716,9 @@
 :root[data-platform="darwin"] .topbar-left {
   padding-left: calc(76px / var(--ui-scale) + 6px);
 }
+:root[data-platform="darwin"] .shell[data-sidebar="false"] .topbar-left {
+  width: calc(76px / var(--ui-scale) + 186px);
+}
 :root[data-platform="darwin"] .brand > span:not(.channel-badge) {
   display: none;
 }
