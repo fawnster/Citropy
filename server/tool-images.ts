@@ -24,18 +24,23 @@ export function removeToolImages(threadId: string): void {
 export async function saveToolImages(
   threadId: string,
   images: Array<{ mime: string; data: string }>,
+  isAlive?: () => boolean,
 ): Promise<ToolImage[]> {
   const saved: ToolImage[] = [];
+  const dir = join(root, threadId);
   for (const image of images.slice(0, maxImages)) {
     const extension = types[image.mime?.toLowerCase()];
     if (!extension || typeof image.data !== "string") continue;
     const body = Buffer.from(image.data, "base64");
     if (!body.length || body.length > maxBytes) continue;
     const id = randomUUID();
-    const dir = join(root, threadId);
     await mkdir(dir, { recursive: true, mode: 0o700 });
     await writeFile(join(dir, `${id}.${extension}`), body, { mode: 0o600 });
     saved.push({ id, mime: image.mime.toLowerCase() });
+  }
+  if (saved.length && isAlive && !isAlive()) {
+    rmSync(dir, { recursive: true, force: true });
+    return [];
   }
   return saved;
 }

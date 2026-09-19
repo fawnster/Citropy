@@ -170,6 +170,14 @@ const app = acp.agent({ name: "fake-cursor" })
       sessionId,
       update: { sessionUpdate: "tool_call", toolCallId: "plan-tool", title: "Create Plan", kind: "other", status: "pending", rawInput: { _toolName: "createPlan" } },
     });
+    await context.client.notify(acp.methods.client.session.update, {
+      sessionId,
+      update: { sessionUpdate: "tool_call", toolCallId: "plan-late", title: "Create Plan", kind: "other", status: "pending", rawInput: {} },
+    });
+    await context.client.notify(acp.methods.client.session.update, {
+      sessionId,
+      update: { sessionUpdate: "tool_call_update", toolCallId: "plan-late", rawInput: { _toolName: "createPlan", plan: "Late plan" } },
+    });
     await notifications(context.client, undefined, [{ kind: "agent_message_chunk", text: "After tools." }]);
     await context.client.notify("cursor/update_todos", {
       toolCallId: "todo-1",

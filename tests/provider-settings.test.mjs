@@ -368,6 +368,10 @@ if (args.includes('--help')) {
       assert.equal(store.notifications.find(entry => entry.id === notification.id).read, true);
       notifyUpdateAvailable("Citropy", "invalid version", "Application");
       assert.equal(store.notifications.some(entry => entry.text.includes("invalid version")), false);
+      notifyUpdateAvailable("Cursor", "2026.09.15-d2fe57e", "Providers");
+      const cursor = store.notifications.find(entry => entry.dedupeKey === "update:Cursor:2026.09.15-d2fe57e");
+      assert.ok(cursor);
+      assert.deepEqual(cursor.target, { view: "settings", section: "Providers" });
       notifyUpdateAvailable("Citropy", "0.3.0", "Application");
       assert.equal(store.notifications.filter(entry => entry.target.section === "Application").length, 2);
     });

@@ -150,6 +150,7 @@ export class ThreadRuntime {
       if (store.disabledProviders.has(provider.id)) throw new Error("Enable this provider before transferring.");
       const previous = { provider: thread.provider, model: thread.model, externalId: thread.externalId, usage: { ...thread.usage }, at: Date.now() };
       this.#sessionGeneration += 1;
+      this.#buildPlan = false;
       this.#session?.dispose();
       this.#session = null;
       this.#pendingModel = undefined;
@@ -404,6 +405,7 @@ export class ThreadRuntime {
     clearTimeout(this.#compactionTimer);
     this.#stopGeneration += 1;
     this.#resume = false;
+    this.#buildPlan = false;
     stopChildren(this.#thread.id);
     cancelThread(this.#thread.id);
     cancelQuestions(this.#thread.id);
@@ -426,6 +428,7 @@ export class ThreadRuntime {
       if (this.#session === session) {
         this.#sessionGeneration += 1;
         this.#session = null;
+        this.#buildPlan = false;
         session.dispose();
         disconnectTools(this.id);
         this.#finishParts();
@@ -444,6 +447,7 @@ export class ThreadRuntime {
     this.#disposed = true;
     this.#stopping?.release();
     this.#sessionGeneration += 1;
+    this.#buildPlan = false;
     endThreadShells(this.id, "stopped");
     this.#finishParts();
     disconnectTools(this.#thread.id);
@@ -658,7 +662,7 @@ export class ThreadRuntime {
             endedAt: Date.now(),
           });
           if (event.images?.length) {
-            void saveToolImages(this.#thread.id, event.images).then((images) => {
+            void saveToolImages(this.#thread.id, event.images, () => store.threads.has(this.#thread.id)).then((images) => {
               if (!images.length) return;
               try {
                 store.patchPart(this.#thread.id, ref.messageId, ref.partId, { images });
@@ -757,6 +761,7 @@ export class ThreadRuntime {
         this.#stopping?.release();
         clearTimeout(this.#compactionTimer);
         this.#resume = false;
+        this.#buildPlan = false;
         if (this.#thread.running && this.#thread.status !== "stopped")
           store.notify({
             kind: "chat",

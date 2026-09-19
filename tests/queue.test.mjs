@@ -386,4 +386,22 @@ test("follow-ups wait in a visible queue and each provider can take one mid-run"
     building.options.emit({ type: "turn.end" });
     await settle();
   });
+
+  await t.test("a plan accepted before the provider exits is not built by a later turn", async () => {
+    const thread = store.createThread({ projectId: project.id, provider: "cursor", title: "Stale plan", permissionMode: "plan" });
+    const runtime = runtimeFor(thread.id);
+    await runtime.send("Plan a pizza file");
+    const planning = sessions.at(-1);
+    planning.options.emit({ type: "plan.accepted" });
+    planning.options.emit({ type: "exit", code: 0 });
+    await waitFor(() => store.threads.get(thread.id).running === false);
+    await runtime.send("Continue");
+    const next = await waitFor(() => sessions.at(-1) !== planning && sessions.at(-1));
+    assert.equal(next.options.permissionMode, "plan");
+    next.options.emit({ type: "turn.end" });
+    await settle();
+    assert.equal(store.threads.get(thread.id).permissionMode, "plan");
+    assert.deepEqual(userTexts(store.threads.get(thread.id)), ["Plan a pizza file", "Continue"]);
+    assert.equal(sessions.at(-1), next);
+  });
 });

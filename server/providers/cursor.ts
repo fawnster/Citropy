@@ -12,6 +12,10 @@ export function cursorCommands(cwd: string): ProviderCommand[] {
   return commandCatalogs.get(cwd)?.commands ?? [];
 }
 
+export function cursorCommandsPublished(cwd: string): boolean {
+  return commandCatalogs.has(cwd);
+}
+
 export const cursorConfig: AcpConfig = {
   label: "Cursor",
   binary: "cursor-agent",

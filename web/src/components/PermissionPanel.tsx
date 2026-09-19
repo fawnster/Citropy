@@ -72,7 +72,7 @@ function Body({ request }: { request: PermissionRequest }) {
 
   return (
     <pre className="ask-code">
-      <code>{JSON.stringify(request.input, null, 2).slice(0, 4000)}</code>
+      <code>{(JSON.stringify(request.input, null, 2) ?? "").slice(0, 4000)}</code>
     </pre>
   );
 }

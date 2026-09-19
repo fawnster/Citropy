@@ -679,7 +679,13 @@ export class AcpSession implements AgentSession {
     state.name = reading.name;
     state.input = reading.input;
     this.#tools.set(update.toolCallId, state);
-    if (state.hidden) return;
+    if (state.hidden) {
+      if (state.started && !state.ended) {
+        state.ended = true;
+        this.#options.emit({ type: "tool.end", callId: update.toolCallId, ok: true, output: "" });
+      }
+      return;
+    }
     if (!state.started) {
       state.started = true;
       this.#breakText();

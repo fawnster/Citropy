@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtemp, rm } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -59,4 +60,14 @@ test("tool images save, serve, reject unknown types, and clear with their conver
   const cleared = capture();
   await serveToolImage({ method: "GET" }, cleared.res, new URLSearchParams({ threadId: "thr_images", id: saved[0].id }));
   assert.equal(cleared.call.status, 404);
+});
+
+test("tool images saved for a removed conversation leave nothing behind", async (t) => {
+  t.after(async () => rm(root, { recursive: true, force: true }));
+  const saved = await saveToolImages("thr_gone", [{ mime: "image/png", data: png.toString("base64") }], () => false);
+  assert.deepEqual(saved, []);
+  assert.equal(existsSync(join(root, "data", "tool-images", "thr_gone")), false);
+  const kept = await saveToolImages("thr_alive", [{ mime: "image/png", data: png.toString("base64") }], () => true);
+  assert.equal(kept.length, 1);
+  assert.equal(existsSync(join(root, "data", "tool-images", "thr_alive", `${kept[0].id}.png`)), true);
 });

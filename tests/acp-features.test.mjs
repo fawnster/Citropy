@@ -24,6 +24,15 @@ test("the ACP provider drives a fake Cursor agent", { timeout: 120_000 }, async 
   const { pendingQuestions, answerQuestion } = await import("../server/questions.ts");
   const { store } = await import("../server/store.ts");
 
+  t.after(async () => {
+    process.env.PATH = originalPath;
+    delete process.env.FAKE_ACP_LOG;
+    delete process.env.CITROPY_DATA_DIR;
+    store.flush();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await rm(directory, { recursive: true, force: true });
+  });
+
   const waitFor = async (predicate, message, timeout = 20_000) => {
     const deadline = Date.now() + timeout;
     while (Date.now() < deadline) {
@@ -100,6 +109,9 @@ test("the ACP provider drives a fake Cursor agent", { timeout: 120_000 }, async 
   assert.deepEqual((await entries()).find((entry) => entry.method === "mcp-permission").outcome, { outcome: "selected", optionId: "allow-once" });
   assert.equal(events.find((event) => event.type === "tool.input" && event.callId === "mcp-1").name, "mcp__citropy__ask_user");
   assert.equal(events.some((event) => event.type === "tool.start" && event.callId === "plan-tool"), false);
+  assert.equal(events.some((event) => event.type === "tool.start" && event.callId === "plan-late"), true);
+  const latePlan = events.find((event) => event.type === "tool.end" && event.callId === "plan-late");
+  assert.equal(latePlan?.ok, true);
   const blockOf = (text) => events.find((event) => event.type === "block.delta" && event.text === text).blockId;
   assert.notEqual(blockOf("Before tools."), blockOf("After tools."));
   const toolStart = events.find((event) => event.type === "tool.start" && event.callId === "tool-1");
@@ -115,6 +127,11 @@ test("the ACP provider drives a fake Cursor agent", { timeout: 120_000 }, async 
   assert.equal(usage.usage.contextMax, 200000);
   assert.equal(usage.usage.costUsd, 0.02);
   assert.deepEqual(cursorCommands(directory).map((command) => [command.name, command.argumentHint]), [["simplify", "[path]"]]);
+  const { listCommands } = await import("../server/commands.ts");
+  const unpublished = join(directory, "fresh-workspace");
+  assert.deepEqual(await listCommands("cursor", unpublished), []);
+  cursorConfig.onCommands(unpublished, [{ name: "review", description: "Review my changes" }]);
+  assert.deepEqual((await listCommands("cursor", unpublished)).map((command) => command.name), ["review"]);
   assert.deepEqual((await entries()).find((entry) => entry.method === "cursor/ask_question").outcome, { outcome: "answered", answers: [{ questionId: "check", selectedOptionIds: ["fast"] }] });
   assert.deepEqual((await entries()).find((entry) => entry.method === "cursor/create_plan").outcome, { outcome: "accepted" });
   assert.deepEqual((await entries()).find((entry) => entry.method === "permission").outcome, { outcome: "selected", optionId: "allow-once" });
@@ -161,13 +178,4 @@ test("the ACP provider drives a fake Cursor agent", { timeout: 120_000 }, async 
   const cancelled = await waitFor(() => cancelEvents.find((event) => event.type === "turn.end"), "the cancelled turn to finish");
   assert.equal(cancelled.error, undefined);
   await waitFor(async () => (await entries()).some((entry) => entry.method === "session/cancel"), "the cancel notification");
-
-  t.after(async () => {
-    process.env.PATH = originalPath;
-    delete process.env.FAKE_ACP_LOG;
-    delete process.env.CITROPY_DATA_DIR;
-    store.flush();
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    await rm(directory, { recursive: true, force: true });
-  });
 });

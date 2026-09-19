@@ -9,7 +9,7 @@ export function ImageStrip({ ids }: { ids: string[] }) {
   const parts = useApp((state) => state.parts);
   const projectId = useApp((state) => state.activeProjectId);
   const threadId = useApp((state) => state.activeThreadId);
-  const [preview, setPreview] = useState<number | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
   const sources = useMemo(() => {
     const collected = new Map<string, { src: string; name: string }>();
     for (const id of ids) {
@@ -32,17 +32,17 @@ export function ImageStrip({ ids }: { ids: string[] }) {
     return [...collected.entries()].map(([key, value]) => ({ key, ...value }));
   }, [ids, parts, projectId, threadId]);
   if (!sources.length) return null;
-  const current = preview === null ? undefined : sources[preview];
+  const current = preview === null ? undefined : sources.find((source) => source.key === preview);
   return (
     <>
       <div className="image-strip">
-        {sources.map((source, index) => (
+        {sources.map((source) => (
           <button
             key={source.key}
             type="button"
             aria-label={`${t("Preview")} ${source.name}`}
             title={source.name}
-            onClick={() => setPreview(index)}
+            onClick={() => setPreview(source.key)}
           >
             <img src={source.src} alt={source.name} loading="lazy" decoding="async" />
           </button>
