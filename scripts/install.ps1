@@ -148,14 +148,17 @@ function Invoke-CitropyInstall {
   }
 }
 
+$scriptPath = $MyInvocation.MyCommand.Path
+
 try {
   Invoke-CitropyInstall
 }
 catch {
+  if ($scriptPath) { exit 1 }
   throw
 }
 finally {
-  $assigned = @{ Channel = $Channel; Version = $Version; BaseUrl = $BaseUrl; Uninstall = $Uninstall }
+  $assigned = @{ Channel = $Channel; Version = $Version; BaseUrl = $BaseUrl; Uninstall = $Uninstall; scriptPath = $scriptPath }
   foreach ($name in $assigned.Keys) {
     $current = Get-Variable -Name $name -ErrorAction SilentlyContinue
     if ($current -and $current.Value -eq $assigned[$name]) { Remove-Variable -Name $name -ErrorAction SilentlyContinue }
