@@ -37,7 +37,13 @@ app.setPath(
   migrateDesktopData(app.getPath("appData"), process.env.CITROPY_DESKTOP_DATA || (development || channel === "lemon" ? join(app.getPath("appData"), appName) : undefined)),
 );
 if (!app.requestSingleInstanceLock()) app.exit(0);
-process.on("SIGTERM", () => app.quit());
+let forcedExit = false;
+process.on("SIGTERM", () => {
+  forcedExit = true;
+  app.quit();
+  const timer = setTimeout(() => app.exit(0), 15000);
+  timer.unref();
+});
 app.on("second-instance", () => {
   if (window) {
     if (window.isMinimized()) window.restore();
@@ -88,13 +94,14 @@ app.on("before-quit", (event) => {
   event.preventDefault();
   quitting = true;
   folderChoice?.abort();
-  void stopComputer().then(() => environments?.dispose()).then(() => backend?.stop()).finally(() => {
+  void stopComputer().then(() => environments?.dispose()).then(() => backend?.stop()).catch(() => {}).finally(() => {
     updates?.dispose();
     for (const notification of notifications) notification.close();
     for (const tab of tabs.values())
       tab.view.webContents.close({ waitForBeforeUnload: false });
     socket?.close();
-    app.quit();
+    if (forcedExit) app.exit(0);
+    else app.quit();
   });
 });
 
@@ -1089,7 +1096,8 @@ app
   })
   .catch(async (error) => {
     process.stderr.write(`${error.message}\n`);
-    if (app.isPackaged) dialog.showErrorBox("Citropy could not open", error.message);
+    if (app.isPackaged && !quitting && !forcedExit) dialog.showErrorBox("Citropy could not open", error.message);
     await backend?.stop().catch(() => {});
-    app.quit();
+    if (forcedExit) app.exit(0);
+    else app.quit();
   });

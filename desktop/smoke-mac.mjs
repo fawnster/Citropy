@@ -83,7 +83,7 @@ try {
       exited,
       new Promise((resolve) => setTimeout(() => resolve(undefined), 45000)),
     ]);
-    assert.ok(result, "Citropy did not quit after SIGTERM.");
+    assert.ok(result, `Citropy did not quit after SIGTERM.${output ? `\n${output}` : ""}`);
     assert.equal(result.signal, null, `Citropy exited from ${result.signal} instead of quitting cleanly.`);
     assert.equal(result.code, 0);
     desktop = undefined;
