@@ -328,6 +328,32 @@ test("conversation persistence and lifecycle recovery", async (t) => {
     store.removeThread(other.id);
     assert.equal(find(), undefined);
   });
+  await t.test("tool results with images store the picture beside the conversation", async (subtest) => {
+    const previousSessions = sessions.length;
+    const entry = store.createThread({ projectId: project.id, provider: "claude", title: "Screenshots", permissionMode: "manual" });
+    subtest.after(() => { disposeRuntime(entry.id); store.removeThread(entry.id); sessions.splice(previousSessions); });
+    await runtimeFor(entry.id).send("Look at the screen");
+    const session = sessions.at(-1);
+    const emit = event => session.options.emit(event);
+    emit({ type: "tool.start", callId: "shot", name: "mcp__citropy__computer_screenshot", input: {} });
+    emit({ type: "tool.end", callId: "shot", ok: true, output: "Captured", images: [{ mime: "image/png", data: Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString("base64") }] });
+    const part = await waitFor(() => entry.messages.flatMap(message => message.parts).find(part => part.kind === "tool" && part.callId === "shot" && part.images?.length));
+    assert.equal(part.images.length, 1);
+    assert.equal(part.images[0].mime, "image/png");
+    assert.equal(fs.existsSync(join(directory, ".citropy", "tool-images", entry.id, `${part.images[0].id}.png`)), true);
+    assert.deepEqual(fs.readFileSync(join(directory, ".citropy", "tool-images", entry.id, `${part.images[0].id}.png`)), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const toolPart = callId => entry.messages.flatMap(message => message.parts).find(part => part.kind === "tool" && part.callId === callId);
+    emit({ type: "tool.start", callId: "read", name: "Read", input: { file_path: join(directory, "cat.jpg") } });
+    assert.deepEqual(toolPart("read").imageFiles, [{ path: join(directory, "cat.jpg"), label: "cat.jpg" }]);
+    assert.equal(toolPart("read").images, undefined);
+    emit({ type: "tool.end", callId: "read", ok: true, output: "" });
+    emit({ type: "tool.start", callId: "outside", name: "Read", input: { file_path: "/etc/passwd.png" } });
+    assert.equal(toolPart("outside").imageFiles, undefined);
+    emit({ type: "tool.end", callId: "outside", ok: true, output: "" });
+    emit({ type: "turn.end" });
+    store.removeThread(entry.id);
+    assert.equal(fs.existsSync(join(directory, ".citropy", "tool-images", entry.id)), false);
+  });
   await t.test("catalog refresh keeps the last good models on failure without resetting conversation state", async () => {
     const listModels = providers.claude.listModels;
     try {

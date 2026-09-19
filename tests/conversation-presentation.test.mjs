@@ -1205,7 +1205,7 @@ app.whenReady().then(() => {
 
   await t.test("completion notices stay quiet only while the same chat is focused near the bottom", async () => {
     const history = Array.from({ length: 20 }, (_, index) => message(`history-${index}`, [textPart(`history-text-${index}`, "An earlier paragraph. ".repeat(20))]));
-    const f = await fixture({ messages: history });
+    const f = await fixture({ messages: history, children: [{ ...thread, id: "elsewhere", title: "Other conversation" }] });
     const { page } = f;
     await page.locator("textarea").focus();
     const notice = (id, threadId = "chat", kind = "chat", level = "success") => ({
@@ -1226,6 +1226,16 @@ app.whenReady().then(() => {
     f.emit(notice("other-conversation", "elsewhere"), notice("push-complete", "chat", "git"), notice("failed-response", "chat", "chat", "error"));
     for (const text of ["other-conversation", "push-complete", "failed-response"])
       await page.locator(".toast").getByText(text, { exact: true }).waitFor();
+    const unread = async (id) => page.evaluate(async (messageId) => (await import("/web/src/lib/store.ts")).useApp.getState().notifications.find((entry) => entry.id === messageId)?.read === false, id);
+    assert.equal(await unread("other-conversation"), true);
+    await page.evaluate(async () => (await import("/web/src/lib/store.ts")).selectThread("elsewhere"));
+    await page.waitForFunction(() => window.presentationStore.getState().notifications.find((entry) => entry.id === "other-conversation")?.read === true);
+    assert.ok(f.requests.some((event) => event.t === "notifications.read" && event.ids.includes("other-conversation")));
+    assert.equal(await unread("push-complete"), true);
+    assert.equal(await unread("failed-response"), true);
+    await page.evaluate(async () => (await import("/web/src/lib/store.ts")).selectThread("chat"));
+    await page.waitForFunction(() => window.presentationStore.getState().notifications.find((entry) => entry.id === "failed-response")?.read === true);
+    assert.equal(await unread("push-complete"), true);
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     f.emit(notice("while-in-settings"));
     await page.locator(".toast").getByText("while-in-settings", { exact: true }).waitFor();
@@ -1512,20 +1522,18 @@ app.whenReady().then(() => {
     const { page } = f;
     const url = "https://docs.example.test/guide?mode=focus#next";
     const icons = [];
-    const network = await page.context().newCDPSession(page);
-    await network.send("Fetch.enable", { patterns: [{ urlPattern: "https://*.example.test/favicon.ico" }] });
-    network.on("Fetch.requestPaused", async ({ requestId, request }) => {
-      const missing = request.url.includes("missing.");
-      if (!missing) icons.push({ url: request.url, referer: request.headers.Referer });
-      await network.send("Fetch.fulfillRequest", { requestId, responseCode: missing ? 404 : 200,
-        responseHeaders: [{ name: "Content-Type", value: "image/svg+xml" }],
-        body: Buffer.from(missing ? "" : '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="blue"/></svg>').toString("base64"),
+    await page.route("**/api/favicon?**", async (route) => {
+      const target = new URL(route.request().url()).searchParams.get("url") ?? "";
+      const missing = target.includes("missing.");
+      if (!missing) icons.push(target);
+      await route.fulfill({ status: missing ? 404 : 200, contentType: "image/svg+xml",
+        body: missing ? "" : '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="blue"/></svg>',
       });
     });
     f.emit({ t: "message.add", threadId: "chat", message: message("links", [textPart("links-text", `[Docs](${url}) and [Missing icon](https://missing.example.test/docs).\n\n[Mail](mailto:hello@example.test) and [Unsafe](javascript:alert%281%29).`)]) });
     const link = page.getByRole("link", { name: "Docs", exact: true });
     await link.locator(".link-site-icon[data-loaded]").waitFor();
-    assert.deepEqual(icons, [{ url: "https://docs.example.test/favicon.ico", referer: undefined }]);
+    assert.deepEqual(icons, [url]);
     const fallback = page.getByRole("link", { name: "Missing icon", exact: true });
     await fallback.locator("img[hidden]").waitFor({ state: "attached" });
     assert.equal(await fallback.locator("svg").isVisible(), true);

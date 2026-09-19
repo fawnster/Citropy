@@ -6,6 +6,7 @@ export function useStickToBottom<T extends HTMLElement, C extends HTMLElement>()
   const stuck = useRef(true);
   const readingExpanded = useRef(false);
   const lastTop = useRef(0);
+  const lastHeight = useRef(0);
   const [atBottom, setAtBottom] = useState(true);
   const [nearBottom, setNearBottom] = useState(true);
   const stopFollowing = useCallback(() => {
@@ -33,9 +34,10 @@ export function useStickToBottom<T extends HTMLElement, C extends HTMLElement>()
       const near = distance < 2;
       if (!readingExpanded.current) {
         if (near) stuck.current = true;
-        else if (node.scrollTop < lastTop.current - 1) stuck.current = false;
+        else if (node.scrollTop < lastTop.current - 1 && node.scrollHeight >= lastHeight.current) stuck.current = false;
       }
       lastTop.current = node.scrollTop;
+      lastHeight.current = node.scrollHeight;
       setAtBottom(near);
       setNearBottom(distance < 96);
     };
@@ -66,6 +68,7 @@ export function useStickToBottom<T extends HTMLElement, C extends HTMLElement>()
     const observer = new ResizeObserver(() => {
       if (stuck.current) node.scrollTop = node.scrollHeight;
       lastTop.current = node.scrollTop;
+      lastHeight.current = node.scrollHeight;
       const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
       setAtBottom(distance < 2);
       setNearBottom(distance < 96);
@@ -80,6 +83,7 @@ export function useStickToBottom<T extends HTMLElement, C extends HTMLElement>()
     node.addEventListener("keydown", onKeyDown);
     node.scrollTop = node.scrollHeight;
     lastTop.current = node.scrollTop;
+    lastHeight.current = node.scrollHeight;
 
     return () => {
       observer.disconnect();

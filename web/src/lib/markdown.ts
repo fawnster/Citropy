@@ -1,11 +1,17 @@
 import { Marked, type Tokens } from "marked";
 import { escapeHtml, highlight } from "./highlight.ts";
+import { serverUrl } from "./environment.ts";
 
 interface CodeToken extends Tokens.Code {
   rendered?: string;
 }
 
-function createParser(theme: "dark" | "light", signal?: AbortSignal) {
+interface AssetContext {
+  projectId: string;
+  threadId: string;
+}
+
+function createParser(theme: "dark" | "light", signal?: AbortSignal, assets?: AssetContext) {
   const marked = new Marked({
     gfm: true,
     breaks: false,
@@ -29,6 +35,16 @@ function createParser(theme: "dark" | "light", signal?: AbortSignal) {
       html(token) {
         return escapeHtml((token as Tokens.HTML).raw);
       },
+      image(token) {
+        const image = token as Tokens.Image;
+        const src = image.href ?? "";
+        const alt = escapeHtml(image.text ?? "");
+        const title = image.title ? ` title="${escapeHtml(image.title)}"` : "";
+        if (!assets || /^(https?:|data:|blob:|\/\/)/i.test(src))
+          return `<img src="${escapeHtml(src)}" alt="${alt}"${title} loading="lazy" decoding="async" />`;
+        const query = new URLSearchParams({ projectId: assets.projectId, threadId: assets.threadId, path: src.replace(/^file:\/\//, "") });
+        return `<img src="${escapeHtml(serverUrl(`/api/assets?${query}`))}" alt="${alt}"${title} loading="lazy" decoding="async" />`;
+      },
       link(token) {
         const link = token as Tokens.Link;
         const href = escapeHtml(link.href ?? "");
@@ -37,8 +53,8 @@ function createParser(theme: "dark" | "light", signal?: AbortSignal) {
         try {
           const url = new URL(link.href);
           if (["http:", "https:"].includes(url.protocol)) {
-            const favicon = escapeHtml(`${url.origin}/favicon.ico`);
-            icon = `<span class="link-site-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18"/></svg><img class="link-favicon" src="${favicon}" width="14" height="14" alt="" decoding="async" referrerpolicy="no-referrer"/></span>`;
+            const favicon = escapeHtml(serverUrl(`/api/favicon?url=${encodeURIComponent(link.href)}`));
+            icon = `<span class="link-site-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18"/></svg><img class="link-favicon" src="${favicon}" width="16" height="16" alt="" decoding="async" referrerpolicy="no-referrer"/></span>`;
           }
         } catch {}
         return `<a href="${safe}" target="_blank" rel="noreferrer noopener">${icon}${this.parser.parseInline(link.tokens)}</a>`;
@@ -49,7 +65,7 @@ function createParser(theme: "dark" | "light", signal?: AbortSignal) {
   return marked;
 }
 
-export async function renderMarkdown(text: string, mode: "dark" | "light", signal?: AbortSignal): Promise<string> {
+export async function renderMarkdown(text: string, mode: "dark" | "light", signal?: AbortSignal, assets?: AssetContext): Promise<string> {
   if (/^\s*\d+[.)]\s*$/.test(text)) return `<p>${escapeHtml(text.trim())}</p>`;
-  return (await createParser(mode, signal).parse(text)) as string;
+  return (await createParser(mode, signal, assets).parse(text)) as string;
 }

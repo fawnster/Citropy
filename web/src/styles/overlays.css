@@ -20,6 +20,7 @@
 }
 
 .ask-diff .diff-line {
+  position: static;
   grid-template-columns: 20px minmax(0, 1fr);
   padding: 0 10px;
 }
@@ -161,25 +162,6 @@
   color: var(--bad);
   font-size: var(--text-sm);
   margin-top: 12px;
-}
-.citropy-dialog.permission-dialog {
-  width: min(660px, calc(var(--viewport-width) - 48px));
-}
-.permission-dialog .ask-code,
-.permission-dialog .ask-diff {
-  max-height: calc(var(--viewport-height) * 0.4);
-}
-.permission-dialog .permission-context {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  color: var(--text-3);
-  font-size: var(--text-sm);
-  margin-bottom: 14px;
-}
-.permission-dialog .permission-context .provider-icon {
-  width: 16px;
-  height: 16px;
 }
 @media (prefers-reduced-motion: reduce) {
   .citropy-dialog { transition: none; }

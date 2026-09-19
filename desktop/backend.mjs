@@ -37,7 +37,9 @@ export function packagedBackend(env) {
         const timer = setTimeout(
           () =>
             finish(
-              new Error("Citropy's server could not start within one minute."),
+              new Error(
+                `Citropy's server could not start within one minute.${output ? `\n${output.trim().slice(-600)}` : ""}`,
+              ),
             ),
           60000,
         );
@@ -49,7 +51,7 @@ export function packagedBackend(env) {
             new Error(
               output.includes("EADDRINUSE")
                 ? "Another Citropy server is running. Close it before opening this release."
-                : "Citropy's server could not start.",
+                : `Citropy's server could not start.${output ? `\n${output.trim().slice(-600)}` : ""}`,
             ),
           );
         const finish = (error) => {

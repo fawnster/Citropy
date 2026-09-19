@@ -3,7 +3,7 @@ import type { GitHubRequest, GitHubResponse } from "./github.ts";
 import type { ComputerState } from "./computer.ts";
 import type { BrowserAction, BrowserState, PanelKind, PanelTab, ToolConnection, ToolDefinition } from "./workbench.ts";
 
-export type ProviderId = "claude" | "codex" | "opencode";
+export type ProviderId = "claude" | "codex" | "opencode" | "cursor";
 
 export type ThreadStatus =
   | "idle"
@@ -21,7 +21,8 @@ export type PartKind =
   | "todo"
   | "patch"
   | "notice"
-  | "question";
+  | "question"
+  | "images";
 
 export type ToolStatus = "running" | "ok" | "error" | "denied";
 
@@ -37,6 +38,16 @@ export type ToolShape =
   | "todo"
   | "generic";
 
+export interface ToolImage {
+  id: string;
+  mime: string;
+}
+
+export interface ImageFile {
+  path: string;
+  label: string;
+}
+
 export interface ToolPart {
   id: string;
   kind: "tool";
@@ -48,6 +59,8 @@ export interface ToolPart {
   input: unknown;
   status: ToolStatus;
   output?: string;
+  images?: ToolImage[];
+  imageFiles?: ImageFile[];
   patch?: FilePatch;
   hits?: string[];
   startedAt: number;
@@ -130,7 +143,13 @@ export interface NoticePart {
   text: string;
 }
 
-export type Part = TextPart | ReasoningPart | ToolPart | TodoPart | PatchPart | NoticePart | QuestionPart;
+export interface ImagesPart {
+  id: string;
+  kind: "images";
+  files: ImageFile[];
+}
+
+export type Part = TextPart | ReasoningPart | ToolPart | TodoPart | PatchPart | NoticePart | QuestionPart | ImagesPart;
 
 export interface Attachment {
   id?: string;

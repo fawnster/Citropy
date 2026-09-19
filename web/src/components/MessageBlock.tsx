@@ -4,6 +4,7 @@ import { PartView } from "./PartView.tsx";
 import { WorkGroup } from "./WorkGroup.tsx";
 import { WorkDetails } from "./WorkDetails.tsx";
 import { Reasoning } from "./parts/Reasoning.tsx";
+import { ImageStrip } from "./parts/ImageStrip.tsx";
 import { MessageActions } from "./MessageActions.tsx";
 import type { TimelineRow } from "../lib/timeline.ts";
 import { useApp } from "../lib/store.ts";
@@ -145,6 +146,8 @@ export const MessageBlock = memo(function MessageBlock({
               <WorkGroup key={row.ids[0]} ids={row.ids} />
             ) : row.kind === "thoughts" ? (
               <Reasoning ids={row.ids} live={streaming} />
+            ) : row.kind === "images" ? (
+              <ImageStrip ids={row.ids} />
             ) : (
               <PartView key={row.id} partId={row.id} live={streaming} />
             )}

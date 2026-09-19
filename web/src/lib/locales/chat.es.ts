@@ -81,6 +81,7 @@ export const chatEs: Record<string, string> = {
   "Allow once": "Permitir una vez",
   "Allow this tool for this session": "Permitir esta herramienta durante esta sesión",
   "Allow tools without approval prompts": "Permitir herramientas sin pedir aprobación",
+  "Always allow": "Permitir siempre",
   "Approval": "Aprobación",
   "Archive conversation": "Archivar conversación",
   "Archived": "Archivado",

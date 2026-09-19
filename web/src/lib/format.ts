@@ -11,6 +11,7 @@ import { selectedModel } from "../../../shared/model-options.ts";
 export const providerLabels: Record<ProviderId, string> = {
   claude: "Claude Code",
   codex: "Codex",
+  cursor: "Cursor",
   opencode: "OpenCode",
 };
 
@@ -26,6 +27,7 @@ export function modelSource(
   model?: ModelOption,
 ): string {
   if (!provider) return translate("Provider unavailable");
+  if (provider.id === "cursor") return model?.hint ?? provider.label;
   if (provider.id !== "opencode") return provider.label;
   const source = model?.hint ?? model?.id.split("/")[0];
   if (!source) return provider.label;

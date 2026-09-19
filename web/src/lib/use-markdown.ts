@@ -26,7 +26,9 @@ function fallback(text: string): string {
 
 export function useMarkdown(text: string, live: boolean): { html: string; ready: boolean } {
   const theme = useApp((state) => state.theme);
-  const key = `${theme}:${text}`;
+  const projectId = useApp((state) => state.activeProjectId);
+  const threadId = useApp((state) => state.activeThreadId);
+  const key = `${theme}:${projectId ?? ""}:${threadId ?? ""}:${text}`;
   const [rendered, setRendered] = useState(() => ({
     html: cache.get(key) ?? fallback(text),
     key: cache.has(key) ? key : null,
@@ -43,7 +45,8 @@ export function useMarkdown(text: string, live: boolean): { html: string; ready:
     let cancelled = false;
     const controller = new AbortController();
     const run = async () => {
-      const result = await renderMarkdown(text, theme, controller.signal).catch(() => fallback(text));
+      const assets = projectId && threadId ? { projectId, threadId } : undefined;
+      const result = await renderMarkdown(text, theme, controller.signal, assets).catch(() => fallback(text));
       if (cancelled || latest.current !== key) return;
       if (!live) remember(key, result);
       setRendered({ html: result, key });
@@ -61,7 +64,7 @@ export function useMarkdown(text: string, live: boolean): { html: string; ready:
       controller.abort();
       clearTimeout(timer);
     };
-  }, [key, text, theme, live]);
+  }, [key, text, theme, live, projectId, threadId]);
 
   return { html: rendered.html, ready: rendered.key === key };
 }

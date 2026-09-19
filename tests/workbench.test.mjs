@@ -253,6 +253,9 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
       project.settings = {};
       parent.provider = "claude";
       assert.ok((await rpc("tools/list")).body.result.tools.some(tool => tool.name === "approve"));
+      parent.provider = "cursor";
+      assert.deepEqual((await rpc("tools/list")).body.result.tools.map(tool => tool.name), ["tool_help", "run_tool"]);
+      assert.doesNotMatch((await rpc("initialize", { protocolVersion: "2025-06-18" })).body.result.instructions, /ask_user/);
       parent.provider = "codex";
       assert.equal((await rpc("tools/list", {}, {})).status, 401);
       assert.equal(

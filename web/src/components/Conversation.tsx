@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AnimatePresence, motion } from "motion/react";
 import { ChevronDown } from "./icons.ts";
@@ -6,7 +6,7 @@ import { MessageBlock } from "./MessageBlock.tsx";
 import { MessageNavigator } from "./MessageNavigator.tsx";
 import { Working } from "./Working.tsx";
 import { scaled, useApp } from "../lib/store.ts";
-import { loadThread, refreshGit } from "../lib/actions.ts";
+import { loadThread, readThreadNotifications, refreshGit } from "../lib/actions.ts";
 import { useStickToBottom } from "../lib/use-stick.ts";
 import {
   timelineRows,
@@ -110,6 +110,11 @@ export function Conversation() {
     if (atBottom) scrollToBottom("instant");
   }, [uiScale, atBottom, scrollToBottom]);
 
+  const readSince = useRef(Date.now());
+  useLayoutEffect(() => {
+    readSince.current = Date.now();
+  }, [threadId]);
+
   useLayoutEffect(() => {
     const update = () => {
       const readingThreadId =
@@ -118,8 +123,10 @@ export function Conversation() {
         document.hasFocus()
           ? threadId
           : null;
-      if (useApp.getState().readingThreadId !== readingThreadId)
+      if (useApp.getState().readingThreadId !== readingThreadId) {
         useApp.setState({ readingThreadId });
+        if (readingThreadId) readThreadNotifications(readingThreadId, readSince.current);
+      }
     };
     update();
     window.addEventListener("focus", update);

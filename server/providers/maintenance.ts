@@ -17,7 +17,7 @@ const plans = new Map<
   ProviderId,
   { time: number; value: Promise<UpdatePlan> }
 >();
-const packages: Record<ProviderId, string> = {
+const packages: Partial<Record<ProviderId, string>> = {
   claude: "@anthropic-ai/claude-code",
   codex: "@openai/codex",
   opencode: "opencode-ai",
@@ -95,12 +95,14 @@ async function resolveUpdatePlan(provider: ProviderId): Promise<UpdatePlan> {
   const brew = /^(.*)\/(Cellar|Caskroom)\/([^/]+)\/[^/]+\//.exec(target);
   if (brew) {
     const command = await executablePath("brew");
-    const name = {
+    const name = ({
       claude: "claude-code",
       codex: "codex",
+      cursor: "cursor",
       opencode: "opencode",
-    }[provider];
+    } as Partial<Record<ProviderId, string>>)[provider];
     if (
+      name &&
       brew[3] === name &&
       command &&
       (await probe(command, ["--prefix"])) === brew[1]
@@ -121,7 +123,7 @@ async function resolveUpdatePlan(provider: ProviderId): Promise<UpdatePlan> {
         "Update this installation through its Homebrew installation, then refresh models.",
     };
   }
-  if (/\/pnpm\/global\//.test(target)) {
+  if (packageName && /\/pnpm\/global\//.test(target)) {
     const command = await executablePath("pnpm");
     if (command) {
       const root = await probe(command, ["root", "--global"]);
@@ -149,7 +151,9 @@ async function resolveUpdatePlan(provider: ProviderId): Promise<UpdatePlan> {
       ? /\/claude\/versions\/[^/]+$/.test(target)
       : provider === "opencode"
         ? target === join(homedir(), ".opencode", "bin", "opencode")
-        : false;
+        : provider === "cursor"
+          ? /\/cursor-agent\/versions\/[^/]+\/cursor-agent$/.test(target)
+          : false;
   if (native) {
     const args = provider === "opencode" ? ["upgrade"] : ["update"];
     const help = await probe(binaryPath, [...args, "--help"]).catch(() => "");
@@ -199,6 +203,16 @@ function versionNumber(value?: string): string | undefined {
   );
 }
 
+export function cursorVersionNewer(
+  installed: string | undefined,
+  latest: string | undefined,
+): boolean | undefined {
+  const current = installed?.match(/(\d{4})\.(\d{2})\.(\d{2})/);
+  const target = latest?.match(/(\d{4})\.(\d{2})\.(\d{2})/);
+  if (!current || !target) return undefined;
+  return Number(`${target[1]}${target[2]}${target[3]}`) > Number(`${current[1]}${current[2]}${current[3]}`);
+}
+
 async function latestVersion(
   provider: ProviderId,
   plan: UpdatePlan,
@@ -219,6 +233,17 @@ async function latestVersion(
       );
       return info.casks?.[0]?.version ?? info.formulae?.[0]?.versions?.stable;
     }
+    if (provider === "cursor") {
+      const response = await fetch("https://cursor.com/install", {
+        signal: AbortSignal.timeout(8000),
+      });
+      if (!response.ok) throw new Error("Version check failed");
+      const script = await response.text();
+      const match =
+        /FINAL_DIR="[^"]*\/versions\/([^"/]+)"/.exec(script) ??
+        /downloads\.cursor\.com\/lab\/([^/]+)\//.exec(script);
+      return match?.[1];
+    }
     let channel = "latest";
     if (provider === "claude" && plan.method === "Native updater") {
       const settings = await readFile(
@@ -232,8 +257,10 @@ async function latestVersion(
         .catch(() => ({}));
       if (settings.autoUpdatesChannel === "stable") channel = "stable";
     }
+    const packageName = packages[provider];
+    if (!packageName) return undefined;
     const response = await fetch(
-      `https://registry.npmjs.org/${encodeURIComponent(packages[provider])}/${channel}`,
+      `https://registry.npmjs.org/${encodeURIComponent(packageName)}/${channel}`,
       { signal: AbortSignal.timeout(8000) },
     );
     if (!response.ok) throw new Error("Version check failed");
@@ -275,7 +302,14 @@ export async function providerMaintenance(
       ]);
       const current = versionNumber(version);
       const target = versionNumber(latest);
-      if (current && target && gt(target, current)) notifyUpdateAvailable(provider.label, target, "Providers");
+      const newer =
+        provider.id === "cursor"
+          ? cursorVersionNewer(version, latest)
+          : current && target
+            ? gt(target, current)
+            : undefined;
+      const advertised = provider.id === "cursor" ? latest : target;
+      if (newer && advertised) notifyUpdateAvailable(provider.label, advertised, "Providers");
       return {
         provider: provider.id,
         status: "idle" as const,
@@ -285,11 +319,11 @@ export async function providerMaintenance(
         latestVersion: latest,
         checkedAt: versions.get(provider.id)?.time,
         updateStatus:
-          current && target
-            ? gt(target, current)
+          newer === undefined
+            ? "unknown"
+            : newer
               ? "available"
-              : "current"
-            : "unknown",
+              : "current",
         binaryPath: plan.binaryPath,
         method: plan.method,
         command: plan.executable

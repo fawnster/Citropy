@@ -37,8 +37,22 @@ export function validateAgentEvent(raw: unknown): AgentEvent {
     case "block.delta": id("blockId"); text("text"); break;
     case "block.end": id("blockId"); break;
     case "tool.start": id("callId"); id("name"); break;
-    case "tool.input": id("callId"); break;
-    case "tool.end": id("callId"); bool("ok"); text("output"); break;
+    case "tool.input": id("callId"); if (event.name !== undefined) id("name"); break;
+    case "tool.end": {
+      id("callId");
+      bool("ok");
+      text("output");
+      if (event.images !== undefined) {
+        if (!Array.isArray(event.images) || event.images.length > 8) throw new Error("Invalid tool images.");
+        for (const entry of event.images) {
+          if (!entry || typeof entry !== "object") throw new Error("Invalid tool image.");
+          const image = entry as Record<string, unknown>;
+          if (typeof image.mime !== "string" || !/^image\/(png|jpeg|webp|gif)$/.test(image.mime)) throw new Error("Invalid tool image type.");
+          if (typeof image.data !== "string" || !image.data.length || image.data.length > 12 * 1024 * 1024) throw new Error("Invalid tool image data.");
+        }
+      }
+      break;
+    }
     case "tool.output": id("callId"); text("output"); if (event.append !== undefined) bool("append"); break;
     case "shell.background": id("callId"); id("taskId"); text("command", true); text("cwd", true); break;
     case "shell.end": id("callId"); bool("ok"); text("output", true); if (event.stopped !== undefined) bool("stopped"); break;
@@ -50,6 +64,7 @@ export function validateAgentEvent(raw: unknown): AgentEvent {
       if (totals && typeof totals === "object" && ["input", "output", "cacheRead", "cacheWrite"].every(key => typeof (totals as Record<string, unknown>)[key] === "number" && Number.isFinite((totals as Record<string, unknown>)[key]) && Number((totals as Record<string, unknown>)[key]) >= 0)) usage.codexTotals = totals;
       return { type: "usage", usage };
     }
+    case "plan.accepted": break;
     case "turn.end": text("error", true); break;
     case "notice": text("text"); if (!["info", "warn", "error"].includes(String(event.level))) throw new Error("Unknown notice level."); break;
     case "exit": if (!Number.isInteger(event.code)) throw new Error("Invalid exit code."); break;

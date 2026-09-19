@@ -15,6 +15,7 @@ export function ToolCard({ part }: { part: ToolPart }) {
   const Icon = shapeIcon[part.shape];
   const elapsed = part.endedAt ? part.endedAt - part.startedAt : null;
   const output = part.output ?? "";
+  const hasImages = Boolean(part.images?.length || part.imageFiles?.length);
 
   const peek = useMemo(() => {
     if (part.status === "running") return null;
@@ -61,13 +62,13 @@ export function ToolCard({ part }: { part: ToolPart }) {
           )}
           {part.patch && <DiffView patch={part.patch} showHeader={false} partId={part.id} />}
           {!part.patch && output && <Output text={output} shape={part.shape} partId={part.id} />}
-          {!part.patch && !output && part.status === "running" && (
+          {!part.patch && !output && !hasImages && part.status === "running" && (
             <div className="tool-waiting">
               <span className="tool-waiting-bar" />
               {t("Running")}
             </div>
           )}
-          {!part.patch && !output && part.status !== "running" && (
+          {!part.patch && !output && !hasImages && part.status !== "running" && (
             <div className="tool-empty">{t("No output")}</div>
           )}
         </div>

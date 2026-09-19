@@ -50,21 +50,29 @@ function currentContextTokens(usage: ClaudeUsage): number | undefined {
     : undefined;
 }
 
-function textOf(content: unknown): string {
-  if (typeof content === "string") return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((entry) => {
-        if (typeof entry === "string") return entry;
-        const record = entry as Record<string, unknown>;
-        if (record.type === "text" && typeof record.text === "string") return record.text;
-        if (record.type === "image") return "[image]";
-        return JSON.stringify(record);
-      })
-      .join("\n");
+function contentOf(content: unknown): { text: string; images: Array<{ mime: string; data: string }> } {
+  if (typeof content === "string") return { text: content, images: [] };
+  if (!Array.isArray(content)) return { text: content == null ? "" : JSON.stringify(content), images: [] };
+  const images: Array<{ mime: string; data: string }> = [];
+  const text: string[] = [];
+  for (const entry of content) {
+    if (typeof entry === "string") {
+      text.push(entry);
+      continue;
+    }
+    const record = entry as Record<string, unknown>;
+    if (record.type === "text" && typeof record.text === "string") {
+      text.push(record.text);
+      continue;
+    }
+    if (record.type === "image") {
+      const source = record.source as { type?: unknown; media_type?: unknown; data?: unknown } | undefined;
+      if (source?.type === "base64" && typeof source.media_type === "string" && typeof source.data === "string") images.push({ mime: source.media_type, data: source.data });
+      continue;
+    }
+    text.push(JSON.stringify(record));
   }
-  if (content == null) return "";
-  return JSON.stringify(content);
+  return { text: text.join("\n"), images };
 }
 
 class ClaudeSession implements AgentSession {
@@ -384,11 +392,12 @@ class ClaudeSession implements AgentSession {
         const block = raw as Record<string, unknown>;
         if (block.type !== "tool_result") continue;
         const callId = String(block.tool_use_id);
-        const output = textOf(block.content);
+        const result = contentOf(block.content);
+        const output = result.text;
         const agent = this.#agents.get(callId);
         if (agent && !/running.*background|launched.*asynchronously/i.test(output)) this.#emit({ type: "subagent", id: callId, ...agent, status: block.is_error ? "error" : "idle", result: output });
         this.#adopt(callId, output);
-        this.#emit({ type: "tool.end", callId, ok: block.is_error !== true, output });
+        this.#emit({ type: "tool.end", callId, ok: block.is_error !== true, output, ...(result.images.length ? { images: result.images } : {}) });
       }
       return;
     }

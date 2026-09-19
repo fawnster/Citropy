@@ -147,6 +147,27 @@ export function loadThread(id: string): void {
   send({ t: "thread.load", id });
 }
 
+export function readThreadNotifications(threadId: string, since = 0): void {
+  const state = useApp.getState();
+  const ids = state.notifications
+    .filter(
+      (entry) =>
+        !entry.read &&
+        entry.kind === "chat" &&
+        entry.target.threadId === threadId &&
+        (!since || entry.createdAt < since),
+    )
+    .map((entry) => entry.id);
+  if (!ids.length) return;
+  const pending = new Set(ids);
+  useApp.setState({
+    notifications: state.notifications.map((entry) =>
+      pending.has(entry.id) ? { ...entry, read: true } : entry,
+    ),
+  });
+  send({ t: "notifications.read", ids });
+}
+
 export async function sendMessage(
   text: string,
   attachments: import("../../../shared/protocol.ts").Attachment[] = [],

@@ -105,6 +105,11 @@ test("Codex app-server streams turns, resumes, reports usage and routes approval
     claudeWire.child.stdout.write(JSON.stringify({ type: "system", subtype: "task_started", task_id: "nested-task", tool_use_id: "nested-a", task_type: "local_agent", description: "Nested review", prompt: "Look deeper" }) + "\n");
     claudeWire.child.stdout.write(JSON.stringify({ type: "system", subtype: "task_notification", task_id: "nested-task", tool_use_id: "nested-a", status: "completed", summary: "Looked" }) + "\n");
     assert.deepEqual(events.findLast((event) => event.type === "subagent"), { type: "subagent", id: "nested-a", title: "Nested review", prompt: "Look deeper", status: "idle", result: "Looked" });
+    claudeWire.child.stdout.write(JSON.stringify({ type: "assistant", message: { content: [{ type: "tool_use", id: "shot-a", name: "mcp__citropy__computer_screenshot", input: {} }] } }) + "\n");
+    claudeWire.child.stdout.write(JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: "shot-a", content: [{ type: "text", text: "Captured" }, { type: "image", source: { type: "base64", media_type: "image/jpeg", data: "aGVsbG8=" } }] }] } }) + "\n");
+    const shot = events.findLast((event) => event.type === "tool.end" && event.callId === "shot-a");
+    assert.equal(shot.output, "Captured");
+    assert.deepEqual(shot.images, [{ mime: "image/jpeg", data: "aGVsbG8=" }]);
     const codex = codexProvider.start(options);
     sessions.push(codex);
     const wire = invocations[1];

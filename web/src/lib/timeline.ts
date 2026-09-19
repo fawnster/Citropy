@@ -4,7 +4,7 @@ import { buildRows, type Row } from "./group.ts";
 export interface TimelineRow {
   key: string;
   messageId: string;
-  row?: Row | { kind: "activity"; id: string; ids: string[]; messageIds: string[]; open: boolean; active: boolean; previewId?: string };
+  row?: Row | { kind: "activity"; id: string; ids: string[]; messageIds: string[]; open: boolean; active: boolean; previewId?: string } | { kind: "images"; id: string; ids: string[] };
   first: boolean;
   last: boolean;
   separator?: boolean;
@@ -68,6 +68,7 @@ export function timelineRows(state: AppState, threadId: string): TimelineRow[] {
         if (index >= finalStart && index <= finalIndex) return false;
         const part = row.kind === "part" ? state.parts[row.id] : undefined;
         if (row === plan || part?.kind === "question" && part.status === "pending") return false;
+        if (part?.kind === "images") return false;
         return part?.kind !== "notice" || part.level === "info";
       }));
       const ids = rows.filter(row => work.has(row)).flatMap(row => row.kind === "part" ? [row.id] : row.ids);
@@ -76,6 +77,11 @@ export function timelineRows(state: AppState, threadId: string): TimelineRow[] {
       const previewId = finalIndex === -1 ? ids.findLast(id => state.parts[id]?.kind === "text") : undefined;
       visible = ids.length ? [{ kind: "activity", id, ids, messageIds, open, active, previewId }, ...rows.filter(row => open || !work.has(row))] : rows;
     }
+    const imageIds = partIds.filter((id) => {
+      const part = state.parts[id];
+      return part?.kind === "tool" && Boolean(part.images?.length || part.imageFiles?.length);
+    });
+    if (imageIds.length) visible = [...visible, { kind: "images", id: `images-${messageId}`, ids: imageIds }];
     return visible.map((row, index) => ({
       key: row.kind === "activity" ? `activity-${messageId}` : row.kind === "part" ? row.id : `${row.kind}-${row.ids[0]}`,
       messageId: row.kind === "activity" ? messageId : owners.get(row.kind === "part" ? row.id : row.ids[0]!)!,

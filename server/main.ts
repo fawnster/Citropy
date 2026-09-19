@@ -62,7 +62,7 @@ const connectionEpoch = randomUUID();
 const activeRequests = new Set<IncomingMessage>();
 
 function activeWork(ownCommands = 0): boolean {
-  return (["claude", "codex", "opencode"] as const).some(id => providerBusy(id) || providerUpdating(id)) || assistanceBusy() || activeCommands > ownCommands || activeRequests.size > 0 || pendingRequests().length > 0;
+  return (["claude", "codex", "opencode", "cursor"] as const).some(id => providerBusy(id) || providerUpdating(id)) || assistanceBusy() || activeCommands > ownCommands || activeRequests.size > 0 || pendingRequests().length > 0;
 }
 
 async function restartDevelopmentServer(): Promise<void> {

@@ -27,6 +27,8 @@ import {
   serveAsset,
 } from "./assets.ts";
 import { changeSkill, listSkills, readSkill, restoreComputerSkill } from "./skills.ts";
+import { serveFavicon } from "./favicons.ts";
+import { serveToolImage } from "./tool-images.ts";
 import { diagnostics } from "./diagnostics.ts";
 import { usageReport } from "./usage.ts";
 import { configureAssistance, generateThreadTitle, startGitAction } from "./assistance.ts";
@@ -59,7 +61,7 @@ function settings(
   const out: ProjectSettings = {};
   if (input.provider !== undefined) {
     if (input.provider !== null && !(shared
-      ? ["claude", "codex", "opencode"].includes(input.provider)
+      ? ["claude", "codex", "opencode", "cursor"].includes(input.provider)
       : providers.some((provider) => provider.id === input.provider)))
       throw new Error("Unknown provider");
     out.provider = input.provider;
@@ -110,7 +112,7 @@ export async function handleFeatures(
 ): Promise<boolean> {
   const url = new URL(req.url ?? "/", "http://localhost");
   if (
-    !/^\/api\/(attachments|assets|preview|workspaces|projects|threads|commands|skills|usage|diagnostics|browser|computer|providers|shells)(\/|$)/.test(
+    !/^\/api\/(attachments|assets|preview|favicon|tool-images|workspaces|projects|threads|commands|skills|usage|diagnostics|browser|computer|providers|shells)(\/|$)/.test(
       url.pathname,
     )
   )
@@ -207,7 +209,7 @@ export async function handleFeatures(
     } else if (url.pathname === "/api/providers/maintenance" && req.method === "GET") respond(await providerMaintenance(url.searchParams.get("refresh") === "1"));
     else if (url.pathname === "/api/providers/update" && req.method === "POST") {
       const input = await body(req);
-      if (!["claude", "codex", "opencode"].includes(input.provider)) throw new Error("Unknown provider.");
+      if (!["claude", "codex", "opencode", "cursor"].includes(input.provider)) throw new Error("Unknown provider.");
       const provider = input.provider as ProviderId;
       if (providerBusy(provider)) throw new Error("Finish or stop this provider’s active conversations before updating.");
       respond(startProviderUpdate(provider, async () => {
@@ -216,7 +218,7 @@ export async function handleFeatures(
       }, refreshProviders));
     } else if (url.pathname === "/api/providers/instructions" && ["GET", "PUT"].includes(req.method || "")) {
       const provider = url.searchParams.get("provider") as ProviderId;
-      if (!["claude", "codex", "opencode"].includes(provider)) throw new Error("Unknown provider.");
+      if (!["claude", "codex", "opencode", "cursor"].includes(provider)) throw new Error("Unknown provider.");
       if (req.method === "GET") respond(readGlobalInstructions(provider));
       else {
         const input = await body(req);
@@ -248,6 +250,10 @@ export async function handleFeatures(
       await serveAsset(req, res, url.searchParams);
     else if (url.pathname === "/api/preview" && req.method === "GET")
       respond(await previewFile(url.searchParams));
+    else if (url.pathname === "/api/favicon" && req.method === "GET")
+      await serveFavicon(res, url.searchParams);
+    else if (url.pathname === "/api/tool-images" && ["GET", "HEAD"].includes(req.method ?? ""))
+      await serveToolImage(req, res, url.searchParams);
     else if (url.pathname === "/api/attachments" && req.method === "POST")
       respond(
         await uploadAttachment(

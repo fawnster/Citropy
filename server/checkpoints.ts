@@ -71,6 +71,14 @@ function overlapping(thread: Thread): boolean {
   return [...store.threads.values()].some(other => other.id !== thread.id && other.running && workspacePath(other.projectId, other.id) === cwd);
 }
 
+const imageExtensions = /\.(png|jpe?g|gif|webp|avif|svg|bmp|ico)$/i;
+
+async function changedImages(cwd: string, before: string, after: string): Promise<Array<{ path: string; label: string }>> {
+  const output = await git(cwd, ["diff", "--name-status", "--diff-filter=AM", "--no-renames", before, after]).catch(() => "");
+  const paths = [...new Set(output.split("\n").map(line => line.split("\t").at(-1) ?? "").filter(path => path && imageExtensions.test(path)))];
+  return paths.slice(0, 6).map(path => ({ path, label: basename(path) }));
+}
+
 export async function beginCheckpoint(thread: Thread, messageId: string): Promise<void> {
   const cwd = workspacePath(thread.projectId, thread.id);
   if (!(await isRepo(cwd))) return;
@@ -98,15 +106,22 @@ export async function beginCheckpoint(thread: Thread, messageId: string): Promis
   });
 }
 
-export async function finishCheckpoint(thread: Thread): Promise<void> {
+export async function finishCheckpoint(thread: Thread, messageId?: string): Promise<void> {
   const checkpoint = thread.checkpoints?.at(-1);
-  if (!checkpoint?.before || checkpoint.after) return;
+  const before = checkpoint?.before;
+  if (!checkpoint || !before || checkpoint.after) return;
   const cwd = workspacePath(thread.projectId, thread.id);
   await checkpointLock(cwd, async () => {
     try {
       const after = await capture(cwd);
       await git(cwd, ["update-ref", `refs/turns/${thread.id}/${checkpoint.messageId}/after`, after]);
       if (store.threads.get(thread.id) === thread) store.patchThread(thread.id, { checkpoints: thread.checkpoints?.map(entry => entry === checkpoint ? { ...entry, after, overlapping: entry.overlapping || overlapping(thread) } : entry) });
+      if (messageId) {
+        try {
+          const images = await changedImages(cwd, before, after);
+          if (images.length) store.addPart(thread.id, messageId, { id: uid("prt"), kind: "images", files: images });
+        } catch {}
+      }
     } catch (error) {
       if (store.threads.get(thread.id) === thread) store.patchThread(thread.id, { checkpoints: thread.checkpoints?.map(entry => entry === checkpoint ? { ...entry, error: (error as Error).message } : entry) });
     }
@@ -242,6 +257,7 @@ export async function forkConversation(thread: Thread, messageId: string): Promi
         await writeFile(join(dir, "metadata.json"), JSON.stringify(attachment), { mode: 0o600 });
       }
     }
+    await cp(join(dataRoot, "tool-images", thread.id), join(dataRoot, "tool-images", fork.id), { recursive: true }).catch(() => {});
     store.replaceMessages(fork.id, messages);
     return fork;
   } catch (error) { store.removeThread(fork.id); throw error; }
