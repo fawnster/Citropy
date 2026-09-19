@@ -5,7 +5,7 @@
   <p>
     <img alt="MIT license" src="https://img.shields.io/badge/license-MIT-blue.svg">
     <img alt="Node.js 22.18 or newer" src="https://img.shields.io/badge/node-%3E%3D22.18-5FA04E.svg">
-    <img alt="Linux" src="https://img.shields.io/badge/desktop-Linux-1793D1.svg">
+    <img alt="Linux and macOS" src="https://img.shields.io/badge/desktop-Linux%20%26%20macOS-1793D1.svg">
   </p>
 </div>
 
@@ -91,6 +91,26 @@ Claude Code and Codex allowances with reset times, token totals for every saved 
 
 Linux, Node.js 22.18 or newer, and Git, plus at least one of the agent CLIs installed and signed in.
 
+Linux and macOS install and update with one command. It downloads the latest release, verifies its checksum, and puts Citropy in your user account, with no administrator password.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.sh | sh
+```
+
+On Linux it installs `~/.local/bin/citropy` and adds Citropy to your application menu. On macOS it installs `~/Applications/Citropy.app`, ad-hoc signed so Apple Silicon runs it, without the quarantine tag, so it opens without a Gatekeeper prompt. A zip downloaded through a browser instead is blocked by Gatekeeper on macOS 15 and later. Re-run the same command to update, and pass `--uninstall` to remove it. On macOS the update button in Settings runs this installer for you.
+
+### Lemon builds
+
+Every push to main publishes a rolling **Lemon** build with the newest changes. It installs next to Citropy with its own data and settings, and shows a Lemon tag beside the title. These builds are for testing and can break.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.sh | sh -s -- --channel=lemon
+```
+
+Remove it later with `--channel=lemon --uninstall`.
+
+From a source checkout instead:
+
 ```sh
 git clone https://github.com/tinuxongit/Citropy.git
 cd Citropy
@@ -114,7 +134,7 @@ npm run screenshots   # regenerate the images in docs/assets
 
 `npm run desktop:dev` uses separate data in `~/.citropy-dev`, a **Citropy Dev** desktop profile, and backend port 4178. The live interface runs on port 5177. Development controls stay out of normal builds.
 
-`npm run desktop:install` adds the normal source build to the application menu; pass `-- --dev` for a separate development launcher. `npm run desktop:package` builds a Linux AppImage and its update manifest in `release/`. The packaged app starts and stops its own local server. `npm run desktop:smoke` checks the packaged app without running a model.
+`npm run desktop:install` adds the normal source build to the application menu; pass `-- --dev` for a separate development launcher. `npm run desktop:package` builds a Linux AppImage and its update manifest in `release/`; pass `-- --mac` on macOS for a zip of the app. The packaged app starts and stops its own local server. `npm run desktop:smoke` checks the packaged app without running a model, and `npm run desktop:smoke:mac` checks the macOS zip.
 
 [Development and release instructions](docs/release.md) cover isolation, system dependencies, GitHub checks, and draft releases.
 

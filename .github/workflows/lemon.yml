@@ -1,0 +1,157 @@
+name: Lemon
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lemon
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - name: Check the installer script
+        run: |
+          sh -n scripts/install.sh
+          shellcheck -s sh scripts/install.sh
+
+  linux:
+    needs: check
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - run: npm ci
+      - name: Set version
+        run: |
+          NEXT=$(node -e "const v = JSON.parse(require('fs').readFileSync('package.json','utf8')).version.split('.').map(Number); v[2] += 1; console.log(v.join('.'))")
+          npm version "$NEXT-lemon.${GITHUB_RUN_NUMBER}" --no-git-tag-version
+      - name: Package
+        env:
+          CITROPY_CHANNEL: lemon
+        run: npm run desktop:package
+      - name: Check the artifact
+        run: test -f release/Citropy-lemon-x86_64.AppImage
+      - name: Test the installer
+        run: |
+          mkdir -p lemon/v-lemon
+          cp release/Citropy-lemon-x86_64.AppImage lemon/v-lemon/
+          (cd lemon/v-lemon && sha256sum *.AppImage > SHA256SUMS && printf '{"version":"%s"}\n' "$(node -e "console.log(require('./package.json').version)")" > version.json)
+          (cd lemon && python3 -m http.server 8792 >/dev/null 2>&1 &)
+          sleep 1
+          HOME="$RUNNER_TEMP/lemon-home" CITROPY_BASE_URL="http://127.0.0.1:8792" sh scripts/install.sh --channel=lemon
+          test -x "$RUNNER_TEMP/lemon-home/.local/bin/citropy-lemon"
+          test -f "$RUNNER_TEMP/lemon-home/.local/share/applications/citropy-lemon.desktop"
+          grep -q 'StartupWMClass=citropy-lemon' "$RUNNER_TEMP/lemon-home/.local/share/applications/citropy-lemon.desktop"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lemon-linux
+          if-no-files-found: error
+          path: release/*.AppImage
+
+  mac:
+    needs: check
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - run: npm ci
+      - name: Set version
+        run: |
+          NEXT=$(node -e "const v = JSON.parse(require('fs').readFileSync('package.json','utf8')).version.split('.').map(Number); v[2] += 1; console.log(v.join('.'))")
+          npm version "$NEXT-lemon.${GITHUB_RUN_NUMBER}" --no-git-tag-version
+      - name: Package
+        env:
+          CITROPY_CHANNEL: lemon
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_FOR_PULL_REQUEST: 'true'
+        run: npm run desktop:package -- --mac
+      - name: Check the artifacts
+        run: |
+          test -f release/Citropy-lemon-arm64.zip
+          test -f release/Citropy-lemon-x64.zip
+      - run: node desktop/smoke-mac.mjs
+      - name: Test the installer
+        run: |
+          VERSION=$(node -e "console.log(require('./package.json').version)")
+          mkdir -p "macdist/v-lemon"
+          cp release/*.zip "macdist/v-lemon/"
+          (cd "macdist/v-lemon" && shasum -a 256 *.zip > SHA256SUMS && printf '{"version":"%s"}\n' "$VERSION" > version.json)
+          (cd macdist && python3 -m http.server 8793 >/dev/null 2>&1 &)
+          sleep 1
+          HOME="$RUNNER_TEMP/lemon-home" CITROPY_BASE_URL="http://127.0.0.1:8793" sh scripts/install.sh --channel=lemon
+          APP="$RUNNER_TEMP/lemon-home/Applications/Citropy Lemon.app"
+          test -x "$APP/Contents/MacOS/Citropy Lemon"
+          codesign --verify --deep --strict "$APP"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lemon-mac
+          if-no-files-found: error
+          path: release/*.zip
+
+  publish:
+    needs: [linux, mac]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Write the version file
+        run: |
+          CURRENT=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
+          NEXT=$(node -e "const v = JSON.parse(require('fs').readFileSync('package.json','utf8')).version.split('.').map(Number); v[2] += 1; console.log(v.join('.'))")
+          printf '{"version":"%s-lemon.%s"}\n' "$NEXT" "${GITHUB_RUN_NUMBER}" > dist/version.json
+          cat dist/version.json
+      - name: Checksum release files
+        working-directory: dist
+        run: |
+          rm -f SHA256SUMS
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+      - name: Publish the Lemon build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          NOTES="Rolling Lemon build from $(git rev-parse --short HEAD) on $(date -u +%Y-%m-%d)."
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/lemon" >/dev/null 2>&1; then
+            gh api "repos/$GITHUB_REPOSITORY/git/refs/tags/lemon" -X PATCH -f sha="$GITHUB_SHA" -F force=true >/dev/null
+          fi
+          if ! gh release view lemon >/dev/null 2>&1; then
+            gh release create lemon --prerelease --title "Citropy Lemon" --notes "$NOTES"
+          fi
+          gh release upload lemon dist/*.AppImage dist/*.zip dist/version.json --clobber
+          gh release upload lemon dist/SHA256SUMS --clobber
+          gh release edit lemon --title "Citropy Lemon" --notes "$NOTES"

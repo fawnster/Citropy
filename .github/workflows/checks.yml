@@ -32,6 +32,10 @@ jobs:
       - run: npm run typecheck
       - run: npm audit --omit=dev --audit-level=high
       - run: npm test
+      - name: Check the installer script
+        run: |
+          sh -n scripts/install.sh
+          shellcheck -s sh scripts/install.sh
       - run: npm run desktop:package
       - run: npm run desktop:smoke
       - name: Checksum release files
@@ -51,3 +55,44 @@ jobs:
           name: package-screenshots
           if-no-files-found: ignore
           path: release/smoke-*.png
+
+  mac:
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - run: npm ci
+      - name: Package the macOS app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          CSC_FOR_PULL_REQUEST: 'true'
+        run: npm run desktop:package -- --mac
+      - run: node desktop/smoke-mac.mjs
+      - name: Test the installer
+        run: |
+          VERSION=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
+          mkdir -p "macdist/v$VERSION"
+          cp release/*.zip "macdist/v$VERSION/"
+          (cd "macdist/v$VERSION" && shasum -a 256 *.zip > SHA256SUMS)
+          cd macdist
+          python3 -m http.server 8791 >/dev/null 2>&1 &
+          sleep 1
+          cd ..
+          HOME="$RUNNER_TEMP/install-home" CITROPY_VERSION="$VERSION" CITROPY_BASE_URL="http://127.0.0.1:8791" sh scripts/install.sh
+          APP="$RUNNER_TEMP/install-home/Applications/Citropy.app"
+          test -x "$APP/Contents/MacOS/Citropy"
+          codesign --verify --deep --strict "$APP"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mac-package
+          if-no-files-found: ignore
+          path: |
+            release/*.zip
+            release/latest-mac.yml

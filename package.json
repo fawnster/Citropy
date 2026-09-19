@@ -25,6 +25,7 @@
     "desktop:install": "node desktop/install.mjs",
     "desktop:package": "node desktop/package.mjs",
     "desktop:smoke": "node desktop/smoke.mjs",
+    "desktop:smoke:mac": "node desktop/smoke-mac.mjs",
     "screenshots": "node tests/screenshots.mjs"
   },
   "dependencies": {

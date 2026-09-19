@@ -5,6 +5,7 @@ export interface DesktopWindowState {
   fullscreen: boolean;
   platform: string;
   development: boolean;
+  channel: "stable" | "lemon";
   version: string;
   notifications: boolean;
   electron: string;

@@ -17,6 +17,7 @@ files:
   - '!desktop/install.mjs'
   - '!desktop/start.mjs'
   - '!desktop/smoke.mjs'
+  - '!desktop/smoke-mac.mjs'
 linux:
   target: AppImage
   category: Development
@@ -24,6 +25,17 @@ linux:
   executableName: citropy
   syncDesktopName: true
   artifactName: Citropy-${version}-${arch}.AppImage
+mac:
+  target:
+    - target: zip
+      arch:
+        - arm64
+        - x64
+  category: public.app-category.developer-tools
+  icon: desktop/assets/citropy.png
+  identity: '-'
+  hardenedRuntime: false
+  artifactName: Citropy-${version}-${arch}.zip
 publish:
   provider: github
   owner: tinuxongit

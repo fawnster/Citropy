@@ -45,12 +45,10 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npm test
 
-  release:
+  linux:
     needs: check
     runs-on: ubuntu-22.04
     timeout-minutes: 45
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-node@v7
@@ -69,13 +67,86 @@ jobs:
         run: npm version "$VERSION" --no-git-tag-version
       - run: npm run desktop:package
       - run: npm run desktop:smoke
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-release
+          if-no-files-found: error
+          path: |
+            release/*.AppImage
+            release/latest-linux.yml
+
+  mac:
+    needs: check
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - run: npm ci
+      - name: Set version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: npm version "$VERSION" --no-git-tag-version
+      - name: Package the macOS app
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npm run desktop:package -- --mac
+      - run: node desktop/smoke-mac.mjs
+      - name: Test the installer
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p "macdist/v$VERSION"
+          cp release/*.zip "macdist/v$VERSION/"
+          (cd "macdist/v$VERSION" && shasum -a 256 *.zip > SHA256SUMS)
+          cd macdist
+          python3 -m http.server 8791 >/dev/null 2>&1 &
+          sleep 1
+          cd ..
+          HOME="$RUNNER_TEMP/install-home" CITROPY_VERSION="$VERSION" CITROPY_BASE_URL="http://127.0.0.1:8791" sh scripts/install.sh
+          APP="$RUNNER_TEMP/install-home/Applications/Citropy.app"
+          test -x "$APP/Contents/MacOS/Citropy"
+          codesign --verify --deep --strict "$APP"
+      - run: test -f release/latest-mac.yml
+      - uses: actions/upload-artifact@v7
+        with:
+          name: mac-release
+          if-no-files-found: error
+          path: |
+            release/*.zip
+            release/latest-mac.yml
+
+  publish:
+    needs: [linux, mac]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Collect release files
+        run: ls -l dist
       - name: Checksum release files
-        working-directory: release
-        run: sha256sum *.AppImage latest-linux.yml > SHA256SUMS
+        working-directory: dist
+        run: |
+          rm -f SHA256SUMS
+          sha256sum -- * > SHA256SUMS
       - name: Commit version and tag
         env:
           VERSION: ${{ inputs.version }}
         run: |
+          npm version "$VERSION" --no-git-tag-version
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add package.json package-lock.json
@@ -88,4 +159,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ inputs.version }}
-        run: gh release create "v$VERSION" release/*.AppImage release/latest-linux.yml release/SHA256SUMS --verify-tag --draft --title "Citropy $VERSION" --generate-notes
+        run: gh release create "v$VERSION" dist/SHA256SUMS dist/*.AppImage dist/latest-linux.yml dist/*.zip dist/latest-mac.yml --verify-tag --draft --title "Citropy $VERSION" --generate-notes

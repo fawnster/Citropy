@@ -21,7 +21,7 @@ try {
   const appRoot = join(root, "resources/app");
   await access(join(appRoot, "LICENSE"));
   await access(join(appRoot, "dist/index.html"));
-  for (const path of [".env", "tests", ".git", "web", "desktop/start.mjs", "desktop/install.mjs", "desktop/smoke.mjs", "node_modules/vite", "node_modules/playwright"]) {
+  for (const path of [".env", "tests", ".git", "web", "desktop/start.mjs", "desktop/install.mjs", "desktop/smoke.mjs", "desktop/smoke-mac.mjs", "node_modules/vite", "node_modules/playwright"]) {
     const present = await access(join(appRoot, path)).then(() => true, () => false);
     assert.equal(present, false, `Development file in release: ${path}`);
   }

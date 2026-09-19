@@ -46,11 +46,26 @@ await run(
   ["ci", "--omit=dev", "--no-audit", "--no-fund"],
   staging,
 );
+const platform =
+  ["--linux", "--mac", "--win"].find((flag) =>
+    process.argv.includes(flag),
+  ) ?? "--linux";
+const channelArgs =
+  process.env.CITROPY_CHANNEL === "lemon"
+    ? [
+        "-c.productName=Citropy Lemon",
+        "-c.appId=com.citropy.desktop.lemon",
+        "-c.linux.executableName=citropy-lemon",
+        "-c.linux.artifactName=Citropy-lemon-${arch}.AppImage",
+        "-c.mac.artifactName=Citropy-lemon-${arch}.zip",
+      ]
+    : [];
 await run(process.execPath, [
   join(root, "node_modules/electron-builder/cli.js"),
   "--config",
   "desktop/electron-builder.yml",
-  "--linux",
+  platform,
+  ...channelArgs,
   ...(process.argv.includes("--dir") ? ["--dir"] : []),
   "--publish",
   "never",

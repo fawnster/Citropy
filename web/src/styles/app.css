@@ -353,6 +353,19 @@
   height: 28px;
 }
 
+.channel-badge {
+  padding: 2px 6px;
+  border: 1px solid var(--accent-line);
+  border-radius: 5px;
+  color: var(--accent-text);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  line-height: 1.4;
+  text-transform: uppercase;
+  user-select: none;
+}
+
 .workspace-breadcrumb {
   display: flex;
   align-items: center;
