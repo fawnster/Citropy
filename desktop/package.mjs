@@ -41,9 +41,10 @@ await writeFile(
   join(staging, "package.json"),
   `${JSON.stringify(manifest, null, 2)}\n`,
 );
+const npm = process.env.npm_execpath;
 await run(
-  process.platform === "win32" ? "npm.cmd" : "npm",
-  ["ci", "--omit=dev", "--no-audit", "--no-fund"],
+  npm ? process.execPath : process.platform === "win32" ? "npm.cmd" : "npm",
+  [...(npm ? [npm] : []), "ci", "--omit=dev", "--no-audit", "--no-fund"],
   staging,
 );
 const platform =
