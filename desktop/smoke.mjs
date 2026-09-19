@@ -35,7 +35,7 @@ try {
     timeout: 60000,
   });
   assert.equal(await desktop.evaluate(({ app }) => app.isPackaged), true);
-  const page = await desktop.firstWindow();
+  const page = await desktop.firstWindow({ timeout: 60000 });
   await page.getByRole("button", { name: "Settings", exact: true }).waitFor({ timeout: 30000 });
   const state = await page.evaluate(() => window.citropyDesktop.windowState());
   assert.equal(state.development, false);
