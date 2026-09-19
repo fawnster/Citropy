@@ -110,15 +110,6 @@ jobs:
           node-version: '22.18.0'
           cache: npm
       - run: npm ci
-      - name: Probe the installer failure paths
-        shell: pwsh
-        run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Channel nope
-          Write-Output "PROBE unknown-channel exit: $LASTEXITCODE"
-          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Version 99.99.99
-          Write-Output "PROBE missing-release exit: $LASTEXITCODE"
-          powershell -NoProfile -Command "Write-Output ('PROBE child version: ' + \$PSVersionTable.PSVersion.ToString())"
-          throw "Probe complete"
       - name: Package the Windows app
         run: npm run desktop:package -- --win
       - run: node desktop/smoke-win.mjs
@@ -156,15 +147,20 @@ jobs:
             if (-not (Test-Path $installed)) { throw "PowerShell 5.1 install failed." }
             powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Uninstall
             if (Test-Path $installDir) { throw "The PowerShell 5.1 uninstall left $installDir behind." }
-            powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Channel nope 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0) { throw "The installer accepted an unknown channel." }
-            powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Version 99.99.99 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0) { throw "The installer accepted a missing release." }
+            powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Channel nope
+            $unknownChannel = $LASTEXITCODE
+            Write-Output "Installer exit code for an unknown channel: $unknownChannel"
+            if ($unknownChannel -eq 0) { throw "The installer accepted an unknown channel." }
+            powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Version 99.99.99
+            $missingRelease = $LASTEXITCODE
+            Write-Output "Installer exit code for a missing release: $missingRelease"
+            if ($missingRelease -eq 0) { throw "The installer accepted a missing release." }
           }
           finally {
             Get-Process -Name Citropy -ErrorAction SilentlyContinue | Stop-Process -Force
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           }
+          exit 0
       - name: Test the installer through the invoker scope
         shell: powershell
         run: |
@@ -189,6 +185,7 @@ jobs:
           finally {
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           }
+          exit 0
       - name: Check the update metadata
         shell: pwsh
         run: |
