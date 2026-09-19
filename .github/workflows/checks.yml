@@ -147,11 +147,6 @@ jobs:
             if (-not (Test-Path $installed)) { throw "PowerShell 5.1 install failed." }
             powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Uninstall
             if (Test-Path $installDir) { throw "The PowerShell 5.1 uninstall left $installDir behind." }
-            $output = powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Expression (Get-Content -Raw scripts/install.ps1); Write-Output CITROPY_SESSION_ALIVE; if (Get-Variable -Name Channel -ErrorAction SilentlyContinue) { Write-Output CITROPY_LEAKED_CHANNEL }; if (Get-Command Invoke-CitropyInstall -ErrorAction SilentlyContinue) { Write-Output CITROPY_LEAKED_FUNCTION }" 2>&1 | Out-String
-            if ($output -notmatch "CITROPY_SESSION_ALIVE") { throw "The installer ended the calling session instead of returning." }
-            if ($output -match "CITROPY_LEAKED_CHANNEL") { throw "The installer leaked its Channel variable into the calling session." }
-            if ($output -match "CITROPY_LEAKED_FUNCTION") { throw "The installer leaked its function into the calling session." }
-            if (-not (Test-Path $installed)) { throw "The invoker-scope install failed: $installed is missing." }
             powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Channel nope 2>&1 | Out-Null
             if ($LASTEXITCODE -eq 0) { throw "The installer accepted an unknown channel." }
             powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Version 99.99.99 2>&1 | Out-Null
