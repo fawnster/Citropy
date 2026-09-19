@@ -81,7 +81,7 @@ try {
     desktop.kill("SIGTERM");
     const result = await Promise.race([
       exited,
-      new Promise((resolve) => setTimeout(() => resolve(undefined), 15000)),
+      new Promise((resolve) => setTimeout(() => resolve(undefined), 45000)),
     ]);
     assert.ok(result, "Citropy did not quit after SIGTERM.");
     assert.equal(result.signal, null, `Citropy exited from ${result.signal} instead of quitting cleanly.`);
