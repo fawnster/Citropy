@@ -87,18 +87,19 @@ main() {
   if [ "${CITROPY_RELAUNCH:-}" = 1 ]; then
     relaunch="$relaunch_target"
   fi
+  wait_for_parent() {
+    [ -n "${CITROPY_PARENT_PID:-}" ] || return 0
+    count=0
+    while kill -0 "$CITROPY_PARENT_PID" 2>/dev/null; do
+      count=$((count + 1))
+      [ "$count" -lt 60 ] || return 0
+      sleep 1
+    done
+  }
   on_exit() {
     [ -z "$tmp" ] || rm -rf "$tmp"
     if [ -n "$relaunch" ]; then
-      parent="${CITROPY_PARENT_PID:-}"
-      if [ -n "$parent" ]; then
-        count=0
-        while kill -0 "$parent" 2>/dev/null; do
-          count=$((count + 1))
-          [ "$count" -lt 60 ] || break
-          sleep 1
-        done
-      fi
+      wait_for_parent
       if [ "$os" = macos ]; then
         open "$relaunch" >/dev/null 2>&1 || true
       else
@@ -110,8 +111,8 @@ main() {
   trap 'exit 130' INT TERM HUP
 
   app_pids() {
-    ps -Ao pid=,args= 2>/dev/null |
-      awk -v exe="$app/Contents/MacOS/$name" '$2 == exe { print $1 }'
+    ps -Ao pid=,command= 2>/dev/null |
+      awk -v exe="$app/Contents/MacOS/$name" '{ pid = $1; sub(/^[[:space:]]*[0-9]+[[:space:]]+/, ""); if (index($0, exe) == 1) print pid }'
   }
   quit_macos_app() {
     [ -n "$(app_pids)" ] || return 0
@@ -221,6 +222,8 @@ main() {
     reported=$(curl -fsSL "$BASE/$tag/version.json" 2>/dev/null | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' || true)
     if [ -n "$reported" ]; then label="Citropy Lemon $reported"; fi
   fi
+
+  wait_for_parent
 
   if [ "$os" = linux ]; then
     mkdir -p "$bin_dir"

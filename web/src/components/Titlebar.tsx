@@ -51,13 +51,16 @@ export function Titlebar({
   const header = useRef<HTMLElement>(null);
   useEffect(() => {
     const element = header.current;
-    if (!element) return;
-    const report = () => {
+    const report = window.citropyDesktop?.titlebarHeight;
+    if (!element || !report) return;
+    let last = 0;
+    const observer = new ResizeObserver(() => {
       const height = element.getBoundingClientRect().height;
-      if (height > 0) window.citropyDesktop?.titlebarHeight?.(height);
-    };
-    report();
-    const observer = new ResizeObserver(report);
+      if (height > 0 && height !== last) {
+        last = height;
+        report(height);
+      }
+    });
     observer.observe(element);
     return () => observer.disconnect();
   }, []);

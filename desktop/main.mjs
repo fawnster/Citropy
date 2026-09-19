@@ -42,7 +42,7 @@ let forcedExit = false;
 process.on("SIGTERM", () => {
   forcedExit = true;
   app.quit();
-  const timer = setTimeout(() => app.exit(0), 15000);
+  const timer = setTimeout(() => app.exit(1), 15000);
   timer.unref();
 });
 app.on("second-instance", () => {
@@ -101,8 +101,7 @@ app.on("before-quit", (event) => {
     for (const tab of tabs.values())
       tab.view.webContents.close({ waitForBeforeUnload: false });
     socket?.close();
-    if (forcedExit) app.exit(0);
-    else app.quit();
+    app.quit();
   });
 });
 
@@ -858,7 +857,7 @@ app
           if (process.platform === "darwin") {
             const directory = resolve(process.execPath, "..", "..", "..", "..");
             try {
-              accessSync(resolve(directory, ".."), constants.W_OK);
+              accessSync(directory, constants.W_OK);
             } catch {
               throw new Error(`Citropy cannot replace itself in ${directory}. Move the app to your Applications folder and try again.`);
             }
@@ -948,7 +947,13 @@ app
       } else throw new Error("Unknown window action");
     });
     ipcMain.on("window:titlebar-height", (event, height) => {
-      if (!trusted(event)) return;
+      let sender;
+      try {
+        sender = trusted(event);
+      } catch {
+        return;
+      }
+      if (!sender) return;
       if (process.platform !== "darwin" || window.isDestroyed()) return;
       if (!Number.isFinite(height) || height < 24 || height > 200) return;
       const buttonHeight = Number.parseFloat(release()) >= 25 ? 14 : 16;
@@ -1107,8 +1112,8 @@ app
   })
   .catch(async (error) => {
     process.stderr.write(`${error.message}\n`);
-    if (app.isPackaged && !quitting && !forcedExit) dialog.showErrorBox("Citropy could not open", error.message);
+    if (quitting) return;
+    if (app.isPackaged && !forcedExit) dialog.showErrorBox("Citropy could not open", error.message);
     await backend?.stop().catch(() => {});
-    if (forcedExit) app.exit(0);
-    else app.quit();
+    app.quit();
   });

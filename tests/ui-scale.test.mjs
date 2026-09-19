@@ -34,6 +34,36 @@ test("every fixed icon size has a scaled CSS size", () => {
     assert.ok(css.includes(`:where(svg, img)[width="${size}"] { width: ${size}px; height: ${size}px; }`), `no scaled rule for icon size ${size}`);
 });
 
+test("the macOS title bar inset keeps its fixed clearance while the gap scales", async () => {
+  const from = styles + "app.css";
+  const { css } = await postcss([scalePixels()]).process(readFileSync(from, "utf8"), { from });
+  assert.ok(
+    css.includes("calc(round(76px * var(--ui-scale), 1px) / var(--ui-scale) + round(6px * var(--ui-scale), 1px))"),
+    "the title bar padding no longer cancels the scale for its fixed part",
+  );
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
+    for (const scale of [90, 100, 120, 150]) {
+      await page.setContent(`<style>${css}</style><div class="shell" data-sidebar="false"><div class="topbar-left" id="pane"></div></div>`);
+      await page.evaluate((value) => {
+        document.documentElement.dataset.platform = "darwin";
+        document.documentElement.style.setProperty("--ui-scale", String(value));
+      }, scale / 100);
+      const computed = await page.$eval("#pane", (element) => {
+        const style = getComputedStyle(element);
+        return { padding: parseFloat(style.paddingLeft), width: parseFloat(style.width) };
+      });
+      const expectedPadding = 76 + 6 * (scale / 100);
+      const expectedWidth = 76 + 186 * (scale / 100);
+      assert.ok(Math.abs(computed.padding - expectedPadding) < 1.5, `padding ${computed.padding} at ${scale}%`);
+      assert.ok(Math.abs(computed.width - expectedWidth) < 1.5, `width ${computed.width} at ${scale}%`);
+    }
+  } finally {
+    await browser.close();
+  }
+});
+
 test("working indicator cells render the same whole-pixel size at every UI scale", async () => {
   const from = styles + "conversation.css";
   const { css } = await postcss([scalePixels()]).process(readFileSync(from, "utf8"), { from });
