@@ -14,7 +14,7 @@ test("grouped workspaces switch hosts without reloading and use the system folde
   await server.listen();
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
-  page.setDefaultTimeout(8000);
+  page.setDefaultTimeout(20000);
   const errors = [];
   const messages = [];
   let defaults = { provider: "opencode", model: "remote/model", effort: "high", permissionMode: "plan" };

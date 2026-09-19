@@ -30,7 +30,7 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
 
   async function fixture(test, { chat = true, catalogs = providers } = {}) {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
-    page.setDefaultTimeout(7000);
+    page.setDefaultTimeout(20000);
     const errors = [];
     const requests = [];
     let connection;

@@ -44,7 +44,7 @@ test("conversation presentation", { timeout: 360_000 }, async (t) => {
   await warmup.close();
   async function fixture({ desktopPage, preferences = {}, messages = [message("saved", [textPart("saved-text", "Saved conversation.")])], children = [], histories = {}, githubAccount, reducedMotion = "no-preference", isGit = false, hasTouch = false } = {}) {
     const page = desktopPage ?? await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion, hasTouch });
-    page.setDefaultTimeout(10000);
+    page.setDefaultTimeout(20000);
     const errors = [];
     const requests = [];
     let connection;

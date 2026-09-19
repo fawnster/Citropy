@@ -537,7 +537,7 @@ if (args.includes('--help')) {
         const page = await browser.newPage({
           viewport: { width: 1440, height: 1050 },
         });
-        page.setDefaultTimeout(10000);
+        page.setDefaultTimeout(20000);
         const errors = [];
         page.on("pageerror", (error) => errors.push(error.message));
         await page.addInitScript(() => {

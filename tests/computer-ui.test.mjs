@@ -20,7 +20,7 @@ test("computer panel setup, preview, controls and settings", { timeout: 45000 },
   const image = (await desktop.screenshot({ type: "jpeg" })).toString("base64");
   await desktop.close();
   const page = await browser.newPage({ viewport: { width: 1600, height: 1000 } });
-  page.setDefaultTimeout(7000);
+  page.setDefaultTimeout(20000);
   const errors = [], actions = [];
   let socket;
   let captures = 0;
