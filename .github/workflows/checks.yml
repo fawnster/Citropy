@@ -156,6 +156,25 @@ jobs:
             Get-Process -Name Citropy -ErrorAction SilentlyContinue | Stop-Process -Force
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
           }
+      - name: Test the installer through the invoker scope
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $server = Start-Process python -ArgumentList "-m","http.server","8794","--directory","windist" -PassThru
+          Start-Sleep -Seconds 2
+          try {
+            $env:CITROPY_VERSION = (Get-Content package.json -Raw | ConvertFrom-Json).version
+            $env:CITROPY_BASE_URL = "http://127.0.0.1:8794"
+            Invoke-Expression (Get-Content -Raw scripts/install.ps1)
+            Write-Output "CITROPY_SESSION_ALIVE"
+            if (Get-Variable -Name Channel -ErrorAction SilentlyContinue) { throw "The installer leaked its Channel variable into the calling session." }
+            if (Get-Command Invoke-CitropyInstall -ErrorAction SilentlyContinue) { throw "The installer leaked its function into the calling session." }
+            $installed = Join-Path $env:LOCALAPPDATA "Programs\citropy\Citropy.exe"
+            if (-not (Test-Path $installed)) { throw "The invoker-scope install failed: $installed is missing." }
+          }
+          finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
       - name: Check the update metadata
         shell: pwsh
         run: |
