@@ -45,7 +45,7 @@ test("the macOS title bar inset keeps its fixed clearance while the gap scales",
   try {
     const page = await browser.newPage();
     for (const scale of [90, 100, 120, 150]) {
-      await page.setContent(`<style>${css}</style><div class="shell" data-sidebar="false"><div class="topbar-left" id="pane"></div></div>`);
+      await page.setContent(`<style>${css}</style><div id="root" style="container: application / inline-size; width: 1200px"><div class="shell" data-sidebar="false"><div class="topbar-left" id="pane"></div></div></div>`);
       await page.evaluate((value) => {
         document.documentElement.dataset.platform = "darwin";
         document.documentElement.style.setProperty("--ui-scale", String(value));
