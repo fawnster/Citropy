@@ -1,4 +1,5 @@
 import { GitCommitHorizontal, Server } from "lucide-react";
+import { useEffect, useRef } from "react";
 import { environmentName, isRemote } from "../lib/environment.ts";
 import { useI18n } from "../lib/i18n.ts";
 import { GitBranch, PanelLeft, PanelRight } from "./icons.ts";
@@ -47,9 +48,22 @@ export function Titlebar({
   const inspectorOpen = useApp((state) => state.inspectorOpen);
 
   const project = projects.find((entry) => entry.id === activeProjectId);
+  const header = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const element = header.current;
+    if (!element) return;
+    const report = () => {
+      const height = element.getBoundingClientRect().height;
+      if (height > 0) window.citropyDesktop?.titlebarHeight?.(height);
+    };
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
 
   return (
-    <header className="topbar" data-desktop={Boolean(window.citropyDesktop)}>
+    <header ref={header} className="topbar" data-desktop={Boolean(window.citropyDesktop)}>
       <div className="topbar-left">
         <div className="brand">
           <img

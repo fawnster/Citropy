@@ -29,6 +29,7 @@ declare global {
       updateCommand(action: "check" | "download" | "install"): Promise<import("../../shared/app-update.ts").AppUpdateState>;
       onUpdateState(callback: (state: import("../../shared/app-update.ts").AppUpdateState) => void): () => void;
       windowState(): Promise<DesktopWindowState>;
+      titlebarHeight(height: number): void;
       windowCommand(
         command: "minimize" | "maximize" | "close" | "reload" | "restart",
       ): Promise<void>;

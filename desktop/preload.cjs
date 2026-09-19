@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld("citropyDesktop", {
   },
   windowState: () => ipcRenderer.invoke("window:state"),
   windowCommand: (command) => ipcRenderer.invoke("window:command", command),
+  titlebarHeight: (height) => ipcRenderer.send("window:titlebar-height", height),
   onWindowState: (callback) => {
     const listener = (_, state) => callback(state);
     ipcRenderer.on("window:state", listener);

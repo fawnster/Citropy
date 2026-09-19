@@ -2,6 +2,7 @@ import { SshEnvironments, sshHosts } from "./ssh.mjs";
 import { chooseNativeFolder } from "./folder-picker.mjs";
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
+import { release } from "node:os";
 import { createAppUpdater } from "./updates.mjs";
 import { packagedBackend } from "./backend.mjs";
 import { initializeProfiles, browserProfile, handleProfiles } from "./browser-profiles.mjs";
@@ -945,6 +946,16 @@ app
         app.relaunch();
         app.quit();
       } else throw new Error("Unknown window action");
+    });
+    ipcMain.on("window:titlebar-height", (event, height) => {
+      if (!trusted(event)) return;
+      if (process.platform !== "darwin" || window.isDestroyed()) return;
+      if (!Number.isFinite(height) || height < 24 || height > 200) return;
+      const buttonHeight = Number.parseFloat(release()) >= 25 ? 14 : 16;
+      window.setWindowButtonPosition({
+        x: 15,
+        y: Math.round((height - buttonHeight) / 2),
+      });
     });
     for (const event of [
       "maximize",
