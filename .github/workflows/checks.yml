@@ -118,6 +118,7 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Version 99.99.99
           Write-Output "PROBE missing-release exit: $LASTEXITCODE"
           powershell -NoProfile -Command "Write-Output ('PROBE child version: ' + \$PSVersionTable.PSVersion.ToString())"
+          throw "Probe complete"
       - name: Package the Windows app
         run: npm run desktop:package -- --win
       - run: node desktop/smoke-win.mjs
