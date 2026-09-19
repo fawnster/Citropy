@@ -32,10 +32,11 @@ jobs:
       - run: npm run typecheck
       - run: npm audit --omit=dev --audit-level=high
       - run: npm test
-      - name: Check the installer script
+      - name: Check the installer scripts
         run: |
           sh -n scripts/install.sh
           shellcheck -s sh scripts/install.sh
+          pwsh -NoProfile -Command '$errors = $null; [System.Management.Automation.Language.Parser]::ParseFile("scripts/install.ps1", [ref]$null, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }'
       - run: npm run desktop:package
       - run: npm run desktop:smoke
       - name: Checksum release files
@@ -96,3 +97,44 @@ jobs:
           path: |
             release/*.zip
             release/latest-mac.yml
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - run: npm ci
+      - name: Package the Windows app
+        run: npm run desktop:package -- --win
+      - run: node desktop/smoke-win.mjs
+      - name: Test the installer
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $dir = "windist/v$version"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item "release/*.exe" $dir
+          $lines = Get-ChildItem "$dir/*.exe" | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" }
+          Set-Content -Path "$dir/SHA256SUMS" -Value $lines
+          $server = Start-Process python -ArgumentList "-m","http.server","8794","--directory","windist" -PassThru
+          Start-Sleep -Seconds 2
+          $env:CITROPY_VERSION = $version
+          $env:CITROPY_BASE_URL = "http://127.0.0.1:8794"
+          ./scripts/install.ps1
+          $installed = Join-Path $env:LOCALAPPDATA "Programs\Citropy\Citropy.exe"
+          if (-not (Test-Path $installed)) { throw "The installer finished but $installed is missing." }
+          Stop-Process -Id $server.Id -Force
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: windows-package
+          if-no-files-found: ignore
+          path: |
+            release/*.exe
+            release/latest.yml

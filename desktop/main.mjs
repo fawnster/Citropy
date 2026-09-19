@@ -111,7 +111,8 @@ const emit = (event) => {
 connectComputerEvents(emit);
 
 const updateRepository = "tinuxongit/Citropy";
-const updateScriptUrl = `https://raw.githubusercontent.com/${updateRepository}/main/scripts/install.sh`;
+const updateScriptName = process.platform === "win32" ? "install.ps1" : "install.sh";
+const updateScriptUrl = `https://raw.githubusercontent.com/${updateRepository}/main/scripts/${updateScriptName}`;
 
 function macScriptUpdates() {
   if (process.platform !== "darwin" || !app.isPackaged) return false;
@@ -849,7 +850,7 @@ app
         install: async () => {
           const response = await fetch(updateScriptUrl, { signal: AbortSignal.timeout(15000) });
           if (!response.ok) throw new Error(`Could not download the installer (${response.status}).`);
-          const script = join(app.getPath("userData"), "install.sh");
+          const script = join(app.getPath("userData"), updateScriptName);
           mkdirSync(app.getPath("userData"), { recursive: true });
           writeFileSync(script, await response.text(), { mode: 0o700 });
           const env = { ...process.env, CITROPY_RELAUNCH: "1", CITROPY_CHANNEL: channel, CITROPY_PARENT_PID: String(process.pid) };
@@ -867,7 +868,13 @@ app
             env.CITROPY_BIN_DIR = resolve(process.env.APPIMAGE, "..");
           }
           const log = openSync(join(app.getPath("userData"), "update.log"), "a");
-          const child = spawn("/bin/sh", [script], { detached: true, stdio: ["ignore", log, log], env });
+          const child = spawn(
+            process.platform === "win32" ? "powershell.exe" : "/bin/sh",
+            process.platform === "win32"
+              ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]
+              : [script],
+            { detached: true, stdio: ["ignore", log, log], env, windowsHide: true },
+          );
           closeSync(log);
           child.unref();
           app.quit();

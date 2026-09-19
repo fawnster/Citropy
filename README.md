@@ -99,6 +99,14 @@ curl -fsSL https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/ins
 
 On Linux it installs `~/.local/bin/citropy` and adds Citropy to your application menu. On macOS it installs `~/Applications/Citropy.app`, ad-hoc signed so Apple Silicon runs it, without the quarantine tag, so it opens without a Gatekeeper prompt. A zip downloaded through a browser instead is blocked by Gatekeeper on macOS 15 and later. Re-run the same command to update, and pass `--uninstall` to remove it. On macOS the update button in Settings runs this installer for you.
 
+On Windows, in PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1 | iex
+```
+
+It installs per user under `%LOCALAPPDATA%\Programs\Citropy` with no administrator rights, adds a Start menu entry, and updates itself in the app. Because a PowerShell download carries no Mark of the Web, Windows shows no SmartScreen warning. Uninstall with `$s = irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1; & ([scriptblock]::Create($s)) -Uninstall`.
+
 ### Lemon builds
 
 Every push to main publishes a rolling **Lemon** build with the newest changes. It installs next to Citropy with its own data and settings, and shows a Lemon tag beside the title. These builds are for testing and can break.
@@ -107,7 +115,13 @@ Every push to main publishes a rolling **Lemon** build with the newest changes. 
 curl -fsSL https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.sh | sh -s -- --channel=lemon
 ```
 
-Remove it later with `--channel=lemon --uninstall`.
+On Windows:
+
+```powershell
+$s = irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1; & ([scriptblock]::Create($s)) -Channel lemon
+```
+
+Remove it later with `--channel=lemon --uninstall` on Linux and macOS, or `-Channel lemon -Uninstall` on Windows.
 
 From a source checkout instead:
 

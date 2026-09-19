@@ -119,8 +119,54 @@ jobs:
             release/*.zip
             release/latest-mac.yml
 
+  windows:
+    needs: check
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - run: npm ci
+      - name: Set version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: npm version "$VERSION" --no-git-tag-version
+      - name: Package the Windows app
+        run: npm run desktop:package -- --win
+      - run: node desktop/smoke-win.mjs
+      - name: Test the installer
+        shell: pwsh
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          $dir = "windist/v$env:VERSION"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item "release/*.exe" $dir
+          $lines = Get-ChildItem "$dir/*.exe" | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" }
+          Set-Content -Path "$dir/SHA256SUMS" -Value $lines
+          $server = Start-Process python -ArgumentList "-m","http.server","8794","--directory","windist" -PassThru
+          Start-Sleep -Seconds 2
+          $env:CITROPY_BASE_URL = "http://127.0.0.1:8794"
+          ./scripts/install.ps1
+          $installed = Join-Path $env:LOCALAPPDATA "Programs\Citropy\Citropy.exe"
+          if (-not (Test-Path $installed)) { throw "The installer finished but $installed is missing." }
+          Stop-Process -Id $server.Id -Force
+      - run: |
+          if (-not (Test-Path release/latest.yml)) { throw "latest.yml is missing." }
+        shell: pwsh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows-release
+          if-no-files-found: error
+          path: |
+            release/*.exe
+            release/latest.yml
+
   publish:
-    needs: [linux, mac]
+    needs: [linux, mac, windows]
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     permissions:
@@ -159,4 +205,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ inputs.version }}
-        run: gh release create "v$VERSION" dist/SHA256SUMS dist/*.AppImage dist/latest-linux.yml dist/*.zip dist/latest-mac.yml --verify-tag --draft --title "Citropy $VERSION" --generate-notes
+        run: gh release create "v$VERSION" dist/SHA256SUMS dist/*.AppImage dist/latest-linux.yml dist/*.zip dist/latest-mac.yml dist/*.exe dist/latest.yml --verify-tag --draft --title "Citropy $VERSION" --generate-notes

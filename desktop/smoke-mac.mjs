@@ -30,7 +30,7 @@ try {
     await access(join(appRoot, "LICENSE"));
     await access(join(appRoot, "dist/index.html"));
     await access(join(app, "Contents/Info.plist"));
-    for (const path of [".env", "tests", ".git", "web", "desktop/start.mjs", "desktop/install.mjs", "desktop/smoke.mjs", "desktop/smoke-mac.mjs", "node_modules/vite", "node_modules/playwright"]) {
+    for (const path of [".env", "tests", ".git", "web", "desktop/start.mjs", "desktop/install.mjs", "desktop/smoke.mjs", "desktop/smoke-mac.mjs", "desktop/smoke-win.mjs", "node_modules/vite", "node_modules/playwright"]) {
       assert.equal(await exists(join(appRoot, path)), false, `Development file in release: ${path}`);
     }
     assert.equal(JSON.parse(await readFile(join(appRoot, "package.json"), "utf8")).version, version);

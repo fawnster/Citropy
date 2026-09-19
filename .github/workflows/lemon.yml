@@ -112,8 +112,56 @@ jobs:
           if-no-files-found: error
           path: release/*.zip
 
+  windows:
+    needs: check
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - run: npm ci
+      - name: Set version
+        run: |
+          CURRENT=$(node -e "console.log(JSON.parse(require('fs').readFileSync('package.json','utf8')).version)")
+          NEXT=$(node -e "const v = JSON.parse(require('fs').readFileSync('package.json','utf8')).version.split('.').map(Number); v[2] += 1; console.log(v.join('.'))")
+          npm version "$NEXT-lemon.${GITHUB_RUN_NUMBER}" --no-git-tag-version
+        shell: bash
+      - name: Package the Windows app
+        env:
+          CITROPY_CHANNEL: lemon
+        run: npm run desktop:package -- --win
+      - name: Check the artifact
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "release/Citropy-lemon-x64-Setup.exe")) { throw "Citropy-lemon-x64-Setup.exe is missing." }
+      - name: Test the installer
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $dir = "windist/lemon"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          Copy-Item "release/*.exe" $dir
+          $lines = Get-ChildItem "$dir/*.exe" | ForEach-Object { "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)" }
+          Set-Content -Path "$dir/SHA256SUMS" -Value $lines
+          Set-Content -Path "$dir/version.json" -Value "{`"version`":`"$version`"}"
+          $server = Start-Process python -ArgumentList "-m","http.server","8795","--directory","windist" -PassThru
+          Start-Sleep -Seconds 2
+          $env:CITROPY_BASE_URL = "http://127.0.0.1:8795"
+          ./scripts/install.ps1 -Channel lemon
+          $installed = Join-Path $env:LOCALAPPDATA "Programs\Citropy Lemon\Citropy Lemon.exe"
+          if (-not (Test-Path $installed)) { throw "The installer finished but $installed is missing." }
+          Stop-Process -Id $server.Id -Force
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lemon-windows
+          if-no-files-found: error
+          path: release/*.exe
+
   publish:
-    needs: [linux, mac]
+    needs: [linux, mac, windows]
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     permissions:
@@ -152,6 +200,6 @@ jobs:
           if ! gh release view lemon >/dev/null 2>&1; then
             gh release create lemon --prerelease --title "Citropy Lemon" --notes "$NOTES"
           fi
-          gh release upload lemon dist/*.AppImage dist/*.zip dist/version.json --clobber
+          gh release upload lemon dist/*.AppImage dist/*.zip dist/*.exe dist/version.json --clobber
           gh release upload lemon dist/SHA256SUMS --clobber
           gh release edit lemon --title "Citropy Lemon" --notes "$NOTES"

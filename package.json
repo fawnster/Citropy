@@ -26,6 +26,7 @@
     "desktop:package": "node desktop/package.mjs",
     "desktop:smoke": "node desktop/smoke.mjs",
     "desktop:smoke:mac": "node desktop/smoke-mac.mjs",
+    "desktop:smoke:win": "node desktop/smoke-win.mjs",
     "screenshots": "node tests/screenshots.mjs"
   },
   "dependencies": {
