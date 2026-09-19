@@ -149,11 +149,18 @@ jobs:
           Set-Content -Path "$dir/SHA256SUMS" -Value $lines
           $server = Start-Process python -ArgumentList "-m","http.server","8794","--directory","windist" -PassThru
           Start-Sleep -Seconds 2
-          $env:CITROPY_BASE_URL = "http://127.0.0.1:8794"
-          ./scripts/install.ps1
-          $installed = Join-Path $env:LOCALAPPDATA "Programs\Citropy\Citropy.exe"
-          if (-not (Test-Path $installed)) { throw "The installer finished but $installed is missing." }
-          Stop-Process -Id $server.Id -Force
+          try {
+            $env:CITROPY_VERSION = $env:VERSION
+            $env:CITROPY_BASE_URL = "http://127.0.0.1:8794"
+            ./scripts/install.ps1
+            $installed = Join-Path $env:LOCALAPPDATA "Programs\citropy\Citropy.exe"
+            if (-not (Test-Path $installed)) { throw "The installer finished but $installed is missing." }
+            $version = (Get-Item $installed).VersionInfo.ProductVersion
+            if ($version -and -not $version.StartsWith($env:VERSION)) { throw "Installed version $version does not match $env:VERSION." }
+          }
+          finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
       - run: |
           if (-not (Test-Path release/latest.yml)) { throw "latest.yml is missing." }
         shell: pwsh
@@ -163,6 +170,7 @@ jobs:
           if-no-files-found: error
           path: |
             release/*.exe
+            release/*.exe.blockmap
             release/latest.yml
 
   publish:
@@ -205,4 +213,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ inputs.version }}
-        run: gh release create "v$VERSION" dist/SHA256SUMS dist/*.AppImage dist/latest-linux.yml dist/*.zip dist/latest-mac.yml dist/*.exe dist/latest.yml --verify-tag --draft --title "Citropy $VERSION" --generate-notes
+        run: gh release create "v$VERSION" dist/SHA256SUMS dist/*.AppImage dist/latest-linux.yml dist/*.zip dist/latest-mac.yml dist/*.exe dist/*.exe.blockmap dist/latest.yml --verify-tag --draft --title "Citropy $VERSION" --generate-notes

@@ -105,7 +105,7 @@ On Windows, in PowerShell:
 irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1 | iex
 ```
 
-It installs per user under `%LOCALAPPDATA%\Programs\Citropy` with no administrator rights, adds a Start menu entry, and updates itself in the app. Because a PowerShell download carries no Mark of the Web, Windows shows no SmartScreen warning. Uninstall with `$s = irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1; & ([scriptblock]::Create($s)) -Uninstall`.
+It installs per user under `%LOCALAPPDATA%\Programs\citropy` with no administrator rights, adds a Start menu entry, and updates itself in the app. Because a PowerShell download carries no Mark of the Web, Windows shows no SmartScreen warning. Machines with Smart App Control turned on still block unsigned apps by design, which needs a signed build or that setting off. Uninstall with `$s = irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1; & ([scriptblock]::Create($s)) -Uninstall`.
 
 ### Lemon builds
 

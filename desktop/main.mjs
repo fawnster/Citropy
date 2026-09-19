@@ -868,8 +868,9 @@ app
             env.CITROPY_BIN_DIR = resolve(process.env.APPIMAGE, "..");
           }
           const log = openSync(join(app.getPath("userData"), "update.log"), "a");
+          const powershell = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
           const child = spawn(
-            process.platform === "win32" ? "powershell.exe" : "/bin/sh",
+            process.platform === "win32" ? powershell : "/bin/sh",
             process.platform === "win32"
               ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]
               : [script],

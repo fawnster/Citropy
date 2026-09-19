@@ -42,8 +42,10 @@ await writeFile(
   `${JSON.stringify(manifest, null, 2)}\n`,
 );
 const npm = process.env.npm_execpath;
+if (!npm && process.platform === "win32")
+  throw new Error("Run desktop packaging through npm run so that npm's CLI path is available.");
 await run(
-  npm ? process.execPath : process.platform === "win32" ? "npm.cmd" : "npm",
+  npm ? process.execPath : "npm",
   [...(npm ? [npm] : []), "ci", "--omit=dev", "--no-audit", "--no-fund"],
   staging,
 );
@@ -56,6 +58,7 @@ const channelArgs =
     ? [
         "-c.productName=Citropy Lemon",
         "-c.appId=com.citropy.desktop.lemon",
+        "-c.extraMetadata.name=citropy-lemon",
         "-c.linux.executableName=citropy-lemon",
         "-c.linux.artifactName=Citropy-lemon-${arch}.AppImage",
         "-c.mac.artifactName=Citropy-lemon-${arch}.zip",

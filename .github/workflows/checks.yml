@@ -124,12 +124,23 @@ jobs:
           Set-Content -Path "$dir/SHA256SUMS" -Value $lines
           $server = Start-Process python -ArgumentList "-m","http.server","8794","--directory","windist" -PassThru
           Start-Sleep -Seconds 2
-          $env:CITROPY_VERSION = $version
-          $env:CITROPY_BASE_URL = "http://127.0.0.1:8794"
-          ./scripts/install.ps1
-          $installed = Join-Path $env:LOCALAPPDATA "Programs\Citropy\Citropy.exe"
-          if (-not (Test-Path $installed)) { throw "The installer finished but $installed is missing." }
-          Stop-Process -Id $server.Id -Force
+          $installed = Join-Path $env:LOCALAPPDATA "Programs\citropy\Citropy.exe"
+          $installDir = Split-Path $installed
+          try {
+            $env:CITROPY_VERSION = $version
+            $env:CITROPY_BASE_URL = "http://127.0.0.1:8794"
+            ./scripts/install.ps1
+            if (-not (Test-Path $installed)) { throw "PowerShell 7 install failed: $installed is missing." }
+            ./scripts/install.ps1 -Uninstall
+            if (Test-Path $installDir) { throw "The uninstaller left $installDir behind." }
+            powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1
+            if (-not (Test-Path $installed)) { throw "PowerShell 5.1 install failed." }
+            $output = powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((Get-Content -Raw scripts/install.ps1))); Write-Output CITROPY_SESSION_ALIVE" 2>&1 | Out-String
+            if ($output -notmatch "CITROPY_SESSION_ALIVE") { throw "The installer ended the calling session instead of returning." }
+          }
+          finally {
+            Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue
+          }
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -137,4 +148,5 @@ jobs:
           if-no-files-found: ignore
           path: |
             release/*.exe
+            release/*.exe.blockmap
             release/latest.yml

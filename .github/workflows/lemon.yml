@@ -151,8 +151,10 @@ jobs:
           Start-Sleep -Seconds 2
           $env:CITROPY_BASE_URL = "http://127.0.0.1:8795"
           ./scripts/install.ps1 -Channel lemon
-          $installed = Join-Path $env:LOCALAPPDATA "Programs\Citropy Lemon\Citropy Lemon.exe"
+          $installed = Join-Path $env:LOCALAPPDATA "Programs\citropy-lemon\Citropy Lemon.exe"
           if (-not (Test-Path $installed)) { throw "The installer finished but $installed is missing." }
+          $stable = Join-Path $env:LOCALAPPDATA "Programs\citropy\Citropy.exe"
+          if (Test-Path $stable) { throw "Lemon installed into the stable folder." }
           Stop-Process -Id $server.Id -Force
       - uses: actions/upload-artifact@v7
         with:
