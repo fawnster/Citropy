@@ -110,6 +110,14 @@ jobs:
           node-version: '22.18.0'
           cache: npm
       - run: npm ci
+      - name: Probe the installer failure paths
+        shell: pwsh
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Channel nope
+          Write-Output "PROBE unknown-channel exit: $LASTEXITCODE"
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Version 99.99.99
+          Write-Output "PROBE missing-release exit: $LASTEXITCODE"
+          powershell -NoProfile -Command "Write-Output ('PROBE child version: ' + \$PSVersionTable.PSVersion.ToString())"
       - name: Package the Windows app
         run: npm run desktop:package -- --win
       - run: node desktop/smoke-win.mjs
