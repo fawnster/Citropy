@@ -91,5 +91,5 @@ try {
   console.log(`Citropy ${version}: both macOS bundles verified, and the ${hostArch} app passed startup and shutdown.`);
 } finally {
   if (desktop && desktop.exitCode === null) desktop.kill("SIGKILL");
-  await rm(directory, { recursive: true, force: true });
+  await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
 }

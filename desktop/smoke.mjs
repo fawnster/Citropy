@@ -65,5 +65,5 @@ try {
 } finally {
   await desktop?.close();
   display.kill();
-  await rm(directory, { recursive: true, force: true });
+  await rm(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
 }
