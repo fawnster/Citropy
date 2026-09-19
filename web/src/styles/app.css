@@ -650,6 +650,10 @@
     display: none;
   }
 
+  :root[data-platform="darwin"] .notification-center {
+    left: calc(8px - (76px / var(--ui-scale) + 6px));
+  }
+
   .topbar-center {
     padding: 0 5px;
     gap: 7px;
