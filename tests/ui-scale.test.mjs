@@ -45,19 +45,21 @@ test("the macOS title bar inset keeps its fixed clearance while the gap scales",
   try {
     const page = await browser.newPage();
     for (const scale of [90, 100, 120, 150]) {
-      await page.setContent(`<style>${css}</style><div id="root" style="container: application / inline-size; width: 1200px"><div class="shell" data-sidebar="false"><div class="topbar-left" id="pane"></div></div></div>`);
-      await page.evaluate((value) => {
-        document.documentElement.dataset.platform = "darwin";
-        document.documentElement.style.setProperty("--ui-scale", String(value));
-      }, scale / 100);
-      const computed = await page.$eval("#pane", (element) => {
-        const style = getComputedStyle(element);
-        return { padding: parseFloat(style.paddingLeft), width: parseFloat(style.width) };
-      });
-      const expectedPadding = 76 + 6 * (scale / 100);
-      const expectedWidth = 76 + 186 * (scale / 100);
-      assert.ok(Math.abs(computed.padding - expectedPadding) < 1.5, `padding ${computed.padding} at ${scale}%`);
-      assert.ok(Math.abs(computed.width - expectedWidth) < 1.5, `width ${computed.width} at ${scale}%`);
+      for (const width of [1200, 720 * (scale / 100) - 1]) {
+        await page.setContent(`<style>${css}</style><div id="root" style="container: application / inline-size; width: ${width}px"><div class="shell" data-sidebar="false"><div class="topbar-left" id="pane"></div></div></div>`);
+        await page.evaluate((value) => {
+          document.documentElement.dataset.platform = "darwin";
+          document.documentElement.style.setProperty("--ui-scale", String(value));
+        }, scale / 100);
+        const computed = await page.$eval("#pane", (element) => {
+          const style = getComputedStyle(element);
+          return { padding: parseFloat(style.paddingLeft), width: parseFloat(style.width) };
+        });
+        const expectedPadding = 76 + 6 * (scale / 100);
+        const expectedWidth = 76 + 186 * (scale / 100);
+        assert.ok(Math.abs(computed.padding - expectedPadding) < 1.5, `padding ${computed.padding} at ${scale}% and ${width}px`);
+        if (width === 1200) assert.ok(Math.abs(computed.width - expectedWidth) < 1.5, `width ${computed.width} at ${scale}%`);
+      }
     }
   } finally {
     await browser.close();

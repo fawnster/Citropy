@@ -104,7 +104,11 @@ jobs:
           (cd "macdist/v$VERSION" && shasum -a 256 *.zip > SHA256SUMS)
           cd macdist
           python3 -m http.server 8791 >/dev/null 2>&1 &
-          sleep 1
+          for attempt in $(seq 1 40); do
+            curl -fsS -o /dev/null "http://127.0.0.1:8791/" && break
+            sleep 0.5
+          done
+          curl -fsS -o /dev/null "http://127.0.0.1:8791/" || { echo "The local release server did not answer on port 8791." >&2; exit 1; }
           cd ..
           HOME="$RUNNER_TEMP/install-home" CITROPY_VERSION="$VERSION" CITROPY_BASE_URL="http://127.0.0.1:8791" sh scripts/install.sh
           APP="$RUNNER_TEMP/install-home/Applications/Citropy.app"

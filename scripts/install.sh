@@ -233,10 +233,10 @@ main() {
     mv -f "$bin_path.new" "$bin_path"
     icon=""
     chmod 755 "$tmp/$asset"
-    if (cd "$tmp" && "$tmp/$asset" --appimage-extract usr/share/icons/hicolor/512x512/apps/citropy.png >/dev/null 2>&1) &&
-      [ -f "$tmp/squashfs-root/usr/share/icons/hicolor/512x512/apps/citropy.png" ]; then
+    if (cd "$tmp" && "$tmp/$asset" --appimage-extract "usr/share/icons/hicolor/512x512/apps/$command_name.png" >/dev/null 2>&1) &&
+      [ -f "$tmp/squashfs-root/usr/share/icons/hicolor/512x512/apps/$command_name.png" ]; then
       mkdir -p "$data_dir/icons/hicolor/512x512/apps"
-      cp "$tmp/squashfs-root/usr/share/icons/hicolor/512x512/apps/citropy.png" "$data_dir/icons/hicolor/512x512/apps/$command_name.png"
+      cp "$tmp/squashfs-root/usr/share/icons/hicolor/512x512/apps/$command_name.png" "$data_dir/icons/hicolor/512x512/apps/$command_name.png"
       icon="$command_name"
     fi
     if [ -n "$icon" ]; then

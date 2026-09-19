@@ -154,14 +154,12 @@ try {
   Invoke-CitropyInstall
 }
 catch {
-  if ($scriptPath) { exit 1 }
+  if ($scriptPath) { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }
   throw
 }
 finally {
-  $assigned = @{ Channel = $Channel; Version = $Version; BaseUrl = $BaseUrl; Uninstall = $Uninstall; scriptPath = $scriptPath }
-  foreach ($name in $assigned.Keys) {
-    $current = Get-Variable -Name $name -ErrorAction SilentlyContinue
-    if ($current -and $current.Value -eq $assigned[$name]) { Remove-Variable -Name $name -ErrorAction SilentlyContinue }
+  foreach ($citropyName in @("Channel", "Version", "BaseUrl", "Uninstall", "scriptPath", "citropyName")) {
+    Remove-Variable -Name $citropyName -ErrorAction SilentlyContinue
   }
   Remove-Item -Path "Function:\Invoke-CitropyInstall" -ErrorAction SilentlyContinue
 }
