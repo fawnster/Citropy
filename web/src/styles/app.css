@@ -357,9 +357,10 @@
 
 .channel-badge {
   padding: 2px 6px;
-  border: 1px solid var(--accent-line);
+  border: 1px solid var(--brand-line);
   border-radius: 5px;
-  color: var(--accent-text);
+  color: var(--brand-text);
+  background: var(--brand-soft);
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
