@@ -1,7 +1,7 @@
 import { assertApplicationReady } from "./update-lock.ts";
 import { generateThreadTitle, workspaceGitBusy } from "./assistance.ts";
 import { stopTextGeneration, textGenerationBusy } from "./text-generation.ts";
-import { basename } from "node:path";
+import { basename, resolve } from "node:path";
 import { diffLines } from "./diff.ts";
 import { uid } from "./ids.ts";
 import { cancelQuestions, hasPendingQuestion } from "./questions.ts";
@@ -54,8 +54,7 @@ function imageFilesFor(raw: unknown, cwd: string): ImageFile[] | undefined {
   for (const key of ["file_path", "filePath", "path", "notebook_path"]) {
     const value = input[key];
     if (typeof value !== "string" || !IMAGE_FILE.test(value)) continue;
-    const path = inside(cwd, value);
-    if (path) return [{ path, label: basename(value) }];
+    return [{ path: inside(cwd, value) ?? resolve(cwd, value), label: basename(value) }];
   }
   return undefined;
 }

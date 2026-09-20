@@ -11,7 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
-import { basename, extname, join } from "node:path";
+import { basename, extname, join, resolve } from "node:path";
 import { pipeline } from "node:stream/promises";
 import { Transform } from "node:stream";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -161,6 +161,19 @@ export async function removeAttachment(
   });
 }
 
+function readImagePath(threadId: string, path: string): string | null {
+  if (!threadId || !path) return null;
+  const thread = store.threads.get(threadId);
+  const found = thread?.messages.some((message) =>
+    message.parts.some(
+      (part) =>
+        part.kind === "tool" &&
+        part.imageFiles?.some((file) => file.path === path),
+    ),
+  );
+  return found ? path : null;
+}
+
 export async function assetPath(params: URLSearchParams): Promise<string> {
   const threadId = params.get("threadId") ?? "";
   const attachmentId = params.get("attachmentId");
@@ -169,10 +182,12 @@ export async function assetPath(params: URLSearchParams): Promise<string> {
     params.get("projectId") ?? "",
     threadId || undefined,
   );
-  const path = inside(root, params.get("path") ?? "");
-  if (!path || !inside(await realpath(root), await realpath(path)))
-    throw new Error("File is outside this conversation's workspace.");
-  return path;
+  const requested = params.get("path") ?? "";
+  const path = inside(root, requested);
+  if (path && inside(await realpath(root), await realpath(path))) return path;
+  const read = readImagePath(threadId, resolve(root, requested));
+  if (read) return read;
+  throw new Error("File is outside this conversation's workspace.");
 }
 
 export async function previewFile(
