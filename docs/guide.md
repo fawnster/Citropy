@@ -38,6 +38,8 @@ The menu beside each conversation offers rename, pin, reorder, snooze, archive, 
 
 Settings > Providers checks the installed version against the provider’s release channel. Newer versions show an Update button; current installations show Up to date. Check for updates refreshes this information. Citropy checks the installation path and uses its native updater or the package manager that owns it. Updates wait until that provider has no active conversations, run in the background with bounded output and a timeout, and refresh models afterward. Unrecognized installations stay manual. The same screen edits each provider's global instruction file: Claude Code's `CLAUDE.md`, Codex's `AGENTS.md` or existing `AGENTS.override.md`, and OpenCode's `AGENTS.md`. Custom config homes are respected. Saves detect outside edits, preserve symlinks, and retain the previous contents in a `.citropy-backup` file beside the target. Start a new conversation to use revised global guidance.
 
+A conversation can delegate work to a subagent on any provider and any model that provider lists. Subagents run in the same workspace and appear under the conversation that started them. If the request omits the provider and model, the subagent inherits the current conversation's. If it names only a provider, the subagent uses that provider's default model.
+
 Model options show the selected model, reasoning effort, context window, and fast mode where supported. Available choices come from the installed providers. Claude extended context is selected per conversation; Codex fast mode uses its priority service tier. Fast mode starts off and can increase provider usage or charges.
 
 ## Workspaces and environments
