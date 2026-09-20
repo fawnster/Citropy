@@ -370,6 +370,12 @@ export class Store {
     }
     this.threads.delete(id);
     this.#dirty.delete(id);
+    const remaining = this.notifications.filter((entry) => entry.target.threadId !== id);
+    if (remaining.length !== this.notifications.length) {
+      this.notifications = remaining;
+      save(notificationsFile, this.notifications);
+      bus.emit({ t: "notifications.update", notifications: this.notifications });
+    }
     rmSync(join(threadsDir, `${id}.json`), { force: true });
     rmSync(join(root, "attachments", id), { recursive: true, force: true });
     removeToolImages(id);
@@ -405,7 +411,8 @@ export class Store {
   patchThread(id: string, patch: Partial<ThreadMeta>): void {
     const thread = this.threads.get(id);
     if (!thread) return;
-    const finished = thread.parentThreadId && thread.running && patch.running === false;
+    const finished = thread.parentThreadId && thread.running && patch.running === false && patch.status !== "stopped";
+    if (!thread.running && patch.running) thread.runCount = (thread.runCount ?? 0) + 1;
     Object.assign(thread, patch);
     thread.updatedAt = Date.now();
     bus.emit({ t: "thread.upsert", thread: meta(thread) });

@@ -253,6 +253,7 @@ export interface ThreadMeta {
   externalId?: string;
   running: boolean;
   runStartedAt?: number;
+  runCount?: number;
   gitAction?: import("./assistance.ts").GitActionState;
   finished?: boolean;
   pinned?: boolean;
