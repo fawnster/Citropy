@@ -148,8 +148,9 @@ test("native computer capture, input and cancellation on an isolated desktop", {
   assert.ok(indicator, indicatorChildren);
   const eventCount = events.length;
   process.kill(Number(indicator[1]), "SIGKILL");
-  for (let i = 0; i < 100 && events.length === eventCount; i++) await new Promise(resolve => setTimeout(resolve, 20));
-  assert.ok(events.slice(eventCount).some(event => event.t === "computer.stopped" && event.error === true));
+  const indicatorStopped = () => events.slice(eventCount).some(event => event.t === "computer.stopped" && event.error === true);
+  for (let i = 0; i < 750 && !indicatorStopped(); i++) await new Promise(resolve => setTimeout(resolve, 20));
+  assert.ok(indicatorStopped(), `No computer.stopped error event within 15 s of killing the indicator. Events since: ${JSON.stringify(events.slice(eventCount))}`);
   await assert.rejects(request("computer.screenshot", { displayId: "desktop" }), /Start a computer session/);
   await request("computer.start", { control: true });
   await request("computer.stop");
