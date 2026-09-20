@@ -221,7 +221,7 @@ export const workspaceTools = ([
   {
     name: "subagent_wait",
     description:
-      "Wait up to 30 seconds for a subagent to finish, then return its status and recent messages. A timeout does not stop the subagent. Finishing posts a notification to the conversation, and subagent_wait is how a caller that needs the result right away reads it.",
+      "Wait up to 30 seconds for a subagent to finish, then return its status and recent messages. A timeout does not stop the subagent. Finishing also posts a notification to the conversation.",
     inputSchema: {
       type: "object",
       properties: { id: string, timeoutMs: number },

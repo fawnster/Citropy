@@ -17,15 +17,14 @@ function finalText(child: Thread): string {
 
 export function subagentFinishedNotification(child: Thread): Omit<AppNotification, "id" | "createdAt" | "read"> {
   const failed = child.status === "error";
-  const stopped = child.status === "stopped";
   const detail = child.error ? clip(child.error, textLimit) : clip(finalText(child), textLimit, true);
-  const outcome = failed ? "failed" : stopped ? "was stopped" : "finished";
+  const outcome = failed ? "failed" : "finished";
   return {
     title: `${clip(child.title, titleLimit)} ${outcome}`,
     text: detail || "No final message.",
     kind: "chat",
-    level: failed || (stopped && child.error) ? "error" : stopped ? "info" : "success",
-    dedupeKey: `subagent:${child.id}:${child.runStartedAt ?? child.messages.at(-1)?.id ?? ""}`,
+    level: failed ? "error" : "success",
+    dedupeKey: `subagent:${child.id}:${child.runCount ?? 0}`,
     target: { view: "chat", projectId: child.projectId, threadId: child.parentThreadId },
   };
 }
