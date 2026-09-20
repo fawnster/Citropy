@@ -51,7 +51,7 @@ test("grouped workspaces switch hosts without reloading and use the system folde
       environmentsState: async () => state(),
       sshHosts: async () => ["buildbox", "staging"],
       onEnvironmentsState: callback => { listeners.add(callback); return () => listeners.delete(callback); },
-      connectEnvironment: async id => { activeId = id; connection.status = "connected"; localStorage.setItem("test.environment", id); emit(); return state(); },
+      connectEnvironment: async id => { activeId = id; connection.status = "connected"; localStorage.setItem("test.environment", id); emit(); return { ...state(), connections: [{ ...connection, name: `${connection.name} (applied)` }] }; },
       disconnectEnvironment: async () => { connection.status = "disconnected"; emit(); },
       saveEnvironment: async input => ({ ...input, id: "new-ssh" }),
       configureProjectDefaults: settings => window.saveProjectDefaults(settings),
@@ -184,6 +184,7 @@ test("grouped workspaces switch hosts without reloading and use the system folde
   await page.getByRole("button", { name: "Reconnect", exact: true }).waitFor();
   await page.getByRole("button", { name: "Reconnect", exact: true }).click();
   await page.locator(".remote-connection-banner").waitFor({ state: "detached" });
+  await page.waitForFunction(async () => (await import("/web/src/lib/environment.ts")).environmentName() === "Build server (applied)");
   await page.evaluate(() => window.citropyDesktop.disconnectEnvironment("ssh-test"));
   await page.getByRole("button", { name: "Switch to Local", exact: true }).click();
   await page.getByText("LOCAL RESPONSE", { exact: true }).waitFor();
