@@ -6,6 +6,7 @@ export interface DesktopWindowState {
   platform: string;
   development: boolean;
   channel: "stable" | "lemon";
+  switchable: boolean;
   version: string;
   notifications: boolean;
   electron: string;
@@ -26,7 +27,13 @@ declare global {
       chooseWorkspaceFolder(id: string, path?: string): Promise<string | null>;
       onEnvironmentsState(callback: (state: import("../../shared/environments.ts").EnvironmentState) => void): () => void;
       updateState(): Promise<import("../../shared/app-update.ts").AppUpdateState>;
-      updateCommand(action: "check" | "download" | "install"): Promise<import("../../shared/app-update.ts").AppUpdateState>;
+      updateCommand(
+        request:
+          | "check"
+          | "download"
+          | "install"
+          | { action: "switch"; channel: "stable" | "lemon" },
+      ): Promise<import("../../shared/app-update.ts").AppUpdateState>;
       onUpdateState(callback: (state: import("../../shared/app-update.ts").AppUpdateState) => void): () => void;
       windowState(): Promise<DesktopWindowState>;
       titlebarHeight(height: number): void;

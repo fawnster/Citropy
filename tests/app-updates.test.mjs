@@ -322,3 +322,113 @@ createRoot(root).render(React.createElement('aside', {className:'rail', style:{w
     assert.deepEqual(errors, []);
   },
 );
+
+test("switching channels installs the other build through the scripted installer", async (t) => {
+  const updater = new EventEmitter();
+  const calls = [];
+  const control = createAppUpdater({
+    updater,
+    version: "0.2.0",
+    channel: "stable",
+    switchable: true,
+    emit: () => {},
+    prepareInstall: async () => {
+      calls.push("prepare");
+    },
+    installer: {
+      install: async (target) => {
+        calls.push(["install", target]);
+      },
+    },
+  });
+  t.after(() => control.dispose());
+  await assert.rejects(
+    control.command({ action: "switch", channel: "nope" }),
+    /Unknown release channel/,
+  );
+  await assert.rejects(
+    control.command({ action: "switch", channel: "stable" }),
+    /already on that channel/,
+  );
+  await control.command({ action: "switch", channel: "lemon" });
+  assert.equal(control.state().status, "installing");
+  assert.match(control.state().message, /Downloading the Lemon build/);
+  for (let attempt = 0; attempt < 20 && calls.length < 2; attempt++) await tick();
+  assert.deepEqual(calls, ["prepare", ["install", "lemon"]]);
+});
+
+test("a failed channel switch keeps the current build and offers no retry action", async (t) => {
+  const updater = new EventEmitter();
+  const calls = [];
+  const control = createAppUpdater({
+    updater,
+    version: "0.2.0",
+    channel: "stable",
+    switchable: true,
+    emit: () => {},
+    prepareInstall: async () => {
+      calls.push("prepare");
+    },
+    installer: {
+      install: async () => {
+        throw new Error("The installer exited with code 1.");
+      },
+    },
+    recoverInstall: async () => {
+      calls.push("recover");
+    },
+  });
+  t.after(() => control.dispose());
+  await control.command({ action: "switch", channel: "lemon" });
+  for (let attempt = 0; attempt < 20 && control.state().status !== "error"; attempt++) await tick();
+  assert.equal(control.state().status, "error");
+  assert.equal(control.state().retry, undefined);
+  assert.match(control.state().message, /still on the stable build/);
+  assert.deepEqual(calls, ["prepare", "recover"]);
+});
+
+test("a build without the scripted installer cannot switch channels", async (t) => {
+  const { control } = fixture();
+  t.after(() => control.dispose());
+  await assert.rejects(
+    control.command({ action: "switch", channel: "lemon" }),
+    /cannot switch release channels/,
+  );
+});
+
+test("a build that cannot replace itself rejects a channel switch", async (t) => {
+  const updater = new EventEmitter();
+  const control = createAppUpdater({
+    updater,
+    version: "0.2.0",
+    channel: "stable",
+    unavailable: "Development build.",
+    switchable: false,
+    emit: () => {},
+    installer: {
+      install: async () => {},
+    },
+  });
+  t.after(() => control.dispose());
+  await assert.rejects(
+    control.command({ action: "switch", channel: "lemon" }),
+    /cannot switch release channels/,
+  );
+  assert.equal((await control.command("check")).status, "unsupported");
+  control.dispose();
+  const available = createAppUpdater({
+    updater: new EventEmitter(),
+    version: "0.2.0",
+    channel: "stable",
+    switchable: false,
+    emit: () => {},
+    installer: {
+      install: async () => {},
+    },
+  });
+  t.after(() => available.dispose());
+  await assert.rejects(
+    available.command({ action: "switch", channel: "lemon" }),
+    /cannot switch release channels/,
+  );
+});

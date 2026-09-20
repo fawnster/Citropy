@@ -77,9 +77,9 @@ jobs:
           done
           curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null "http://127.0.0.1:8792/" || { echo "The local release server did not answer on port 8792." >&2; exit 1; }
           HOME="$RUNNER_TEMP/lemon-home" CITROPY_BASE_URL="http://127.0.0.1:8792" sh scripts/install.sh --channel=lemon
-          test -x "$RUNNER_TEMP/lemon-home/.local/bin/citropy-lemon"
-          test -f "$RUNNER_TEMP/lemon-home/.local/share/applications/citropy-lemon.desktop"
-          grep -q 'StartupWMClass=citropy-lemon' "$RUNNER_TEMP/lemon-home/.local/share/applications/citropy-lemon.desktop"
+          test -x "$RUNNER_TEMP/lemon-home/.local/bin/citropy"
+          test -f "$RUNNER_TEMP/lemon-home/.local/share/applications/citropy.desktop"
+          grep -q 'StartupWMClass=citropy' "$RUNNER_TEMP/lemon-home/.local/share/applications/citropy.desktop"
       - uses: actions/upload-artifact@v7
         with:
           name: lemon-linux
@@ -127,8 +127,8 @@ jobs:
           done
           curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null "http://127.0.0.1:8793/" || { echo "The local release server did not answer on port 8793." >&2; exit 1; }
           HOME="$RUNNER_TEMP/lemon-home" CITROPY_BASE_URL="http://127.0.0.1:8793" sh scripts/install.sh --channel=lemon
-          APP="$RUNNER_TEMP/lemon-home/Applications/Citropy Lemon.app"
-          test -x "$APP/Contents/MacOS/Citropy Lemon"
+          APP="$RUNNER_TEMP/lemon-home/Applications/Citropy.app"
+          test -x "$APP/Contents/MacOS/Citropy"
           codesign --verify --deep --strict "$APP"
       - uses: actions/upload-artifact@v7
         with:
@@ -183,10 +183,8 @@ jobs:
             $env:CITROPY_CHANNEL = "lemon"
             $env:CITROPY_BASE_URL = "http://127.0.0.1:8795"
             ./scripts/install.ps1
-            $installed = Join-Path $env:LOCALAPPDATA "Programs\citropy-lemon\Citropy Lemon.exe"
+            $installed = Join-Path $env:LOCALAPPDATA "Programs\citropy\Citropy.exe"
             if (-not (Test-Path $installed)) { throw "The installer finished but $installed is missing." }
-            $stableFolder = Join-Path $env:LOCALAPPDATA "Programs\citropy"
-            if (Test-Path $stableFolder) { throw "Lemon installed into the stable folder." }
           }
           finally {
             Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue

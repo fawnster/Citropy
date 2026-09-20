@@ -25,8 +25,18 @@ import type {
 } from "../shared/protocol.ts";
 
 const root = dataRoot;
-const previousRoot = join(homedir(), ".loom");
-if (!dev && !process.env.CITROPY_DATA_DIR && !existsSync(root) && existsSync(previousRoot)) renameSync(previousRoot, root);
+const legacyRoots = [join(homedir(), ".citropy-lemon"), join(homedir(), ".loom")];
+if (!dev && !process.env.CITROPY_DATA_DIR && !existsSync(root)) {
+  for (const legacy of legacyRoots) {
+    if (!existsSync(legacy)) continue;
+    try {
+      renameSync(legacy, root);
+    } catch {
+      // the older build can still hold its folder open on Windows
+    }
+    break;
+  }
+}
 const threadsDir = join(root, "threads");
 const settingsFile = join(root, "settings.json");
 const projectsFile = join(root, "projects.json");

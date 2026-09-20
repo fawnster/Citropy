@@ -56,10 +56,6 @@ const platform =
 const channelArgs =
   process.env.CITROPY_CHANNEL === "lemon"
     ? [
-        "-c.productName=Citropy Lemon",
-        "-c.appId=com.citropy.desktop.lemon",
-        "-c.extraMetadata.name=citropy-lemon",
-        "-c.linux.executableName=citropy-lemon",
         "-c.linux.artifactName=Citropy-lemon-${arch}.AppImage",
         "-c.mac.artifactName=Citropy-lemon-${arch}.zip",
         "-c.win.artifactName=Citropy-lemon-${arch}-Setup.exe",

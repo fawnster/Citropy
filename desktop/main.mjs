@@ -22,7 +22,7 @@ import {
 } from "electron";
 import { WebSocket } from "ws";
 import { fileURLToPath } from "node:url";
-import { join, resolve, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import { readFileSync, writeFileSync, mkdirSync, openSync, closeSync, accessSync, constants } from "node:fs";
 import { migrateDesktopData } from "./migrate-data.mjs";
 
@@ -31,11 +31,11 @@ const { version } = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 );
 const channel = /-lemon[.\d]*$/.test(version) ? "lemon" : "stable";
-const appName = development ? "Citropy Dev" : channel === "lemon" ? "Citropy Lemon" : "Citropy";
+const appName = development ? "Citropy Dev" : "Citropy";
 app.setName(appName);
 app.setPath(
   "userData",
-  migrateDesktopData(app.getPath("appData"), process.env.CITROPY_DESKTOP_DATA || (development || channel === "lemon" ? join(app.getPath("appData"), appName) : undefined)),
+  migrateDesktopData(app.getPath("appData"), process.env.CITROPY_DESKTOP_DATA || (development ? join(app.getPath("appData"), appName) : undefined)),
 );
 if (!app.requestSingleInstanceLock()) app.exit(0);
 let forcedExit = false;
@@ -52,11 +52,11 @@ app.on("second-instance", () => {
     window.focus();
   }
 });
-if (process.platform === "linux") app.setDesktopName(development ? "citropy-dev.desktop" : channel === "lemon" ? "citropy-lemon.desktop" : "citropy.desktop");
+if (process.platform === "linux") app.setDesktopName(development ? "citropy-dev.desktop" : "citropy.desktop");
 if (app.isPackaged) {
   process.env.CITROPY_DEVELOPMENT = "0";
-  process.env.CITROPY_PORT ||= channel === "lemon" ? "4179" : "4177";
-  if (channel === "lemon") process.env.CITROPY_DATA_DIR ||= join(app.getPath("home"), ".citropy-lemon");
+  if (process.env.CITROPY_DATA_DIR === join(app.getPath("home"), ".citropy-lemon")) delete process.env.CITROPY_DATA_DIR;
+  process.env.CITROPY_PORT ||= "4177";
   process.env.CITROPY_HOST = "127.0.0.1";
   process.env.CITROPY_URL = `http://127.0.0.1:${process.env.CITROPY_PORT}`;
   process.env.CITROPY_UI_URL = process.env.CITROPY_URL;
@@ -830,57 +830,71 @@ app
         ? "Install the Citropy AppImage to download and apply release updates."
         : undefined;
     const scriptedUpdates = !unavailableUpdate && (channel === "lemon" || macScriptUpdates());
+    const windowsFolder = process.env.LOCALAPPDATA ? resolve(process.env.LOCALAPPDATA, "Programs", "citropy") : undefined;
+    const switchable = !unavailableUpdate && (
+      process.platform === "win32"
+        ? Boolean(windowsFolder) && resolve(process.execPath).startsWith(`${windowsFolder}${sep}`)
+        : process.platform === "darwin"
+          ? basename(resolve(process.execPath, "..", "..", "..")) === "Citropy.app"
+          : true);
     const autoUpdater = unavailableUpdate || scriptedUpdates ? undefined : (await import("electron-updater").then(module => module.default || module)).autoUpdater;
+    const scriptInstaller = {
+      check: async () => {
+        if (channel === "lemon") {
+          const response = await fetch(`https://github.com/${updateRepository}/releases/download/lemon/version.json`, { signal: AbortSignal.timeout(10000) });
+          if (!response.ok) throw new Error(`GitHub answered ${response.status} for the Lemon build.`);
+          const info = await response.json();
+          return typeof info.version === "string" ? info.version : undefined;
+        }
+        const response = await fetch(`https://github.com/${updateRepository}/releases/latest`, { signal: AbortSignal.timeout(10000) });
+        if (!response.ok) throw new Error(`GitHub answered ${response.status} for the latest release.`);
+        return response.url.match(/\/releases\/tag\/v?([^/?#]+)$/)?.[1];
+      },
+      install: async (target = channel) => {
+        const response = await fetch(updateScriptUrl, { signal: AbortSignal.timeout(15000) });
+        if (!response.ok) throw new Error(`Could not download the installer (${response.status}).`);
+        const script = join(app.getPath("userData"), updateScriptName);
+        mkdirSync(app.getPath("userData"), { recursive: true });
+        writeFileSync(script, await response.text(), { mode: 0o700 });
+        const env = { ...process.env, CITROPY_RELAUNCH: "1", CITROPY_CHANNEL: target, CITROPY_PARENT_PID: String(process.pid) };
+        for (const name of ["CITROPY_VERSION", "CITROPY_BASE_URL", "CITROPY_BIN_DIR", "CITROPY_BIN_PATH", "CITROPY_APP_DIR"]) delete env[name];
+        if (target !== channel)
+          for (const name of ["CITROPY_PORT", "CITROPY_URL", "CITROPY_UI_URL"])
+            delete env[name];
+        if (process.platform === "darwin") {
+          const directory = resolve(process.execPath, "..", "..", "..", "..");
+          try {
+            accessSync(directory, constants.W_OK);
+          } catch {
+            throw new Error(`Citropy cannot replace itself in ${directory}. Move the app to your Applications folder and try again.`);
+          }
+          env.CITROPY_APP_DIR = directory;
+        } else if (process.env.APPIMAGE) {
+          env.CITROPY_BIN_PATH = process.env.APPIMAGE;
+          env.CITROPY_BIN_DIR = resolve(process.env.APPIMAGE, "..");
+        }
+        const log = openSync(join(app.getPath("userData"), "update.log"), "a");
+        const powershell = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+        const child = spawn(
+          process.platform === "win32" ? powershell : "/bin/sh",
+          process.platform === "win32"
+            ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]
+            : [script],
+          { detached: true, stdio: ["ignore", log, log], env, windowsHide: true },
+        );
+        closeSync(log);
+        child.unref();
+        app.quit();
+      },
+    };
     updates = createAppUpdater({
       updater: autoUpdater,
       version,
+      channel,
       unavailable: unavailableUpdate,
-      external: scriptedUpdates ? {
-        check: async () => {
-          if (channel === "lemon") {
-            const response = await fetch(`https://github.com/${updateRepository}/releases/download/lemon/version.json`, { signal: AbortSignal.timeout(10000) });
-            if (!response.ok) throw new Error(`GitHub answered ${response.status} for the Lemon build.`);
-            const info = await response.json();
-            return typeof info.version === "string" ? info.version : undefined;
-          }
-          const response = await fetch(`https://github.com/${updateRepository}/releases/latest`, { signal: AbortSignal.timeout(10000) });
-          if (!response.ok) throw new Error(`GitHub answered ${response.status} for the latest release.`);
-          return response.url.match(/\/releases\/tag\/v?([^/?#]+)$/)?.[1];
-        },
-        install: async () => {
-          const response = await fetch(updateScriptUrl, { signal: AbortSignal.timeout(15000) });
-          if (!response.ok) throw new Error(`Could not download the installer (${response.status}).`);
-          const script = join(app.getPath("userData"), updateScriptName);
-          mkdirSync(app.getPath("userData"), { recursive: true });
-          writeFileSync(script, await response.text(), { mode: 0o700 });
-          const env = { ...process.env, CITROPY_RELAUNCH: "1", CITROPY_CHANNEL: channel, CITROPY_PARENT_PID: String(process.pid) };
-          for (const name of ["CITROPY_VERSION", "CITROPY_BASE_URL", "CITROPY_BIN_DIR", "CITROPY_BIN_PATH", "CITROPY_APP_DIR"]) delete env[name];
-          if (process.platform === "darwin") {
-            const directory = resolve(process.execPath, "..", "..", "..", "..");
-            try {
-              accessSync(directory, constants.W_OK);
-            } catch {
-              throw new Error(`Citropy cannot replace itself in ${directory}. Move the app to your Applications folder and try again.`);
-            }
-            env.CITROPY_APP_DIR = directory;
-          } else if (process.env.APPIMAGE) {
-            env.CITROPY_BIN_PATH = process.env.APPIMAGE;
-            env.CITROPY_BIN_DIR = resolve(process.env.APPIMAGE, "..");
-          }
-          const log = openSync(join(app.getPath("userData"), "update.log"), "a");
-          const powershell = join(process.env.SystemRoot ?? "C:\\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-          const child = spawn(
-            process.platform === "win32" ? powershell : "/bin/sh",
-            process.platform === "win32"
-              ? ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", script]
-              : [script],
-            { detached: true, stdio: ["ignore", log, log], env, windowsHide: true },
-          );
-          closeSync(log);
-          child.unref();
-          app.quit();
-        },
-      } : undefined,
+      switchable,
+      external: scriptedUpdates ? scriptInstaller : undefined,
+      installer: unavailableUpdate ? undefined : scriptInstaller,
       emit: (state) => {
         if (!window.isDestroyed()) window.webContents.send("updates:state", state);
         if (state.status === "available") emit({ type: "update.available", version: state.version });
@@ -913,9 +927,9 @@ app
       if (!trusted(event)) throw new Error("Unavailable outside Citropy");
       return updates.state();
     });
-    ipcMain.handle("updates:command", (event, action) => {
+    ipcMain.handle("updates:command", (event, request) => {
       if (!trusted(event)) throw new Error("Unavailable outside Citropy");
-      return updates.command(action);
+      return updates.command(request);
     });
     const windowState = () => ({
       maximized: window.isMaximized(),
@@ -923,6 +937,7 @@ app
       platform: process.platform,
       development,
       channel,
+      switchable,
       version,
       notifications: Notification.isSupported(),
       electron: process.versions.electron,

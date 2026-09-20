@@ -109,7 +109,7 @@ It installs per user under `%LOCALAPPDATA%\Programs\citropy` with no administrat
 
 ### Lemon builds
 
-Every push to main publishes a rolling **Lemon** build with the newest changes. It installs next to Citropy with its own data and settings, and shows a Lemon tag beside the title. These builds are for testing and can break.
+Every push to main publishes a rolling **Lemon** build with the newest changes. It is the same app as Citropy, shares its conversations, settings, and terminals, and shows a Lemon tag beside the title. These builds are for testing and can break. Switch to it from Settings, or install it directly:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.sh | sh -s -- --channel=lemon
@@ -121,7 +121,7 @@ On Windows:
 $s = irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1; & ([scriptblock]::Create($s)) -Channel lemon
 ```
 
-Remove it later with `--channel=lemon --uninstall` on Linux and macOS, or `-Channel lemon -Uninstall` on Windows.
+Installing a channel replaces the installed build; your conversations, settings, and terminals stay. It also replaces the earlier separate Lemon preview and moves its data into `~/.citropy`. Remove Citropy with `--uninstall` on Linux and macOS, or `-Uninstall` on Windows.
 
 From a source checkout instead:
 
