@@ -33,6 +33,7 @@ import {
   toggleSidebar,
 } from "./lib/store.ts";
 import { send } from "./lib/socket.ts";
+import { useUiSounds } from "./lib/use-ui-sounds.ts";
 import { createThread } from "./lib/actions.ts";
 import { reportError } from "./lib/api.ts";
 import { useGitHub } from "./lib/use-github.ts";
@@ -83,6 +84,7 @@ export function App() {
   const threads = useApp((state) => state.threads);
   const hasProject = useApp((state) => state.projects.length > 0);
   const navigationOpen = view === "chat" ? sidebarOpen : sectionSidebarOpen;
+  useUiSounds();
 
   useEffect(() => {
     document.documentElement.lang = language;

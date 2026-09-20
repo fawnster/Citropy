@@ -10,6 +10,7 @@ const TYPES: Record<string, string> = {
   ".svg": "image/svg+xml",
   ".woff2": "font/woff2",
   ".woff": "font/woff",
+  ".ogg": "audio/ogg",
   ".png": "image/png",
   ".ico": "image/x-icon",
   ".map": "application/json",

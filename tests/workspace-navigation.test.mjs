@@ -526,7 +526,7 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
       await page.locator(".composer-model").click();
       const menu = page.getByRole("menu");
       assert.equal(await menu.getByRole("button", { name: "Codex", exact: true }).count(), 0);
-      await menu.getByRole("button", { name: "Transfer to another agent", exact: true }).click();
+      await page.getByRole("button", { name: "Transfer to another agent", exact: true }).click();
       await menu.getByText("Choose a model for a new agent in this chat. Reading the conversation again consumes extra usage.", { exact: true }).waitFor();
       assert.equal(await menu.getByRole("menuitem", { name: /^Claude Fast/ }).isDisabled(), true);
       await menu.getByRole("button", { name: "Codex", exact: true }).click();

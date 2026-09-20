@@ -172,6 +172,34 @@
   background: var(--on-accent);
   transform: translateX(14px);
 }
+.sound-row-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+.sound-volume {
+  padding: var(--settings-inset);
+}
+.sound-volume-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 16px;
+  font-weight: 500;
+}
+.sound-volume-heading output {
+  color: var(--text-3);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+.sound-volume input {
+  display: block;
+  width: 100%;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
 .settings-note {
   margin-top: 16px;
   font-size: var(--text-sm);

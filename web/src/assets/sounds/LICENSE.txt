@@ -1,0 +1,20 @@
+Every file here is a real recording of something physical, not a synthesizer
+and not an electronic tone. Each one is an individual hit cut from a longer
+recording and re-encoded to mono Vorbis. No other changes.
+
+Source: BigSoundBank (bigsoundbank.com), recorded by Joseph SARDIN.
+Licence: CC0 1.0 Universal, public domain dedication. Commercial use
+allowed, attribution not required but given here.
+https://creativecommons.org/publicdomain/zero/1.0/
+
+Page for each recording is bigsoundbank.com/<name>.html
+
+  click.ogg       computer-keyboard-s0229            one key on a computer keyboard
+  nav.ogg         quick-raspberry-keyboard-1-s1724   one key on a Raspberry Pi keyboard
+  toggle-on.ogg   switch-5-s0321                     one throw of a switch
+  toggle-off.ogg  old-switch-s0540                   one throw of an older switch
+  send.ogg        mobile-key-s0176                   one press of a mobile phone key
+  copy.ogg        slow-raspberry-keyboard-s1732      one key on a Raspberry Pi keyboard
+  done.ogg        old-camera-trigger-s3022           a camera shutter
+  attention.ogg   floppy-disk-3-5-output-s1397       a floppy drive ejecting
+  error.ogg       slow-macbook-keyboard-2-s1727      one key on a MacBook keyboard

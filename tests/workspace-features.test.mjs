@@ -349,6 +349,44 @@ test("workspace features persist and use conversation boundaries", async (t) => 
         ).status,
         400,
       );
+      const outsideImage = join(directory, "outside.png");
+      fs.writeFileSync(outsideImage, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      assert.equal(
+        (
+          await request(
+            `preview?${parameters}&path=${encodeURIComponent(outsideImage)}`,
+          )
+        ).status,
+        400,
+      );
+      session.options.emit({
+        type: "tool.start",
+        callId: "read-image",
+        name: "Read",
+        input: { file_path: outsideImage },
+      });
+      const read = store.threads
+        .get(thread.id)
+        .messages.flatMap((message) => message.parts)
+        .find((part) => part.kind === "tool" && part.callId === "read-image");
+      assert.deepEqual(read.imageFiles, [
+        { path: outsideImage, label: "outside.png" },
+      ]);
+      const image = await fetch(
+        `${url}assets?${parameters}&path=${encodeURIComponent(outsideImage)}`,
+      );
+      assert.equal(image.status, 200);
+      assert.equal((await image.arrayBuffer()).byteLength, 4);
+      const unreadImage = join(directory, "unread.png");
+      fs.writeFileSync(unreadImage, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+      assert.equal(
+        (
+          await request(
+            `preview?${parameters}&path=${encodeURIComponent(unreadImage)}`,
+          )
+        ).status,
+        400,
+      );
       session.options.emit({ type: "turn.end" });
       store.flush();
       assert.equal(

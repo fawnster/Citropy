@@ -237,21 +237,6 @@
 .menu-item-action[aria-pressed="true"] { color: var(--warn); }
 .menu-item-action[aria-pressed="true"] svg { fill: currentColor; }
 
-.model-picker-transfer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: 100%;
-  padding: 9px 10px;
-  border-radius: var(--r-sm);
-  color: var(--text-2);
-  font-size: var(--text-sm);
-  text-align: left;
-}
-.model-picker-transfer:hover,
-.model-picker-transfer[aria-pressed="true"] { background: var(--raised-2); color: var(--text); }
-.model-picker-transfer:disabled { opacity: 0.45; cursor: default; }
-
 .menu-item:hover,
 .menu-item:focus-visible {
   background: var(--raised-2);

@@ -348,7 +348,7 @@ test("conversation persistence and lifecycle recovery", async (t) => {
     assert.equal(toolPart("read").images, undefined);
     emit({ type: "tool.end", callId: "read", ok: true, output: "" });
     emit({ type: "tool.start", callId: "outside", name: "Read", input: { file_path: "/etc/passwd.png" } });
-    assert.equal(toolPart("outside").imageFiles, undefined);
+    assert.deepEqual(toolPart("outside").imageFiles, [{ path: "/etc/passwd.png", label: "passwd.png" }]);
     emit({ type: "tool.end", callId: "outside", ok: true, output: "" });
     emit({ type: "turn.end" });
     store.removeThread(entry.id);
