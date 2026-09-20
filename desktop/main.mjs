@@ -25,7 +25,7 @@ import { fileURLToPath } from "node:url";
 import { basename, join, resolve, sep } from "node:path";
 import { readFileSync, writeFileSync, mkdirSync, openSync, closeSync, accessSync, constants } from "node:fs";
 import { migrateDesktopData } from "./migrate-data.mjs";
-import { channelOf } from "./channel.mjs";
+import { channelOf, appIconName } from "./channel.mjs";
 
 const development = !app.isPackaged && process.env.CITROPY_DEVELOPMENT === "1";
 const { version } = JSON.parse(
@@ -759,7 +759,7 @@ app
       minWidth,
       minHeight,
       title: appName,
-      icon: fileURLToPath(new URL(`./assets/${development ? "citropy-dev" : "citropy"}.png`, import.meta.url)),
+      icon: fileURLToPath(new URL(`./assets/${appIconName({ development, channel })}.png`, import.meta.url)),
       frame: false,
       ...(process.platform === "darwin"
         ? { titleBarStyle: "hidden", trafficLightPosition: { x: 15, y: 20 } }

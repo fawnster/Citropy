@@ -109,7 +109,7 @@ It installs per user under `%LOCALAPPDATA%\Programs\citropy` with no administrat
 
 ### Lime builds
 
-Every push to main publishes a rolling **Lime** build with the newest changes. It is the same app as Citropy, shares its conversations, settings, and terminals, and shows a Lime tag beside the title. These builds are for testing and can break. Switch to it from Settings, or install it directly:
+Every push to main publishes a rolling **Lime** build with the newest changes. It is the same app as Citropy, shares its conversations, settings, and terminals, and is marked by a Lime tag beside the title and its own lime application icon. The Citropy mark stays the same yellow lemon. These builds are for testing and can break. Switch to it from Settings, or install it directly:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.sh | sh -s -- --channel=lime
