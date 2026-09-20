@@ -1701,11 +1701,14 @@ app.whenReady().then(() => {
     const inspector = await page.getByRole("button", { name: "Toggle inspector", exact: true }).boundingBox();
     assert.ok(location.x < inspector.x && Math.abs(location.y - inspector.y) < 2);
     const calls = [];
+    let releasePush;
+    const pushReleased = new Promise((resolve) => { releasePush = resolve; });
     await page.route("**/api/threads/git-action?**", async (route) => {
       const request = route.request().postDataJSON();
       calls.push(request);
       const action = { action: request.action, status: request.action === "push" ? "pushing" : "generating" };
       f.emit({ t: "thread.upsert", thread: { ...thread, gitAction: action } });
+      if (request.action === "push") await pushReleased;
       await route.fulfill({ json: action });
     });
     await page.screenshot({ path: "/tmp/citropy-git-panel-changes-1440.png", animations: "disabled" });
@@ -1720,6 +1723,7 @@ app.whenReady().then(() => {
     await panel.locator(".git-panel-progress").filter({ hasText: "Pushing" }).waitFor();
     assert.deepEqual(calls[1], { action: "push", scope: "all" });
     assert.equal(await panel.getByRole("button", { name: "Push", exact: true }).isDisabled(), true);
+    releasePush();
     f.emit({ t: "thread.upsert", thread: { ...thread, gitAction: { action: "push", status: "success" } } });
     f.emit({ t: "git.status", projectId: "workspace", threadId: "chat", status: { ...initial, clean: true, files: [], ahead: 0 } });
     await panel.getByText("No commits to push", { exact: true }).waitFor();
