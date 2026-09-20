@@ -123,7 +123,7 @@ main() {
   remove_earlier_lemon() {
     found=0
     for path in "$app_dir/Citropy Lemon.app" "$bin_dir/citropy-lemon" "$data_dir/applications/citropy-lemon.desktop" "$data_dir/icons/hicolor/512x512/apps/citropy-lemon.png"; do
-      if [ -e "$path" ]; then
+      if [ -e "$path" ] && [ "$path" != "$bin_path" ]; then
         rm -rf "$path"
         found=1
       fi
