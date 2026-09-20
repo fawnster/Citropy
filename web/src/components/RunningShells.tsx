@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "motion/react";
 import { Check, Copy, ExternalLink, Square, Terminal, X } from "lucide-react";
 import type { NotificationTarget, ShellProcess } from "../../../shared/protocol.ts";
 import { scaled, selectPanel, useApp, viewportWidth } from "../lib/store.ts";
+import { playUiSound } from "../lib/ui-sound.ts";
 import { api } from "../lib/api.ts";
 import { useI18n } from "../lib/i18n.ts";
 import { useReducedMotion } from "../lib/use-reduced-motion.ts";
@@ -129,7 +130,7 @@ function ShellsPanel({ id, trigger, onClose, onOpen }: {
       </div>
       {active(selected) && selected.stopMode === "task" && <p className="shell-stop-hint">{t("Stopping this shell also stops its AI task.")}</p>}
       {error?.id === selected.id && <p className="shell-error" role="alert">{error.message}</p>}
-      <div className="shell-output-heading"><span>{t("Recent output")}</span>{selected.output && <button type="button" className="icon-btn" aria-label={t(copied ? "Copied" : "Copy output")} onClick={() => { void navigator.clipboard.writeText(selected.output).then(() => setCopied(true)).catch(error => setError({ id: selected.id, message: (error as Error).message })); }}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>}</div>
+      <div className="shell-output-heading"><span>{t("Recent output")}</span>{selected.output && <button type="button" className="icon-btn" data-ui-sound="off" aria-label={t(copied ? "Copied" : "Copy output")} onClick={() => { void navigator.clipboard.writeText(selected.output).then(() => { setCopied(true); playUiSound("copy"); }).catch(error => setError({ id: selected.id, message: (error as Error).message })); }}>{copied ? <Check size={13} /> : <Copy size={13} />}</button>}</div>
       {selected.output ? <pre ref={output} className="shell-output scroll" tabIndex={0} aria-label={t("Recent output")} onScroll={event => { const element = event.currentTarget; followOutput.current = element.scrollHeight - element.scrollTop - element.clientHeight < 24; }}>{selected.output}</pre> : <p className="shell-output-empty">{t("Output appears when the provider reports it.")}</p>}
     </div> : <p className="shell-output-empty">{t("No shells are running.")}</p>}
   </motion.section>;

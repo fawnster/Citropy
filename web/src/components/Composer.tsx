@@ -43,6 +43,7 @@ import {
   finishThread,
 } from "../lib/actions.ts";
 import { confirmAction, selectThread, useApp } from "../lib/store.ts";
+import { playUiSound } from "../lib/ui-sound.ts";
 import {
   effortLabel as formatEffort,
   tokens,
@@ -302,6 +303,7 @@ export function Composer({
   const submit = async () => {
     const text = value.trim();
     if ((!text && !attachments.length) || !threadId || !canSend) return;
+    playUiSound("send");
     const command = commands.find((entry) => entry.label === text);
     if (command) {
       if (
@@ -603,6 +605,7 @@ export function Composer({
                   className="btn"
                   type="button"
                   data-variant="primary"
+                  data-ui-sound="off"
                   onClick={submit}
                   disabled={(!value.trim() && !attachments.length) || !canSend}
                 >
@@ -625,6 +628,7 @@ export function Composer({
                 className="btn composer-send"
                 type="button"
                 data-variant="primary"
+                data-ui-sound="off"
                 aria-label={t("Send")}
                 title={t("Send")}
                 onClick={submit}

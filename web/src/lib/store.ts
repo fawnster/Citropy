@@ -1,6 +1,7 @@
 import type { QuestionRequest } from "../../../shared/questions.ts";
 import { environmentStorage } from "./environment.ts";
 import { resolveResponse } from "./requests.ts";
+import { playUiSound } from "./ui-sound.ts";
 import type { ComputerState } from "../../../shared/computer.ts";
 import "./migrate-preferences.ts";
 import { create } from "zustand";
@@ -122,6 +123,9 @@ export interface AppState {
   textStreaming: boolean;
   typingAnimation: boolean;
   typingSpeed: number;
+  uiSounds: boolean;
+  uiAlertSounds: boolean;
+  uiSoundVolume: number;
 }
 
 function readPref<T extends string>(key: string, fallback: T): T {
@@ -141,6 +145,7 @@ const initialScale =
     ? storedScale
     : 120;
 const storedSpeed = Number(readPref("citropy.typingSpeed", "100"));
+const storedVolume = Number(readPref("citropy.uiSoundVolume", "60"));
 
 function readPanelWidths(): Partial<Record<PanelId, number>> {
   try {
@@ -258,6 +263,11 @@ export const useApp = create<AppState>(() => ({
     Number.isFinite(storedSpeed) && storedSpeed >= 20 && storedSpeed <= 300
       ? storedSpeed
       : 100,
+  uiSounds: readFlag("citropy.uiSounds", true),
+  uiAlertSounds: readFlag("citropy.uiAlertSounds", true),
+  uiSoundVolume: Number.isFinite(storedVolume)
+    ? Math.max(0, Math.min(100, storedVolume))
+    : 60,
 }));
 
 export function resetEnvironment(projects: Project[], home: string): void {
@@ -449,6 +459,10 @@ function sortThreads(state: AppState): void {
     .map((thread) => thread.id);
 }
 
+function playAlert(level: "success" | "error" | "attention"): void {
+  playUiSound(level === "attention" ? "attention" : level === "success" ? "done" : "error");
+}
+
 export function applyEvent(state: AppState, event: ServerEvent): void {
   if (unloadedDelta(state, event)) return;
   if (event.t === "computer.state") {
@@ -491,6 +505,8 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
         seen ? { ...event.notification, read: true } : event.notification,
         ...state.notifications,
       ].slice(0, 100);
+      if (!seen && event.notification.level !== "info")
+        playAlert(event.notification.level);
       if (state.notificationPreferences.toasts && !seen)
         state.toasts = [
           ...state.toasts,
@@ -763,6 +779,7 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
       return;
     }
     case "question.request": {
+      playAlert("attention");
       state.questions = [...state.questions.filter(question => question.id !== event.request.id), event.request];
       return;
     }
@@ -772,6 +789,7 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
       return;
     }
     case "permission.request": {
+      playAlert("attention");
       state.permissions = [...state.permissions, event.request];
       return;
     }
@@ -925,6 +943,23 @@ export function setShowGitHubIdentity(value: boolean): void {
 export function setTypingAnimation(value: boolean): void {
   useApp.setState({ typingAnimation: value });
   environmentStorage.setItem("citropy.typingAnimation", value ? "1" : "0");
+}
+
+export function setUiSounds(value: boolean): void {
+  useApp.setState({ uiSounds: value });
+  environmentStorage.setItem("citropy.uiSounds", value ? "1" : "0");
+}
+
+export function setUiAlertSounds(value: boolean): void {
+  useApp.setState({ uiAlertSounds: value });
+  environmentStorage.setItem("citropy.uiAlertSounds", value ? "1" : "0");
+}
+
+export function setUiSoundVolume(value: number): void {
+  if (!Number.isFinite(value)) return;
+  const uiSoundVolume = Math.max(0, Math.min(100, Math.round(value)));
+  useApp.setState({ uiSoundVolume });
+  environmentStorage.setItem("citropy.uiSoundVolume", String(uiSoundVolume));
 }
 
 export function setTypingSpeed(value: number): void {
