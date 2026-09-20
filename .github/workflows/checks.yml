@@ -37,7 +37,8 @@ jobs:
       - name: Check the installer scripts
         run: |
           sh -n scripts/install.sh
-          shellcheck -s sh scripts/install.sh
+          sh -n desktop/apply-appimage-update.sh
+          shellcheck -s sh scripts/install.sh desktop/apply-appimage-update.sh
           pwsh -NoProfile -Command '$errors = $null; [System.Management.Automation.Language.Parser]::ParseFile("scripts/install.ps1", [ref]$null, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }'
       - run: npm run desktop:package
       - run: npm run desktop:smoke

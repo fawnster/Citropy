@@ -4,6 +4,8 @@ import { randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { release } from "node:os";
 import { createAppUpdater } from "./updates.mjs";
+import { spawnAppImageRelaunch } from "./appimage-relaunch.mjs";
+import { createSecondInstanceFocus, revealDesktopWindow } from "./window-reveal.mjs";
 import { packagedBackend } from "./backend.mjs";
 import { initializeProfiles, browserProfile, handleProfiles } from "./browser-profiles.mjs";
 import { computerRequest, connectComputerEvents, stopComputer } from "./computer.mjs";
@@ -44,13 +46,8 @@ process.on("SIGTERM", () => {
   const timer = setTimeout(() => app.exit(1), 15000);
   timer.unref();
 });
-app.on("second-instance", () => {
-  if (window) {
-    if (window.isMinimized()) window.restore();
-    window.show();
-    window.focus();
-  }
-});
+const secondInstance = createSecondInstanceFocus(() => window);
+app.on("second-instance", () => secondInstance.focus());
 if (process.platform === "linux") app.setDesktopName(development ? "citropy-dev.desktop" : "citropy.desktop");
 if (app.isPackaged) {
   process.env.CITROPY_DEVELOPMENT = "0";
@@ -733,8 +730,6 @@ async function request(method, params) {
 app
   .whenReady()
   .then(async () => {
-    await backend?.start();
-    await initializeProfiles(app.getPath("userData"));
     let saved = {};
     try {
       saved = JSON.parse(readFileSync(windowFile, "utf8"));
@@ -771,6 +766,11 @@ app
         sandbox: true,
       },
     });
+    window.once("ready-to-show", () => revealDesktopWindow(window, { maximized: saved.maximized }));
+    if (process.platform === "linux") revealDesktopWindow(window, { maximized: saved.maximized });
+    secondInstance.flush();
+    const started = backend?.start() ?? Promise.resolve();
+    await initializeProfiles(app.getPath("userData"));
     Menu.setApplicationMenu(null);
     const trusted = (event) =>
       event.sender === window.webContents &&
@@ -789,6 +789,7 @@ app
     }, changed: state => {
       if (!window.isDestroyed()) window.webContents.send("environments:state", state);
     } });
+    await started;
     await environments.load();
     for (const [channel, action] of Object.entries({
       state: () => environments.state(),
@@ -874,6 +875,18 @@ app
       version,
       unavailable: unavailableUpdate,
       external: scriptedUpdates ? scriptInstaller : undefined,
+      applyInstall:
+        process.platform === "linux" && process.env.APPIMAGE
+          ? async (file) => {
+              spawnAppImageRelaunch({
+                appImage: process.env.APPIMAGE,
+                downloadedFile: file,
+                parentPid: process.pid,
+                logFile: join(app.getPath("userData"), "update.log"),
+              });
+              app.quit();
+            }
+          : undefined,
       emit: (state) => {
         if (!window.isDestroyed()) window.webContents.send("updates:state", state);
         if (state.status === "available") emit({ type: "update.available", version: state.version });
@@ -942,7 +955,14 @@ app
         }
         window.webContents.reload();
       } else if (command === "restart") {
-        app.relaunch();
+        if (process.env.APPIMAGE) {
+          spawnAppImageRelaunch({
+            appImage: process.env.APPIMAGE,
+            parentPid: process.pid,
+            logFile: join(app.getPath("userData"), "update.log"),
+          });
+          app.releaseSingleInstanceLock();
+        } else app.relaunch();
         app.quit();
       } else throw new Error("Unknown window action");
     });
@@ -983,10 +1003,6 @@ app
           { mode: 0o600 },
         );
       } catch {}
-    });
-    window.once("ready-to-show", () => {
-      if (saved.maximized) window.maximize();
-      window.show();
     });
     window.webContents.on("will-navigate", (event, url) => {
       if (new URL(url).origin !== ui.origin) event.preventDefault();

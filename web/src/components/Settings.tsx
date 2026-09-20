@@ -51,6 +51,7 @@ import { send } from "../lib/socket.ts";
 import { configureUiSounds, playUiSound, previewUiSound } from "../lib/ui-sound.ts";
 import { useI18n } from "../lib/i18n.ts";
 import type { DesktopWindowState } from "../desktop.d.ts";
+import type { AppUpdateState } from "../../../shared/app-update.ts";
 
 const sections = [
   { name: "Environments", group: "Workspace", icon: Monitor, description: "Choose this computer or an SSH host for your workspaces." },
@@ -161,12 +162,18 @@ export function Settings({
     Object.values(state.threads).some((thread) => thread.running),
   );
   const [desktop, setDesktop] = useState<DesktopWindowState>();
+  const [update, setUpdate] = useState<AppUpdateState>();
   const [applicationError, setApplicationError] = useState("");
   const [updating, setUpdating] = useState(false);
   useEffect(() => {
     void window.citropyDesktop?.windowState?.().then(setDesktop);
     return window.citropyDesktop?.onWindowState?.(setDesktop);
   }, []);
+  useEffect(() => {
+    void window.citropyDesktop?.updateState?.().then(setUpdate).catch(() => {});
+    return window.citropyDesktop?.onUpdateState?.(setUpdate);
+  }, []);
+  const applyingUpdate = Boolean(update && ["downloading", "ready", "installing"].includes(update.status));
   const development = useApp((state) => state.development);
   const restartServer = async () => {
     if (!(await confirmAction({
@@ -582,15 +589,17 @@ export function Settings({
                       <span>
                         <strong>{t("Restart desktop")}</strong>
                         <small>
-                          {running
-                            ? t("Available when active conversations have finished.")
-                            : t("Restart the app and reopen your browser tabs.")}
+                          {applyingUpdate
+                            ? t("Use Restart & apply to install the downloaded update.")
+                            : running
+                              ? t("Available when active conversations have finished.")
+                              : t("Restart the app and reopen your browser tabs.")}
                         </small>
                       </span>
                       <button
                         type="button"
                         className="btn"
-                        disabled={!connected || updating || running}
+                        disabled={!connected || updating || running || applyingUpdate}
                         onClick={() => void applicationAction("restart")}
                       >
                         <RotateCcw size={14} />{" "}{t("Restart")}{" "}</button>

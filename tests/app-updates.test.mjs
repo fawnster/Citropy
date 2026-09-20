@@ -79,6 +79,53 @@ test("release updates require separate download and apply actions and clean up l
   assert.equal(updater.eventNames().length, 0);
 });
 
+test("AppImage installs apply the downloaded file instead of electron-updater's relaunch", async (t) => {
+  const applied = [];
+  const { updater, control, calls } = fixture({
+    applyInstall: async (file) => {
+      applied.push(file);
+    },
+  });
+  t.after(() => control.dispose());
+  updater.downloadUpdate = async () => {
+    calls.push("download");
+    updater.emit("update-downloaded", {
+      version: "0.2.0",
+      downloadedFile: "/tmp/Citropy-0.2.0.AppImage",
+    });
+  };
+  await control.command("check");
+  await tick();
+  await control.command("download");
+  await tick();
+  await control.command("install");
+  await tick();
+  assert.deepEqual(applied, ["/tmp/Citropy-0.2.0.AppImage"]);
+  assert.equal(
+    calls.some((call) => Array.isArray(call)),
+    false,
+  );
+
+  const missing = fixture({
+    applyInstall: async (file) => {
+      applied.push(file);
+    },
+  });
+  t.after(() => missing.control.dispose());
+  missing.updater.downloadUpdate = async () => {
+    missing.updater.emit("update-downloaded", { version: "0.2.0" });
+  };
+  await missing.control.command("check");
+  await tick();
+  await missing.control.command("download");
+  await tick();
+  await missing.control.command("install");
+  await tick();
+  assert.equal(missing.control.state().status, "error");
+  assert.match(missing.control.state().message, /could not be applied/);
+  assert.equal(applied.length, 1);
+});
+
 test("duplicate clicks, no release, verification failures, and blocked restarts preserve the current app", async (t) => {
   let release;
   let failure = false;

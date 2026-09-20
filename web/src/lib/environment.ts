@@ -6,6 +6,7 @@ let initial: EnvironmentState = { activeId: "local", endpoint: "", connections: 
 let controller = new AbortController();
 let switching: string | null = null;
 let selection = 0;
+let pushes = 0;
 const listeners = new Set<() => void>();
 type WorkspaceCatalog = Record<string, { home: string; projects: Project[] }>;
 let workspaces: WorkspaceCatalog = {};
@@ -25,6 +26,7 @@ export async function initializeEnvironment(): Promise<void> {
   if (initial.activeId !== "local" && !/^http:\/\/127\.0\.0\.1:\d+$/.test(initial.endpoint))
     throw new Error("The SSH environment has no local tunnel endpoint.");
   const unsubscribe = window.citropyDesktop?.onEnvironmentsState?.(value => {
+    pushes++;
     initial = { ...value, activeId: initial.activeId, endpoint: initial.endpoint };
     publish();
   });
@@ -56,13 +58,15 @@ export async function selectEnvironment(id: string, projectId?: string): Promise
   if (!desktop?.connectEnvironment) throw new Error("Open Citropy desktop to use SSH environments.");
   if (switching && id !== "local") throw new Error("Wait for the current connection or cancel it first.");
   const turn = ++selection;
+  const pushesBefore = pushes;
   switching = id;
   try {
-    const next = await desktop.connectEnvironment(id);
+    const snapshot = await desktop.connectEnvironment(id);
     if (turn !== selection) return;
-    if (id !== "local" && !/^http:\/\/127\.0\.0\.1:\d+$/.test(next.endpoint)) throw new Error("The SSH environment has no local tunnel endpoint.");
+    if (id !== "local" && !/^http:\/\/127\.0\.0\.1:\d+$/.test(snapshot.endpoint)) throw new Error("The SSH environment has no local tunnel endpoint.");
     const [{ connect, disconnect, waitUntilConnected }, { resetEnvironment, selectProject, useApp }] = await Promise.all([import("./socket.ts"), import("./store.ts")]);
     if (turn !== selection) return;
+    const next = pushes === pushesBefore ? snapshot : { ...snapshot, connections: initial.connections };
     if (id !== initial.activeId) {
       disconnect(true);
       controller.abort();

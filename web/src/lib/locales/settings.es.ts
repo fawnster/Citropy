@@ -451,6 +451,7 @@ export const settingsEs: Record<string, string> = {
   "Use GitHub profile in chat": "Usar perfil de GitHub en el chat",
   "Use native browsing, notifications, and window controls.": "Usa la navegación, las notificaciones y los controles de ventana nativos.",
   "Use profile": "Usar perfil",
+  "Use Restart & apply to install the downloaded update.": "Usa Reiniciar y aplicar para instalar la actualización descargada.",
   "Use Stop sharing here or in your desktop's sharing indicator.": "Usa Dejar de compartir aquí o en el indicador de uso compartido del escritorio.",
   "Use the model's preference": "Usar la preferencia del modelo",
   "Use your system sound for desktop notifications.": "Usar el sonido del sistema para las notificaciones de escritorio.",

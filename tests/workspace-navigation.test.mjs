@@ -231,9 +231,23 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     await page.route("**/api/providers/maintenance*", route => route.fulfill({ json: [] }));
     await page.evaluate(() => {
       window.updateCommands = [];
+      let state = { status: "available", currentVersion: "0.1.0", version: "0.2.0" };
+      const listeners = new Set();
       window.citropyDesktop = {
-        updateState: async () => ({ status: "available", currentVersion: "0.1.0", version: "0.2.0" }),
-        updateCommand: async command => { window.updateCommands.push(command); return { status: "ready", currentVersion: "0.1.0", version: "0.2.0" }; },
+        windowState: async () => ({ platform: "linux", maximized: false, fullscreen: false, development: false, version: "test", notifications: false, electron: "test" }),
+        onWindowState: () => () => {},
+        updateState: async () => state,
+        onUpdateState: callback => {
+          listeners.add(callback);
+          return () => listeners.delete(callback);
+        },
+        updateCommand: async command => {
+          window.updateCommands.push(command);
+          state = { status: command === "download" ? "ready" : state.status, currentVersion: "0.1.0", version: "0.2.0" };
+          for (const listener of listeners) listener(state);
+          return state;
+        },
+        windowCommand: async () => {},
       };
     });
     for (const [index, section] of ["Providers", "Application"].entries()) {
@@ -249,6 +263,7 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     await update.click();
     assert.deepEqual(await page.evaluate(() => window.updateCommands), ["download"]);
     await page.locator(".settings").getByRole("button", { name: "Restart & apply", exact: true }).waitFor();
+    assert.equal(await page.locator(".settings").getByRole("button", { name: "Restart", exact: true }).isDisabled(), true);
     const tooltip = page.locator(".app-update-settings [role=tooltip]");
     assert.equal(await tooltip.evaluate(node => {
       const bounds = node.getBoundingClientRect();

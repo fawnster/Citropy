@@ -21,6 +21,8 @@ try {
   const appRoot = join(root, "resources/app");
   await access(join(appRoot, "LICENSE"));
   await access(join(appRoot, "dist/index.html"));
+  await access(join(appRoot, "desktop/apply-appimage-update.sh"));
+  await access(join(appRoot, "desktop/appimage-relaunch.mjs"));
   for (const path of [".env", "tests", ".git", "web", "desktop/start.mjs", "desktop/install.mjs", "desktop/smoke.mjs", "desktop/smoke-mac.mjs", "desktop/smoke-win.mjs", "node_modules/vite", "node_modules/playwright"]) {
     const present = await access(join(appRoot, path)).then(() => true, () => false);
     assert.equal(present, false, `Development file in release: ${path}`);

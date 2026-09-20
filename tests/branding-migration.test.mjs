@@ -103,3 +103,21 @@ test("conversations from the earlier Lemon data folder move into the shared fold
     assert.equal(existsSync(join(directory, ".citropy-lemon")), existing);
   }
 });
+
+test("the interface brand color matches the yellow mark, not Lime", () => {
+  const root = new URL("..", import.meta.url);
+  const mark = readFileSync(new URL("public/citropy.svg", root), "utf8");
+  const tokens = readFileSync(new URL("web/src/styles/tokens.css", root), "utf8");
+  assert.match(mark, /A yellow lemon half/);
+  assert.match(mark, /fill="#F4D34E"/);
+  assert.doesNotMatch(mark, /a3e635|lime half/i);
+  assert.match(tokens, /--brand:\s*#f4d34e/i);
+  assert.doesNotMatch(tokens, /a3e635|bef264|4d7c0f/i);
+  const installer = readFileSync(new URL("scripts/install.sh", root), "utf8");
+  assert.match(installer, /gtk-update-icon-cache -f/);
+  assert.match(readFileSync(new URL("desktop/install.mjs", root), "utf8"), /gtk-update-icon-cache/);
+  assert.equal(existsSync(new URL("web/src/components/ChannelBadge.tsx", root)), false);
+  assert.equal(existsSync(new URL("web/src/components/ChannelSwitch.tsx", root)), false);
+  assert.doesNotMatch(readFileSync(new URL("web/src/components/Titlebar.tsx", root), "utf8"), /channel-badge|ChannelBadge|Lime/);
+  assert.doesNotMatch(readFileSync(new URL("web/src/styles/app.css", root), "utf8"), /channel-badge/);
+});
