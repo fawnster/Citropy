@@ -31,11 +31,11 @@ const { version } = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 );
 const channel = /-lemon[.\d]*$/.test(version) ? "lemon" : "stable";
-const appName = development ? "Citropy Dev" : channel === "lemon" ? "Citropy Lemon" : "Citropy";
+const appName = development ? "Citropy Dev" : "Citropy";
 app.setName(appName);
 app.setPath(
   "userData",
-  migrateDesktopData(app.getPath("appData"), process.env.CITROPY_DESKTOP_DATA || (development || channel === "lemon" ? join(app.getPath("appData"), appName) : undefined)),
+  migrateDesktopData(app.getPath("appData"), process.env.CITROPY_DESKTOP_DATA || (development ? join(app.getPath("appData"), appName) : undefined)),
 );
 if (!app.requestSingleInstanceLock()) app.exit(0);
 let forcedExit = false;
@@ -52,11 +52,10 @@ app.on("second-instance", () => {
     window.focus();
   }
 });
-if (process.platform === "linux") app.setDesktopName(development ? "citropy-dev.desktop" : channel === "lemon" ? "citropy-lemon.desktop" : "citropy.desktop");
+if (process.platform === "linux") app.setDesktopName(development ? "citropy-dev.desktop" : "citropy.desktop");
 if (app.isPackaged) {
   process.env.CITROPY_DEVELOPMENT = "0";
-  process.env.CITROPY_PORT ||= channel === "lemon" ? "4179" : "4177";
-  if (channel === "lemon") process.env.CITROPY_DATA_DIR ||= join(app.getPath("home"), ".citropy-lemon");
+  process.env.CITROPY_PORT ||= "4177";
   process.env.CITROPY_HOST = "127.0.0.1";
   process.env.CITROPY_URL = `http://127.0.0.1:${process.env.CITROPY_PORT}`;
   process.env.CITROPY_UI_URL = process.env.CITROPY_URL;

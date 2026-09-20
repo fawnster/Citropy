@@ -60,15 +60,9 @@ main() {
     arch=arm64
   fi
 
-  if [ "$CHANNEL" = lemon ]; then
-    name="Citropy Lemon"
-    command_name="citropy-lemon"
-    data_hint="$HOME/.citropy-lemon and the Citropy Lemon profile"
-  else
-    name="Citropy"
-    command_name="citropy"
-    data_hint="$HOME/.citropy and the Citropy profile"
-  fi
+  name="Citropy"
+  command_name="citropy"
+  data_hint="$HOME/.citropy and the Citropy profile"
   bin_dir="${CITROPY_BIN_DIR:-$HOME/.local/bin}"
   bin_path="${CITROPY_BIN_PATH:-$bin_dir/$command_name}"
   data_dir="${XDG_DATA_HOME:-$HOME/.local/share}"

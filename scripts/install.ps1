@@ -47,16 +47,9 @@ function Invoke-CitropyInstall {
       Fail "Unsupported processor: $architecture"
     }
 
-    if ($Channel -eq "lemon") {
-      $name = "Citropy Lemon"
-      $folder = "citropy-lemon"
-      $stateHint = "$env:USERPROFILE\.citropy-lemon"
-    }
-    else {
-      $name = "Citropy"
-      $folder = "citropy"
-      $stateHint = "$env:USERPROFILE\.citropy"
-    }
+    $name = "Citropy"
+    $folder = "citropy"
+    $stateHint = "$env:USERPROFILE\.citropy"
     $installDir = Join-Path $env:LOCALAPPDATA "Programs\$folder"
     $exe = Join-Path $installDir "$name.exe"
     $uninstaller = Join-Path $installDir "Uninstall $name.exe"
