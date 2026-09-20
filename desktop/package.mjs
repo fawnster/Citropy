@@ -59,6 +59,9 @@ const channelArgs =
         "-c.linux.artifactName=Citropy-lime-${arch}.AppImage",
         "-c.mac.artifactName=Citropy-lime-${arch}.zip",
         "-c.win.artifactName=Citropy-lime-${arch}-Setup.exe",
+        "-c.linux.icon=desktop/assets/citropy-lime.png",
+        "-c.mac.icon=desktop/assets/citropy-lime.png",
+        "-c.win.icon=desktop/assets/citropy-lime.png",
       ]
     : [];
 await run(process.execPath, [
