@@ -1,15 +1,9 @@
 # Installs or updates Citropy on Windows.
 #
 #   irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1 | iex
-#   $s = irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1; & ([scriptblock]::Create($s)) -Channel lime
 #   $s = irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1; & ([scriptblock]::Create($s)) -Uninstall
-#
-# The stable channel installs released versions. Lime installs the rolling
-# build from main. Both are the same app with the same data, so installing
-# either one replaces the other.
 [CmdletBinding()]
 param(
-  [string]$Channel = $env:CITROPY_CHANNEL,
   [string]$Version = $env:CITROPY_VERSION,
   [string]$BaseUrl = $env:CITROPY_BASE_URL,
   [switch]$Uninstall
@@ -31,11 +25,6 @@ function Invoke-CitropyInstall {
   $temp = $null
   $exe = $null
   try {
-    if (-not $Channel) { $Channel = "stable" }
-    if ($Channel -eq "lemon") { $Channel = "lime" }
-    if ($Channel -ne "stable" -and $Channel -ne "lime") { Fail "Unknown channel: $Channel. Use stable or lime." }
-    if ($Channel -eq "lime" -and $Version) { Fail "The Lime channel always installs the newest build, so -Version does not apply." }
-
     $architecture = $env:PROCESSOR_ARCHITEW6432
     if (-not $architecture) { $architecture = $env:PROCESSOR_ARCHITECTURE }
     if ($architecture -eq "AMD64") {
@@ -56,18 +45,6 @@ function Invoke-CitropyInstall {
     $exe = Join-Path $installDir "$name.exe"
     $uninstaller = Join-Path $installDir "Uninstall $name.exe"
 
-    function Remove-EarlierLemon {
-      $legacyDir = Join-Path $env:LOCALAPPDATA "Programs\citropy-lemon"
-      if (-not (Test-Path $legacyDir)) { return }
-      $legacyUninstaller = Join-Path $legacyDir "Uninstall Citropy Lemon.exe"
-      if (Test-Path $legacyUninstaller) {
-        Start-Process -FilePath $legacyUninstaller -ArgumentList "/S" -Wait | Out-Null
-        for ($attempt = 0; $attempt -lt 60 -and (Test-Path $legacyDir); $attempt++) { Start-Sleep -Milliseconds 500 }
-      }
-      if (Test-Path $legacyDir) { Remove-Item -Path $legacyDir -Recurse -Force -ErrorAction SilentlyContinue }
-      if (-not (Test-Path $legacyDir)) { Say "Removed the earlier separate Citropy Lemon install." }
-    }
-
     if ($Uninstall) {
       if (Test-Path $uninstaller) {
         $process = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
@@ -79,7 +56,6 @@ function Invoke-CitropyInstall {
       else {
         Say "$name is not installed in $installDir."
       }
-      Remove-EarlierLemon
       Say "Your conversations and settings stay in $stateHint and the $name profile."
       return
     }
@@ -90,26 +66,19 @@ function Invoke-CitropyInstall {
       Fail "Refusing to download over plain HTTP from a remote host."
     }
 
-    if ($Channel -eq "lime") {
-      $tag = "lime"
-      $asset = "Citropy-lime-$arch-Setup.exe"
-      $label = "Citropy Lime"
-    }
-    else {
-      if (-not $Version) {
-        try {
-          $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ "User-Agent" = "Citropy" }
-        }
-        catch {
-          Fail "Could not read the latest release from GitHub. Pass -Version or set CITROPY_VERSION. ($($_.Exception.Message))"
-        }
-        $Version = $release.tag_name -replace "^v", ""
+    if (-not $Version) {
+      try {
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/$repo/releases/latest" -Headers @{ "User-Agent" = "Citropy" }
       }
-      if ($Version -notmatch "^\d+\.\d+\.\d+$") { Fail "Version $Version does not look like a release. Use a version like 0.2.0." }
-      $tag = "v$Version"
-      $asset = "Citropy-$Version-$arch-Setup.exe"
-      $label = "Citropy $Version"
+      catch {
+        Fail "Could not read the latest release from GitHub. Pass -Version or set CITROPY_VERSION. ($($_.Exception.Message))"
+      }
+      $Version = $release.tag_name -replace "^v", ""
     }
+    if ($Version -notmatch "^\d+\.\d+\.\d+$") { Fail "Version $Version does not look like a release. Use a version like 0.2.0." }
+    $tag = "v$Version"
+    $asset = "Citropy-$Version-$arch-Setup.exe"
+    $label = "Citropy $Version"
 
     $waitFor = $env:CITROPY_PARENT_PID
     if ($waitFor) {
@@ -136,19 +105,9 @@ function Invoke-CitropyInstall {
     $actual = (Get-FileHash -Path $setup -Algorithm SHA256).Hash
     if ($actual.ToLower() -ne $expected.ToLower()) { Fail "The downloaded file failed its checksum. Try again." }
     if ($PSVersionTable.PSVersion.Major -lt 6 -or $IsWindows) { Unblock-File -Path $setup }
-    if ($Channel -eq "lime") {
-      try {
-        $infoFile = Join-Path $temp "version.json"
-        Invoke-WebRequest -Uri "$BaseUrl/$tag/version.json" -OutFile $infoFile -UseBasicParsing
-        $info = Get-Content -Path $infoFile -Raw | ConvertFrom-Json
-        if ($info.version) { $label = "Citropy Lime $($info.version)" }
-      }
-      catch {}
-    }
     $install = Start-Process -FilePath $setup -ArgumentList "/S" -Wait -PassThru
     if ($install.ExitCode -ne 0) { Fail "The installer exited with code $($install.ExitCode), so the current installation was left alone." }
     if (-not (Test-Path $exe)) { Fail "The installer finished but $exe was not found." }
-    Remove-EarlierLemon
     Say "Installed $label at $installDir"
   }
   finally {
@@ -167,7 +126,7 @@ catch {
   throw
 }
 finally {
-  foreach ($citropyName in @("Channel", "Version", "BaseUrl", "Uninstall", "scriptPath", "citropyName")) {
+  foreach ($citropyName in @("Version", "BaseUrl", "Uninstall", "scriptPath", "citropyName")) {
     Remove-Variable -Name $citropyName -ErrorAction SilentlyContinue
   }
   Remove-Item -Path "Function:\Invoke-CitropyInstall" -ErrorAction SilentlyContinue

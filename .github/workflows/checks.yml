@@ -151,10 +151,6 @@ jobs:
             if (-not (Test-Path $installed)) { throw "PowerShell 5.1 install failed." }
             powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Uninstall
             if (Test-Path $installDir) { throw "The PowerShell 5.1 uninstall left $installDir behind." }
-            powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Channel nope
-            $unknownChannel = $LASTEXITCODE
-            Write-Output "Installer exit code for an unknown channel: $unknownChannel"
-            if ($unknownChannel -eq 0) { throw "The installer accepted an unknown channel." }
             powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install.ps1 -Version 99.99.99
             $missingRelease = $LASTEXITCODE
             Write-Output "Installer exit code for a missing release: $missingRelease"
@@ -181,7 +177,7 @@ jobs:
             $env:CITROPY_BASE_URL = "http://127.0.0.1:8794"
             Invoke-Expression (Get-Content -Raw scripts/install.ps1)
             Write-Output "CITROPY_SESSION_ALIVE"
-            if (Get-Variable -Name Channel -ErrorAction SilentlyContinue) { throw "The installer leaked its Channel variable into the calling session." }
+            if (Get-Variable -Name Version -ErrorAction SilentlyContinue) { throw "The installer leaked its Version variable into the calling session." }
             if (Get-Command Invoke-CitropyInstall -ErrorAction SilentlyContinue) { throw "The installer leaked its function into the calling session." }
             $installed = Join-Path $env:LOCALAPPDATA "Programs\citropy\Citropy.exe"
             if (-not (Test-Path $installed)) { throw "The invoker-scope install failed: $installed is missing." }

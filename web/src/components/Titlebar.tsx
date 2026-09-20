@@ -10,7 +10,6 @@ import { WindowControls } from "./WindowControls.tsx";
 import { GitActions } from "./GitActions.tsx";
 import { RunningShells } from "./RunningShells.tsx";
 import { WorkspaceSelector } from "./WorkspaceSelector.tsx";
-import { ChannelBadge } from "./ChannelBadge.tsx";
 import type { NotificationTarget } from "../../../shared/protocol.ts";
 
 export function Titlebar({
@@ -78,7 +77,6 @@ export function Titlebar({
             aria-hidden="true"
           />
           <span>Citropy</span>
-          <ChannelBadge />
         </div>
         <div className="topbar-navigation">
           <NotificationCenter onOpen={onNotification} />

@@ -2,12 +2,7 @@
 # Installs or updates Citropy on Linux and macOS.
 #
 #   curl -fsSL https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.sh | sh
-#   curl -fsSL https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.sh | sh -s -- --channel=lime
 #   sh scripts/install.sh --uninstall
-#
-# The stable channel installs released versions. Lime installs the rolling
-# build from main. Both are the same app with the same data, so installing
-# either one replaces the other.
 set -eu
 
 REPO="tinuxongit/Citropy"
@@ -17,36 +12,22 @@ say() { printf '%s\n' "$*"; }
 fail() { printf 'Citropy install: %s\n' "$*" >&2; exit 1; }
 
 main() {
-  CHANNEL="${CITROPY_CHANNEL:-stable}"
   VERSION="${CITROPY_VERSION:-}"
   BASE="${CITROPY_BASE_URL:-}"
   UNINSTALL=0
   for argument in "$@"; do
     case "$argument" in
       --uninstall) UNINSTALL=1 ;;
-      --channel=*) CHANNEL="${argument#--channel=}" ;;
       --version=*) VERSION="${argument#--version=}" ;;
       --help|-h)
         say "Installs or updates Citropy on Linux and macOS."
-        say "  --channel=stable|lime   pick the release channel (default stable)"
-        say "  --version=X.Y.Z          install a specific stable release"
-        say "  --uninstall              remove this channel's app"
+        say "  --version=X.Y.Z   install a specific release"
+        say "  --uninstall       remove the installed app"
         exit 0
         ;;
       *) fail "Unknown option: $argument" ;;
     esac
   done
-  case "$CHANNEL" in
-    lemon) CHANNEL=lime ;;
-  esac
-  case "$CHANNEL" in
-    stable | lime) ;;
-    *) fail "Unknown channel: $CHANNEL. Use stable or lime." ;;
-  esac
-  if [ "$CHANNEL" = lime ] && [ -n "$VERSION" ]; then
-    fail "The Lime channel always installs the newest build, so --version does not apply."
-  fi
-
   case "$(uname -s)" in
     Linux) os=linux ;;
     Darwin) os=macos ;;
@@ -123,20 +104,6 @@ main() {
       sleep 1
     done
   }
-  remove_earlier_lemon() {
-    found=0
-    for path in "$app_dir/Citropy Lemon.app" "$HOME/Applications/Citropy Lemon.app" "$bin_dir/citropy-lemon" "$HOME/.local/bin/citropy-lemon" \
-      "$data_dir/applications/citropy-lemon.desktop" "$data_dir/icons/hicolor/512x512/apps/citropy-lemon.png"; do
-      if [ -e "$path" ] && [ "$path" != "$bin_path" ]; then
-        rm -rf "$path"
-        found=1
-      fi
-    done
-    if [ "$found" = 1 ]; then
-      say "Removed the earlier separate Citropy Lemon install."
-    fi
-  }
-
   if [ "$UNINSTALL" = 1 ]; then
     if [ "$os" = macos ]; then
       rm -rf "$staging" "$previous"
@@ -163,7 +130,6 @@ main() {
       fi
       say "Your conversations stay in $data_hint. The app profile is in $HOME/.config/$name."
     fi
-    remove_earlier_lemon
     exit 0
   fi
 
@@ -183,32 +149,23 @@ main() {
       ;;
   esac
 
-  if [ "$CHANNEL" = lime ]; then
-    tag=lime
-    label="Citropy Lime"
-  else
-    if [ -z "$VERSION" ]; then
-      latest=$(curl -fsSL -o /dev/null -w '%{url_effective}' "$GITHUB/releases/latest") ||
-        fail "Could not reach GitHub. Check your connection and try again."
-      VERSION=${latest##*/tag/v}
-    fi
-    if ! printf '%s' "$VERSION" |
-      awk -F. 'NF == 3 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ { found = 1 } END { exit !found }'; then
-      fail "Version $VERSION does not look like a release. Use a version like 0.2.0."
-    fi
-    tag="v$VERSION"
-    label="Citropy $VERSION"
+  if [ -z "$VERSION" ]; then
+    latest=$(curl -fsSL -o /dev/null -w '%{url_effective}' "$GITHUB/releases/latest") ||
+      fail "Could not reach GitHub. Check your connection and try again."
+    VERSION=${latest##*/tag/v}
   fi
+  if ! printf '%s' "$VERSION" |
+    awk -F. 'NF == 3 && $1 ~ /^[0-9]+$/ && $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ { found = 1 } END { exit !found }'; then
+    fail "Version $VERSION does not look like a release. Use a version like 0.2.0."
+  fi
+  tag="v$VERSION"
+  label="Citropy $VERSION"
   if [ "$os" = macos ]; then
     extension=zip
   else
     extension=AppImage
   fi
-  if [ "$CHANNEL" = lime ]; then
-    asset="Citropy-lime-$arch.$extension"
-  else
-    asset="Citropy-$VERSION-$arch.$extension"
-  fi
+  asset="Citropy-$VERSION-$arch.$extension"
 
   if command -v sha256sum >/dev/null 2>&1; then
     hash_file() { sha256sum "$1"; }
@@ -229,11 +186,6 @@ main() {
   [ -n "$expected" ] || fail "SHA256SUMS does not list $asset."
   actual=$(hash_file "$tmp/$asset" | awk '{ print $1 }')
   [ "$actual" = "$expected" ] || fail "The downloaded file failed its checksum. Try again."
-
-  if [ "$CHANNEL" = lime ]; then
-    reported=$(curl -fsSL "$BASE/$tag/version.json" 2>/dev/null | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' || true)
-    if [ -n "$reported" ]; then label="Citropy Lime $reported"; fi
-  fi
 
   wait_for_parent
 
@@ -273,7 +225,6 @@ EOF
     else
       say "The application icon could not be extracted, so the menu entry was skipped."
     fi
-    remove_earlier_lemon
     say "Installed $label at $bin_path"
     say "Open it from your application menu or by running $command_name."
   else
@@ -311,7 +262,6 @@ EOF
       fail "Could not replace $app."
     fi
     rm -rf "$previous"
-    remove_earlier_lemon
     say "Installed $label at $app"
     say "Open it from Launchpad or by running: open \"$app\""
   fi

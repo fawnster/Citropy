@@ -28,7 +28,6 @@ import { ComputerSettings } from "./ComputerSettings.tsx";
 import { ProviderSettings } from "./ProviderSettings.tsx";
 import { AssistanceSettings } from "./AssistanceSettings.tsx";
 import { AppUpdateControl } from "./AppUpdateControl.tsx";
-import { ChannelSwitch } from "./ChannelSwitch.tsx";
 import { ExperimentalTag } from "./ExperimentalTag.tsx";
 import { SectionSidebar } from "./SectionSidebar.tsx";
 import {
@@ -456,7 +455,6 @@ export function Settings({
                   </span>
                   <AppUpdateControl variant="settings" />
                 </div>
-                <ChannelSwitch />
                 {development && !isRemote() && (
                   <div className="setting-row">
                     <span>
