@@ -58,6 +58,13 @@
   --accent-line: rgba(255, 255, 255, 0.25);
   --accent-text: #e5e5e5;
 
+  --brand: #a3e635;
+  --on-brand: #202020;
+  --brand-hover: #bef264;
+  --brand-soft: rgba(163, 230, 53, 0.14);
+  --brand-line: rgba(163, 230, 53, 0.35);
+  --brand-text: #a3e635;
+
   --heat: #edb56a;
   --web-icon: #64c9c2;
   --task-icon: #b398ed;
@@ -108,6 +115,13 @@
   --accent-soft: rgba(0, 0, 0, 0.055);
   --accent-line: rgba(0, 0, 0, 0.24);
   --accent-text: #333333;
+
+  --brand: #4d7c0f;
+  --on-brand: #ffffff;
+  --brand-hover: #3f6212;
+  --brand-soft: rgba(77, 124, 15, 0.10);
+  --brand-line: rgba(77, 124, 15, 0.30);
+  --brand-text: #4d7c0f;
 
   --heat: #a56316;
   --web-icon: #177b76;
