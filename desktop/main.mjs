@@ -22,7 +22,7 @@ import {
 } from "electron";
 import { WebSocket } from "ws";
 import { fileURLToPath } from "node:url";
-import { join, resolve, sep } from "node:path";
+import { basename, join, resolve, sep } from "node:path";
 import { readFileSync, writeFileSync, mkdirSync, openSync, closeSync, accessSync, constants } from "node:fs";
 import { migrateDesktopData } from "./migrate-data.mjs";
 
@@ -55,6 +55,7 @@ app.on("second-instance", () => {
 if (process.platform === "linux") app.setDesktopName(development ? "citropy-dev.desktop" : "citropy.desktop");
 if (app.isPackaged) {
   process.env.CITROPY_DEVELOPMENT = "0";
+  if (process.env.CITROPY_DATA_DIR === join(app.getPath("home"), ".citropy-lemon")) delete process.env.CITROPY_DATA_DIR;
   process.env.CITROPY_PORT ||= "4177";
   process.env.CITROPY_HOST = "127.0.0.1";
   process.env.CITROPY_URL = `http://127.0.0.1:${process.env.CITROPY_PORT}`;
@@ -829,6 +830,13 @@ app
         ? "Install the Citropy AppImage to download and apply release updates."
         : undefined;
     const scriptedUpdates = !unavailableUpdate && (channel === "lemon" || macScriptUpdates());
+    const windowsFolder = process.env.LOCALAPPDATA ? resolve(process.env.LOCALAPPDATA, "Programs", "citropy") : undefined;
+    const switchable = !unavailableUpdate && (
+      process.platform === "win32"
+        ? Boolean(windowsFolder) && resolve(process.execPath).startsWith(`${windowsFolder}${sep}`)
+        : process.platform === "darwin"
+          ? basename(resolve(process.execPath, "..", "..", "..")) === "Citropy.app"
+          : true);
     const autoUpdater = unavailableUpdate || scriptedUpdates ? undefined : (await import("electron-updater").then(module => module.default || module)).autoUpdater;
     const scriptInstaller = {
       check: async () => {
@@ -851,7 +859,7 @@ app
         const env = { ...process.env, CITROPY_RELAUNCH: "1", CITROPY_CHANNEL: target, CITROPY_PARENT_PID: String(process.pid) };
         for (const name of ["CITROPY_VERSION", "CITROPY_BASE_URL", "CITROPY_BIN_DIR", "CITROPY_BIN_PATH", "CITROPY_APP_DIR"]) delete env[name];
         if (target !== channel)
-          for (const name of ["CITROPY_PORT", "CITROPY_URL", "CITROPY_UI_URL", "CITROPY_DATA_DIR", "CITROPY_DESKTOP_DATA"])
+          for (const name of ["CITROPY_PORT", "CITROPY_URL", "CITROPY_UI_URL"])
             delete env[name];
         if (process.platform === "darwin") {
           const directory = resolve(process.execPath, "..", "..", "..", "..");
@@ -884,6 +892,7 @@ app
       version,
       channel,
       unavailable: unavailableUpdate,
+      switchable,
       external: scriptedUpdates ? scriptInstaller : undefined,
       installer: unavailableUpdate ? undefined : scriptInstaller,
       emit: (state) => {
@@ -928,6 +937,7 @@ app
       platform: process.platform,
       development,
       channel,
+      switchable,
       version,
       notifications: Notification.isSupported(),
       electron: process.versions.electron,

@@ -6,6 +6,7 @@ export interface DesktopWindowState {
   platform: string;
   development: boolean;
   channel: "stable" | "lemon";
+  switchable: boolean;
   version: string;
   notifications: boolean;
   electron: string;

@@ -5,6 +5,7 @@ export function createAppUpdater({
   version,
   channel,
   unavailable,
+  switchable,
   external,
   installer,
   emit,
@@ -114,6 +115,8 @@ export function createAppUpdater({
   const command = async (request) => {
     const action = typeof request === "string" ? request : request?.action;
     const target = typeof request === "string" ? undefined : request?.channel;
+    if (action === "switch" && (unavailable || !switchable))
+      throw new Error("This build cannot switch release channels.");
     if (disposed || unavailable || operation || recovering) return { ...state };
     if (!["check", "download", "install", "switch"].includes(action))
       throw new Error("Unknown update action");

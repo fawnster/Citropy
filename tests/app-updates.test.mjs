@@ -330,6 +330,7 @@ test("switching channels installs the other build through the scripted installer
     updater,
     version: "0.2.0",
     channel: "stable",
+    switchable: true,
     emit: () => {},
     prepareInstall: async () => {
       calls.push("prepare");
@@ -363,6 +364,7 @@ test("a failed channel switch keeps the current build and offers no retry action
     updater,
     version: "0.2.0",
     channel: "stable",
+    switchable: true,
     emit: () => {},
     prepareInstall: async () => {
       calls.push("prepare");
@@ -390,6 +392,43 @@ test("a build without the scripted installer cannot switch channels", async (t) 
   t.after(() => control.dispose());
   await assert.rejects(
     control.command({ action: "switch", channel: "lemon" }),
+    /cannot switch release channels/,
+  );
+});
+
+test("a build that cannot replace itself rejects a channel switch", async (t) => {
+  const updater = new EventEmitter();
+  const control = createAppUpdater({
+    updater,
+    version: "0.2.0",
+    channel: "stable",
+    unavailable: "Development build.",
+    switchable: false,
+    emit: () => {},
+    installer: {
+      install: async () => {},
+    },
+  });
+  t.after(() => control.dispose());
+  await assert.rejects(
+    control.command({ action: "switch", channel: "lemon" }),
+    /cannot switch release channels/,
+  );
+  assert.equal((await control.command("check")).status, "unsupported");
+  control.dispose();
+  const available = createAppUpdater({
+    updater: new EventEmitter(),
+    version: "0.2.0",
+    channel: "stable",
+    switchable: false,
+    emit: () => {},
+    installer: {
+      install: async () => {},
+    },
+  });
+  t.after(() => available.dispose());
+  await assert.rejects(
+    available.command({ action: "switch", channel: "lemon" }),
     /cannot switch release channels/,
   );
 });

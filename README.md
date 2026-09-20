@@ -121,7 +121,7 @@ On Windows:
 $s = irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1; & ([scriptblock]::Create($s)) -Channel lemon
 ```
 
-Installing a channel replaces the installed build; your conversations, settings, and terminals stay. Remove Citropy with `--uninstall` on Linux and macOS, or `-Uninstall` on Windows.
+Installing a channel replaces the installed build; your conversations, settings, and terminals stay. It also replaces the earlier separate Lemon preview and moves its data into `~/.citropy`. Remove Citropy with `--uninstall` on Linux and macOS, or `-Uninstall` on Windows.
 
 From a source checkout instead:
 

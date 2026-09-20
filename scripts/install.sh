@@ -6,7 +6,8 @@
 #   sh scripts/install.sh --uninstall
 #
 # The stable channel installs released versions. Lemon installs the rolling
-# build from main and keeps its own app, data, and settings.
+# build from main. Both are the same app with the same data, so installing
+# either one replaces the other.
 set -eu
 
 REPO="tinuxongit/Citropy"
@@ -119,6 +120,18 @@ main() {
       sleep 1
     done
   }
+  remove_earlier_lemon() {
+    found=0
+    for path in "$app_dir/Citropy Lemon.app" "$bin_dir/citropy-lemon" "$data_dir/applications/citropy-lemon.desktop" "$data_dir/icons/hicolor/512x512/apps/citropy-lemon.png"; do
+      if [ -e "$path" ]; then
+        rm -rf "$path"
+        found=1
+      fi
+    done
+    if [ "$found" = 1 ]; then
+      say "Removed the earlier separate Citropy Lemon install."
+    fi
+  }
 
   if [ "$UNINSTALL" = 1 ]; then
     if [ "$os" = macos ]; then
@@ -146,6 +159,7 @@ main() {
       fi
       say "Your conversations stay in $data_hint. The app profile is in $HOME/.config/$name."
     fi
+    remove_earlier_lemon
     exit 0
   fi
 
@@ -255,6 +269,7 @@ EOF
     else
       say "The application icon could not be extracted, so the menu entry was skipped."
     fi
+    remove_earlier_lemon
     say "Installed $label at $bin_path"
     say "Open it from your application menu or by running $command_name."
   else
@@ -292,6 +307,7 @@ EOF
       fail "Could not replace $app."
     fi
     rm -rf "$previous"
+    remove_earlier_lemon
     say "Installed $label at $app"
     say "Open it from Launchpad or by running: open \"$app\""
   fi

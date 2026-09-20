@@ -5,7 +5,8 @@
 #   $s = irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1; & ([scriptblock]::Create($s)) -Uninstall
 #
 # The stable channel installs released versions. Lemon installs the rolling
-# build from main and keeps its own app, data, and settings.
+# build from main. Both are the same app with the same data, so installing
+# either one replaces the other.
 [CmdletBinding()]
 param(
   [string]$Channel = $env:CITROPY_CHANNEL,
@@ -54,6 +55,18 @@ function Invoke-CitropyInstall {
     $exe = Join-Path $installDir "$name.exe"
     $uninstaller = Join-Path $installDir "Uninstall $name.exe"
 
+    function Remove-EarlierLemon {
+      $legacyDir = Join-Path $env:LOCALAPPDATA "Programs\citropy-lemon"
+      if (-not (Test-Path $legacyDir)) { return }
+      $legacyUninstaller = Join-Path $legacyDir "Uninstall Citropy Lemon.exe"
+      if (Test-Path $legacyUninstaller) {
+        Start-Process -FilePath $legacyUninstaller -ArgumentList "/S" -Wait | Out-Null
+        for ($attempt = 0; $attempt -lt 60 -and (Test-Path $legacyDir); $attempt++) { Start-Sleep -Milliseconds 500 }
+      }
+      if (Test-Path $legacyDir) { Remove-Item -Path $legacyDir -Recurse -Force -ErrorAction SilentlyContinue }
+      if (-not (Test-Path $legacyDir)) { Say "Removed the earlier separate Citropy Lemon install." }
+    }
+
     if ($Uninstall) {
       if (Test-Path $uninstaller) {
         $process = Start-Process -FilePath $uninstaller -ArgumentList "/S" -Wait -PassThru
@@ -65,6 +78,7 @@ function Invoke-CitropyInstall {
       else {
         Say "$name is not installed in $installDir."
       }
+      Remove-EarlierLemon
       Say "Your conversations and settings stay in $stateHint and the $name profile."
       return
     }
@@ -133,6 +147,7 @@ function Invoke-CitropyInstall {
     $install = Start-Process -FilePath $setup -ArgumentList "/S" -Wait -PassThru
     if ($install.ExitCode -ne 0) { Fail "The installer exited with code $($install.ExitCode), so the current installation was left alone." }
     if (-not (Test-Path $exe)) { Fail "The installer finished but $exe was not found." }
+    Remove-EarlierLemon
     Say "Installed $label at $installDir"
   }
   finally {

@@ -75,3 +75,31 @@ test("conversation directory migration retains saved bytes and never overwrites 
     assert.equal(existsSync(join(directory, ".loom")), existing);
   }
 });
+
+test("the earlier Lemon folders become the shared ones without overwriting data", (t) => {
+  const directory = temporary(t);
+  write(join(directory, "Citropy Lemon", "window.json"), '{"width":1280}');
+  assert.equal(migrateDesktopData(directory), join(directory, "Citropy"));
+  assert.equal(existsSync(join(directory, "Citropy Lemon")), false);
+  assert.equal(readFileSync(join(directory, "Citropy", "window.json"), "utf8"), '{"width":1280}');
+  const both = temporary(t);
+  write(join(both, "Citropy Lemon", "window.json"), "lemon");
+  write(join(both, "Citropy", "window.json"), "current");
+  migrateDesktopData(both);
+  assert.equal(readFileSync(join(both, "Citropy", "window.json"), "utf8"), "current");
+  assert.equal(readFileSync(join(both, "Citropy Lemon", "window.json"), "utf8"), "lemon");
+});
+
+test("conversations from the earlier Lemon data folder move into the shared folder once", (t) => {
+  for (const existing of [false, true]) {
+    const directory = temporary(t);
+    const saved = JSON.stringify({ id: "saved", projectId: "workspace", status: "idle", running: false, messages: [{ id: "response", role: "assistant", parts: [{ id: "text", kind: "text", text: "Preserved response", complete: false }] }] });
+    write(join(directory, ".citropy-lemon", "threads", "saved.json"), saved);
+    if (existing) write(join(directory, ".citropy", "threads", "current.json"), saved.replace('"saved"', '"current"'));
+    const result = execFileSync(process.execPath, ["--experimental-strip-types", "--input-type=module", "-e", `const { store } = await import(${JSON.stringify(new URL("../server/store.ts", import.meta.url).href)}); process.stdout.write(JSON.stringify([...store.threads.values()]));`], { env: { ...process.env, HOME: directory }, encoding: "utf8" });
+    const threads = JSON.parse(result);
+    assert.equal(threads.length, 1);
+    assert.equal(threads[0].id, existing ? "current" : "saved");
+    assert.equal(existsSync(join(directory, ".citropy-lemon")), existing);
+  }
+});
