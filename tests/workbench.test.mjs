@@ -242,6 +242,12 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
       assert.ok(after < before * 0.3, `Initial schemas: ${before} -> ${after} bytes`);
       const help = (await rpc("tools/call", { name: "tool_help", arguments: { category: "workspace" } })).body.result;
       assert.deepEqual(JSON.parse(help.content[0].text).map(tool => tool.name), ["workspace_tree", "workspace_read", "open_panel"]);
+      const subagentTools = JSON.parse((await rpc("tools/call", { name: "tool_help", arguments: { category: "subagent" } })).body.result.content[0].text);
+      const subagentStart = subagentTools.find(tool => tool.name === "subagent_start");
+      assert.match(subagentStart.description, /any configured provider and any model/);
+      assert.match(subagentStart.description, /default to this conversation's/);
+      assert.match(subagentStart.inputSchema.properties.model.description, /current model list/);
+      assert.match(subagentStart.inputSchema.properties.provider.description, /Provider/);
       assert.equal((await rpc("tools/call", { name: "workspace_read", arguments: { path: "hello.txt" } })).body.result.content[0].text, "Workspace file");
       for (const name of ["approve", "run_tool", "tool_help"])
         assert.equal((await tool(name)).isError, true);

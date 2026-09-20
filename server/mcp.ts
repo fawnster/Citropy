@@ -186,15 +186,27 @@ export const workspaceTools = ([
   {
     name: "subagent_start",
     description:
-      "Delegate a concrete task to a subagent. It runs in the same workspace with inherited permissions and appears beneath this conversation. Returns immediately. Use subagent_wait to read its result. Coordinate files to avoid overlapping edits.",
+      "Delegate a concrete task to a subagent. It runs in the same workspace with inherited permissions and appears beneath this conversation, and it can run on any configured provider and any model that provider currently lists. provider and model default to this conversation's when omitted, otherwise to that provider's default model. effort overrides reasoning effort. Returns immediately. Use subagent_wait to read its result. Coordinate files to avoid overlapping edits.",
     inputSchema: {
       type: "object",
       properties: {
         title: string,
         task: string,
-        provider: { enum: ["claude", "codex", "opencode", "cursor"] },
-        model: string,
-        effort: string,
+        provider: {
+          enum: ["claude", "codex", "opencode", "cursor"],
+          description:
+            "Provider to run the subagent on. Defaults to this conversation's provider.",
+        },
+        model: {
+          type: "string",
+          description:
+            "Model id from that provider's current model list, such as claude-sonnet-5 or claude-opus-5 for claude, or gpt-5.5 for codex. The model picker in Citropy shows the live list.",
+        },
+        effort: {
+          type: "string",
+          description:
+            "Reasoning effort supported by the chosen model, such as low, medium, or high. Options vary by provider and model.",
+        },
       },
       required: ["title", "task"],
     },
