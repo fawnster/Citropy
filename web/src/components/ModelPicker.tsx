@@ -46,14 +46,10 @@ export function ModelPicker({ value, fallback, label, onChange, onTransfer, tran
     width={340}
     className="model-picker-menu"
     searchable
+    onClose={() => setTransferring(false)}
     emptyMessage={favoritesView ? t("Star models to find them here.") : undefined}
     controls={<>
-      {onTransfer && <>
-        <button className="model-picker-transfer" type="button" aria-pressed={transferring} disabled={transferDisabled} onClick={() => { setTransferring(!transferring); setBrowsing(choice?.provider); }}>
-          <ArrowRightLeft size={15} />{t("Transfer to another agent")}
-        </button>
-        {transferring && <p className="model-picker-note" role="status">{t("Choose a model for a new agent in this chat. Reading the conversation again consumes extra usage.")}</p>}
-      </>}
+      {onTransfer && transferring && <p className="model-picker-note" role="status">{t("Choose a model for a new agent in this chat. Reading the conversation again consumes extra usage.")}</p>}
       <div className="model-picker-toolbar sliding-selection">
         <SelectionHighlight value={favoritesView ? "favorites" : catalog?.id} />
         {locked && catalog ? <button className="model-picker-locked" type="button" aria-label={`${catalog.label} · ${t("Provider locked")}`} title={`${catalog.label} · ${t("Provider locked")}`} aria-pressed={!favoritesView} onClick={() => setBrowsing(catalog.id)}>
@@ -63,7 +59,20 @@ export function ModelPicker({ value, fallback, label, onChange, onTransfer, tran
             <ProviderIcon provider={entry.id} />
           </button>)}
         </div>}
-        <button className="model-picker-favorites" type="button" aria-label={t("Favorite models")} title={t("Favorite models")} aria-pressed={favoritesView} onClick={() => setBrowsing(favoritesView ? choice?.provider : "favorites")}><Star size={17} fill={favoritesView ? "currentColor" : "none"} /></button>
+        <div className="model-picker-actions">
+          {onTransfer && <button
+            className="model-picker-transfer"
+            type="button"
+            title={t("Transfer to another agent")}
+            aria-label={t("Transfer to another agent")}
+            aria-pressed={transferring}
+            disabled={transferDisabled}
+            onClick={() => { setTransferring(!transferring); setBrowsing(choice?.provider); }}
+          >
+            <ArrowRightLeft size={16} />
+          </button>}
+          <button className="model-picker-favorites" type="button" aria-label={t("Favorite models")} title={t("Favorite models")} aria-pressed={favoritesView} onClick={() => setBrowsing(favoritesView ? choice?.provider : "favorites")}><Star size={17} fill={favoritesView ? "currentColor" : "none"} /></button>
+        </div>
       </div>
       {catalog?.modelsError && <p className="model-picker-note" role="status">{t("Models · refresh unavailable")}</p>}
     </>}

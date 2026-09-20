@@ -127,6 +127,7 @@ export function Titlebar({
             type="button"
             onClick={toggleInspector}
             data-active={inspectorOpen}
+            aria-expanded={inspectorOpen}
             title={t("Toggle inspector")}
           >
             <PanelRight size={15} />
