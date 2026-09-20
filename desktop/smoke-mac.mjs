@@ -16,7 +16,7 @@ let desktop;
 
 try {
   const { version } = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
-  const appName = /-lemon/.test(version) ? "Citropy Lemon" : "Citropy";
+  const appName = "Citropy";
   const files = await readdir(root);
   const zips = files.filter((name) => name.endsWith(".zip") && (name.includes("-arm64") || name.includes("-x64")));
   assert.equal(zips.length, 2, `Build both macOS zips before running the macOS smoke check. Found: ${files.join(", ")}`);

@@ -3,8 +3,10 @@ import { gt, valid } from "semver";
 export function createAppUpdater({
   updater,
   version,
+  channel,
   unavailable,
   external,
+  installer,
   emit,
   prepareInstall,
   recoverInstall = async () => {},
@@ -25,7 +27,7 @@ export function createAppUpdater({
   };
   const fail = async (error, action) => {
     if (disposed || recovering) return;
-    if (action === "install") {
+    if (action === "install" || action === "switch") {
       recovering = recoverInstall();
       try {
         await recovering;
@@ -43,13 +45,16 @@ export function createAppUpdater({
         ? "The download failed verification. Download a fresh copy to try again."
         : /404|403|401|token|release|not found/i.test(`${code} ${detail}`)
           ? "No release is accessible. Check published Citropy releases and, for private repositories, your GitHub sign-in."
-          : action === "install"
+          : action === "switch"
             ? error?.userMessage ||
-              "The update could not be applied. Citropy has kept the current version."
-            : action === "download"
-              ? "The download could not finish. Check your connection and try again."
-              : "Could not check for updates. Check your connection and try again.";
-    publish({ status: "error", retry: action, message });
+              `The channel did not switch. Citropy is still on the ${channel === "lemon" ? "Lemon" : "stable"} build.`
+            : action === "install"
+              ? error?.userMessage ||
+                "The update could not be applied. Citropy has kept the current version."
+              : action === "download"
+                ? "The download could not finish. Check your connection and try again."
+                : "Could not check for updates. Check your connection and try again.";
+    publish({ status: "error", ...(action === "switch" ? {} : { retry: action }), message });
   };
   const listen = (name, handler) => {
     updater.on(name, handler);
@@ -106,10 +111,17 @@ export function createAppUpdater({
       void fail(error, operation || "check");
     });
   }
-  const command = async (action) => {
+  const command = async (request) => {
+    const action = typeof request === "string" ? request : request?.action;
+    const target = typeof request === "string" ? undefined : request?.channel;
     if (disposed || unavailable || operation || recovering) return { ...state };
-    if (!["check", "download", "install"].includes(action))
+    if (!["check", "download", "install", "switch"].includes(action))
       throw new Error("Unknown update action");
+    if (action === "switch") {
+      if (!installer) throw new Error("This build cannot switch release channels.");
+      if (target !== "stable" && target !== "lemon") throw new Error("Unknown release channel");
+      if (target === channel) throw new Error("Citropy is already on that channel.");
+    }
     if (
       action === "check" &&
       ["ready", "downloading", "installing"].includes(state.status)
@@ -135,7 +147,10 @@ export function createAppUpdater({
           : action === "download"
             ? "downloading"
             : "installing",
-      message: undefined,
+      message:
+        action === "switch"
+          ? `Downloading the ${target === "lemon" ? "Lemon" : "stable"} build and reopening Citropy.`
+          : undefined,
       retry: undefined,
       ...(action === "download"
         ? {
@@ -179,6 +194,9 @@ export function createAppUpdater({
           await updater.downloadUpdate();
           if (state.status === "downloading")
             throw new Error("The download did not pass verification");
+        } else if (action === "switch") {
+          await prepareInstall();
+          await installer.install(target);
         } else {
           await prepareInstall();
           if (external) await external.install();
