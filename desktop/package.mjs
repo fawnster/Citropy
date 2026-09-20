@@ -53,23 +53,11 @@ const platform =
   ["--linux", "--mac", "--win"].find((flag) =>
     process.argv.includes(flag),
   ) ?? "--linux";
-const channelArgs =
-  process.env.CITROPY_CHANNEL === "lime"
-    ? [
-        "-c.linux.artifactName=Citropy-lime-${arch}.AppImage",
-        "-c.mac.artifactName=Citropy-lime-${arch}.zip",
-        "-c.win.artifactName=Citropy-lime-${arch}-Setup.exe",
-        "-c.linux.icon=desktop/assets/citropy-lime.png",
-        "-c.mac.icon=desktop/assets/citropy-lime.png",
-        "-c.win.icon=desktop/assets/citropy-lime.png",
-      ]
-    : [];
 await run(process.execPath, [
   join(root, "node_modules/electron-builder/cli.js"),
   "--config",
   "desktop/electron-builder.yml",
   platform,
-  ...channelArgs,
   ...(process.argv.includes("--dir") ? ["--dir"] : []),
   "--publish",
   "never",

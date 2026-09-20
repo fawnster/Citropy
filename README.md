@@ -107,21 +107,7 @@ irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps
 
 It installs per user under `%LOCALAPPDATA%\Programs\citropy` with no administrator rights, adds a Start menu entry, and updates itself in the app. Because a PowerShell download carries no Mark of the Web, Windows shows no SmartScreen warning. Machines with Smart App Control turned on still block unsigned apps by design, which needs a signed build or that setting off. Uninstall with `$s = irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1; & ([scriptblock]::Create($s)) -Uninstall`.
 
-### Lime builds
-
-Every push to main publishes a rolling **Lime** build with the newest changes. It is the same app as Citropy, shares its conversations, settings, and terminals, and is marked by a Lime tag beside the title and its own lime application icon. The Citropy mark stays the same yellow lemon. These builds are for testing and can break. Switch to it from Settings, or install it directly:
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.sh | sh -s -- --channel=lime
-```
-
-On Windows:
-
-```powershell
-$s = irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1; & ([scriptblock]::Create($s)) -Channel lime
-```
-
-Installing a channel replaces the installed build; your conversations, settings, and terminals stay. It also replaces the earlier separate Lemon preview and moves its data into `~/.citropy`. Remove Citropy with `--uninstall` on Linux and macOS, or `-Uninstall` on Windows.
+Installing replaces the installed build; your conversations, settings, and terminals stay. Remove Citropy with `--uninstall` on Linux and macOS, or `-Uninstall` on Windows.
 
 From a source checkout instead:
 
