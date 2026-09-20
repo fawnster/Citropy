@@ -26,8 +26,8 @@ export function ChannelSwitch() {
     };
   }, []);
   if (!desktop?.switchable) return null;
-  const target = desktop.channel === "lemon" ? "stable" : "lemon";
-  const label = target === "lemon" ? t("Use the Lemon build") : t("Use the stable build");
+  const target = desktop.channel === "lime" ? "stable" : "lime";
+  const label = target === "lime" ? t("Use the Lime build") : t("Use the stable build");
   const switching =
     update?.status === "installing" && /build and reopening/.test(update.message ?? "");
   const switchChannel = async () => {
@@ -35,8 +35,8 @@ export function ChannelSwitch() {
       !(await confirmAction({
         title: label,
         description:
-          target === "lemon"
-            ? t("Citropy downloads the rolling build from main, replaces this app, and reopens it. Your conversations, settings, and terminals stay.")
+          target === "lime"
+            ? t("Citropy downloads the Lime build from main, replaces this app, and reopens it. Your conversations, settings, and terminals stay.")
             : t("Citropy downloads the latest release, replaces this app, and reopens it. Your conversations, settings, and terminals stay."),
         label: t("Switch and reopen"),
       }))
@@ -54,9 +54,9 @@ export function ChannelSwitch() {
     }
   };
   const channelNote =
-    desktop.channel === "lemon"
-      ? "Lemon, the rolling build from main. Switching replaces this app and keeps your data."
-      : "Stable releases. Switching to Lemon replaces this app and keeps your data.";
+    desktop.channel === "lime"
+      ? "Lime, the rolling build from main. Switching replaces this app and keeps your data."
+      : "Stable releases. Switching to Lime replaces this app and keeps your data.";
   const note =
     error ??
     (update?.status === "error" && /channel/i.test(update.message ?? "") ? update.message : undefined) ??

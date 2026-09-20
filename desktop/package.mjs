@@ -54,11 +54,11 @@ const platform =
     process.argv.includes(flag),
   ) ?? "--linux";
 const channelArgs =
-  process.env.CITROPY_CHANNEL === "lemon"
+  process.env.CITROPY_CHANNEL === "lime"
     ? [
-        "-c.linux.artifactName=Citropy-lemon-${arch}.AppImage",
-        "-c.mac.artifactName=Citropy-lemon-${arch}.zip",
-        "-c.win.artifactName=Citropy-lemon-${arch}-Setup.exe",
+        "-c.linux.artifactName=Citropy-lime-${arch}.AppImage",
+        "-c.mac.artifactName=Citropy-lime-${arch}.zip",
+        "-c.win.artifactName=Citropy-lime-${arch}-Setup.exe",
       ]
     : [];
 await run(process.execPath, [

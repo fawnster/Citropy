@@ -1,10 +1,10 @@
 # Installs or updates Citropy on Windows.
 #
 #   irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1 | iex
-#   $s = irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1; & ([scriptblock]::Create($s)) -Channel lemon
+#   $s = irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1; & ([scriptblock]::Create($s)) -Channel lime
 #   $s = irm https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.ps1; & ([scriptblock]::Create($s)) -Uninstall
 #
-# The stable channel installs released versions. Lemon installs the rolling
+# The stable channel installs released versions. Lime installs the rolling
 # build from main. Both are the same app with the same data, so installing
 # either one replaces the other.
 [CmdletBinding()]
@@ -32,8 +32,9 @@ function Invoke-CitropyInstall {
   $exe = $null
   try {
     if (-not $Channel) { $Channel = "stable" }
-    if ($Channel -ne "stable" -and $Channel -ne "lemon") { Fail "Unknown channel: $Channel. Use stable or lemon." }
-    if ($Channel -eq "lemon" -and $Version) { Fail "The Lemon channel always installs the newest build, so -Version does not apply." }
+    if ($Channel -eq "lemon") { $Channel = "lime" }
+    if ($Channel -ne "stable" -and $Channel -ne "lime") { Fail "Unknown channel: $Channel. Use stable or lime." }
+    if ($Channel -eq "lime" -and $Version) { Fail "The Lime channel always installs the newest build, so -Version does not apply." }
 
     $architecture = $env:PROCESSOR_ARCHITEW6432
     if (-not $architecture) { $architecture = $env:PROCESSOR_ARCHITECTURE }
@@ -89,10 +90,10 @@ function Invoke-CitropyInstall {
       Fail "Refusing to download over plain HTTP from a remote host."
     }
 
-    if ($Channel -eq "lemon") {
-      $tag = "lemon"
-      $asset = "Citropy-lemon-$arch-Setup.exe"
-      $label = "Citropy Lemon"
+    if ($Channel -eq "lime") {
+      $tag = "lime"
+      $asset = "Citropy-lime-$arch-Setup.exe"
+      $label = "Citropy Lime"
     }
     else {
       if (-not $Version) {
@@ -135,12 +136,12 @@ function Invoke-CitropyInstall {
     $actual = (Get-FileHash -Path $setup -Algorithm SHA256).Hash
     if ($actual.ToLower() -ne $expected.ToLower()) { Fail "The downloaded file failed its checksum. Try again." }
     if ($PSVersionTable.PSVersion.Major -lt 6 -or $IsWindows) { Unblock-File -Path $setup }
-    if ($Channel -eq "lemon") {
+    if ($Channel -eq "lime") {
       try {
         $infoFile = Join-Path $temp "version.json"
         Invoke-WebRequest -Uri "$BaseUrl/$tag/version.json" -OutFile $infoFile -UseBasicParsing
         $info = Get-Content -Path $infoFile -Raw | ConvertFrom-Json
-        if ($info.version) { $label = "Citropy Lemon $($info.version)" }
+        if ($info.version) { $label = "Citropy Lime $($info.version)" }
       }
       catch {}
     }

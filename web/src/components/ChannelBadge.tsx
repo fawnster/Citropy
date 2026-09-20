@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 
 export function ChannelBadge() {
-  const [channel, setChannel] = useState<"stable" | "lemon">("stable");
+  const [channel, setChannel] = useState<"stable" | "lime">("stable");
   useEffect(() => {
     let alive = true;
     void window.citropyDesktop
@@ -14,10 +14,10 @@ export function ChannelBadge() {
       alive = false;
     };
   }, []);
-  if (channel !== "lemon") return null;
+  if (channel !== "lime") return null;
   return (
     <span className="channel-badge" title="Rolling build from main">
-      Lemon
+      Lime
     </span>
   );
 }
