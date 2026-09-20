@@ -67,15 +67,15 @@ jobs:
         run: test -f release/Citropy-lemon-x86_64.AppImage
       - name: Test the installer
         run: |
-          mkdir -p lemon/v-lemon
-          cp release/Citropy-lemon-x86_64.AppImage lemon/v-lemon/
-          (cd lemon/v-lemon && sha256sum *.AppImage > SHA256SUMS && printf '{"version":"%s"}\n' "$(node -e "console.log(require('./package.json').version)")" > version.json)
-          (cd lemon && python3 -m http.server 8792 >/dev/null 2>&1 &)
+          mkdir -p lemondist/lemon
+          cp release/Citropy-lemon-x86_64.AppImage lemondist/lemon/
+          (cd lemondist/lemon && sha256sum *.AppImage > SHA256SUMS && printf '{"version":"%s"}\n' "$(node -e "console.log(require('./package.json').version)")" > version.json)
+          (cd lemondist && python3 -m http.server 8792 >/dev/null 2>&1 &)
           for attempt in $(seq 1 40); do
-            curl -fsS -o /dev/null "http://127.0.0.1:8792/" && break
+            curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null "http://127.0.0.1:8792/" && break
             sleep 0.5
           done
-          curl -fsS -o /dev/null "http://127.0.0.1:8792/" || { echo "The local release server did not answer on port 8792." >&2; exit 1; }
+          curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null "http://127.0.0.1:8792/" || { echo "The local release server did not answer on port 8792." >&2; exit 1; }
           HOME="$RUNNER_TEMP/lemon-home" CITROPY_BASE_URL="http://127.0.0.1:8792" sh scripts/install.sh --channel=lemon
           test -x "$RUNNER_TEMP/lemon-home/.local/bin/citropy-lemon"
           test -f "$RUNNER_TEMP/lemon-home/.local/share/applications/citropy-lemon.desktop"
@@ -117,15 +117,15 @@ jobs:
       - name: Test the installer
         run: |
           VERSION=$(node -e "console.log(require('./package.json').version)")
-          mkdir -p "macdist/v-lemon"
-          cp release/*.zip "macdist/v-lemon/"
-          (cd "macdist/v-lemon" && shasum -a 256 *.zip > SHA256SUMS && printf '{"version":"%s"}\n' "$VERSION" > version.json)
+          mkdir -p macdist/lemon
+          cp release/*.zip macdist/lemon/
+          (cd macdist/lemon && shasum -a 256 *.zip > SHA256SUMS && printf '{"version":"%s"}\n' "$VERSION" > version.json)
           (cd macdist && python3 -m http.server 8793 >/dev/null 2>&1 &)
           for attempt in $(seq 1 40); do
-            curl -fsS -o /dev/null "http://127.0.0.1:8793/" && break
+            curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null "http://127.0.0.1:8793/" && break
             sleep 0.5
           done
-          curl -fsS -o /dev/null "http://127.0.0.1:8793/" || { echo "The local release server did not answer on port 8793." >&2; exit 1; }
+          curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null "http://127.0.0.1:8793/" || { echo "The local release server did not answer on port 8793." >&2; exit 1; }
           HOME="$RUNNER_TEMP/lemon-home" CITROPY_BASE_URL="http://127.0.0.1:8793" sh scripts/install.sh --channel=lemon
           APP="$RUNNER_TEMP/lemon-home/Applications/Citropy Lemon.app"
           test -x "$APP/Contents/MacOS/Citropy Lemon"
