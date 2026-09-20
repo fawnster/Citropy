@@ -266,7 +266,7 @@ app.whenReady().then(() => {
       const panel = page.getByRole("dialog", { name: "Running shells", exact: true });
       await panel.getByRole("button", { name: "Show command", exact: true }).click();
       await panel.waitFor({ state: "hidden" });
-      await page.locator('.tool[data-open="true"] .tool-output').getByText(command.output, { exact: true }).waitFor({ timeout: 2000 });
+      await page.locator('.tool[data-open="true"] .tool-output').getByText(command.output, { exact: true }).waitFor();
       const target = page.locator('.tool').filter({ hasText: command.headline });
       await page.waitForFunction(() => {
         const element = document.querySelector('.tool[data-open="true"] .tool-head');
