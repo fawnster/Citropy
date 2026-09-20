@@ -224,7 +224,13 @@ const app = acp.agent({ name: "fake-cursor" })
     });
     await context.client.notify(acp.methods.client.session.update, {
       sessionId,
-      update: { sessionUpdate: "usage_update", used: 12000, size: 200000, cost: { amount: 0.02, currency: "USD" } },
+      update: {
+        sessionUpdate: "usage_update",
+        used: 12000,
+        size: 200000,
+        cost: { amount: 0.02, currency: "USD" },
+        _meta: { cachedReadTokens: 4000, cachedWriteTokens: 150, outputTokens: 300 },
+      },
     });
     await context.client.notify(acp.methods.client.session.update, {
       sessionId,
@@ -239,7 +245,16 @@ const app = acp.agent({ name: "fake-cursor" })
       },
     });
     await notifications(context.client, "message-2", [{ kind: "agent_message_chunk", text: "Done." }]);
-    return { stopReason: "end_turn" };
+    return {
+      stopReason: "end_turn",
+      usage: {
+        totalTokens: 12700,
+        inputTokens: 2500,
+        outputTokens: 800,
+        cachedReadTokens: 9000,
+        cachedWriteTokens: 400,
+      },
+    };
   })
   .onNotification(acp.methods.agent.session.cancel, () => {
     cancelled = true;

@@ -1,12 +1,15 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "../lib/use-reduced-motion.ts";
-import { useId, useLayoutEffect, useRef, useState } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Minimize2 } from "lucide-react";
-import { cost, tokens } from "../lib/format.ts";
+import { cost, tokenRate, tokens } from "../lib/format.ts";
 import { scaled, useApp, viewportWidth } from "../lib/store.ts";
 import { useI18n } from "../lib/i18n.ts";
 import { selectedModel } from "../../../shared/model-options.ts";
+import { estimateConversationTokens, reportedContext } from "../../../shared/usage-metrics.ts";
 import { ContextInspector } from "./ContextInspector.tsx";
+
+const PANEL_WIDTH = 272;
 
 export function ContextUsage({ onCompact, draft = "" }: { onCompact?: () => void; draft?: string }) {
   const t = useI18n();
@@ -19,6 +22,7 @@ export function ContextUsage({ onCompact, draft = "" }: { onCompact?: () => void
   const uiScale = useApp((state) => state.uiScale);
   const connected = useApp((state) => state.connected);
   const thread = useApp((state) => state.threads[state.activeThreadId ?? ""]);
+  const historyBytes = useApp((state) => state.historyBytes[state.activeThreadId ?? ""] ?? 0);
   const provider = useApp((state) => state.providers.find((entry) => entry.id === thread?.provider));
   const usage = thread?.usage;
   const totals = [...(thread?.transfers ?? []), ...(thread ? [thread] : [])].reduce((sum, session) => ({
@@ -30,11 +34,38 @@ export function ContextUsage({ onCompact, draft = "" }: { onCompact?: () => void
   }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 });
   const model = selectedModel(provider?.models ?? [], thread?.model);
   const contextMax = (usage?.contextMax || thread?.contextWindow || model?.contextMax) ?? 0;
-  const reported = Boolean(usage && usage.contextTokens > 0 && (!contextMax || usage.contextTokens <= contextMax));
+  const reported = Boolean(usage && reportedContext(usage.contextTokens, contextMax));
   const hasTotals = Boolean(totals.input || totals.output || totals.cacheRead || totals.cacheWrite || totals.costUsd);
   const fresh = !thread?.externalId && !thread?.running && !usage?.turns && !(usage?.input || usage?.output || usage?.cacheRead || usage?.cacheWrite || usage?.costUsd);
-  const known = Boolean(contextMax > 0 && (reported || fresh));
-  const contextTokens = fresh ? 0 : usage?.contextTokens ?? 0;
+  const estimated = useMemo(() => {
+    if (thread?.provider !== "cursor" || fresh || reported) return 0;
+    const state = useApp.getState();
+    const threadId = state.activeThreadId;
+    if (!threadId) return estimateConversationTokens([], draft);
+    const messages = (state.order[threadId] ?? []).flatMap((id) => {
+      const shell = state.messages[id];
+      if (!shell) return [];
+      return [{
+        id: shell.id,
+        role: shell.role,
+        ts: shell.ts,
+        parts: shell.partIds.flatMap((partId) => {
+          const part = state.parts[partId];
+          return part ? [part] : [];
+        }),
+        attachments: shell.attachments,
+      }];
+    });
+    return estimateConversationTokens(messages, draft);
+  }, [draft, fresh, historyBytes, reported, thread?.provider]);
+  const contextTokens = fresh ? 0 : reported ? usage?.contextTokens ?? 0 : estimated;
+  const shown = Boolean(!fresh && (reported || estimated > 0));
+  const known = Boolean(contextMax > 0 && (shown || fresh));
+  const estimatedNote = Boolean((usage?.contextEstimated || (!reported && estimated > 0)) && shown);
+  const cacheShare = totals.input + totals.cacheRead;
+  const cacheRate = cacheShare > 0 ? totals.cacheRead / cacheShare : 0;
+  const hasCache = Boolean(totals.cacheRead || totals.cacheWrite);
+  const speed = usage?.tokensPerSecond ?? 0;
   const totalProcessed = totals.input + totals.cacheRead + totals.cacheWrite + totals.output;
   const fill =
     known
@@ -52,7 +83,7 @@ export function ContextUsage({ onCompact, draft = "" }: { onCompact?: () => void
     const position = () => {
       const bounds = anchor.getBoundingClientRect();
       const scale = uiScale / 100;
-      const width = Math.min(252, viewportWidth() - 24);
+      const width = Math.min(PANEL_WIDTH, viewportWidth() - 24);
       panel.style.width = `${scaled(width)}px`;
       panel.style.maxHeight = `${scaled(Math.max(0, bounds.top / scale - 20))}px`;
       panel.style.left = `${scaled(Math.max(12, Math.min(bounds.right / scale - width, viewportWidth() - width - 12)))}px`;
@@ -153,7 +184,7 @@ export function ContextUsage({ onCompact, draft = "" }: { onCompact?: () => void
             <span>
               {known
                 ? t("{percent}% context used", { percent: Math.round(fill * 100) })
-                : t(reported ? "Window size unavailable" : "Not reported yet")}
+                : t(shown ? "Window size unavailable" : "Not reported yet")}
             </span>
           </div>
           <p>
@@ -162,12 +193,41 @@ export function ContextUsage({ onCompact, draft = "" }: { onCompact?: () => void
                   used: tokens(contextTokens),
                   total: tokens(contextMax),
                 })
-              : reported
+              : shown
                 ? t("{used} tokens used", { used: tokens(contextTokens) })
                 : contextMax > 0
                   ? t("Window size: {total} tokens", { total: tokens(contextMax) })
                   : t("Usage appears when the provider reports it.")}
           </p>
+          {estimatedNote && <p className="context-estimate">{t("Estimated from conversation")}</p>}
+          {hasCache && (
+            <div className="context-cache">
+              <div className="context-heading">
+                <strong>{t("Cache hits")}</strong>
+                <span>{t("{percent}% reused", { percent: Math.round(cacheRate * 100) })}</span>
+              </div>
+              <div
+                className="context-cache-bar"
+                role="img"
+                aria-label={t("{percent}% reused", { percent: Math.round(cacheRate * 100) })}
+              >
+                {totals.cacheRead > 0 && <span data-part="hit" style={{ flex: totals.cacheRead }} />}
+                {totals.input > 0 && <span data-part="fresh" style={{ flex: totals.input }} />}
+                {totals.cacheWrite > 0 && <span data-part="write" style={{ flex: totals.cacheWrite }} />}
+              </div>
+              <p className="context-cache-note">
+                {t("{hit} reused · {fresh} new", { hit: tokens(totals.cacheRead), fresh: tokens(totals.input) })}
+              </p>
+            </div>
+          )}
+          {speed > 0 && (
+            <div className="context-speed">
+              <div className="context-heading">
+                <strong>{t("Tokens per second")}</strong>
+                <span>{t("{rate} tok/s", { rate: tokenRate(speed) })}</span>
+              </div>
+            </div>
+          )}
           {usage && hasTotals && (
             <details className="context-totals">
               <summary>

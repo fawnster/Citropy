@@ -13,7 +13,7 @@ export interface ProtocolEntry {
 
 const entries: ProtocolEntry[] = [];
 const statuses = new Set(["idle", "queued", "thinking", "working", "awaiting", "error", "stopped"]);
-const usageKeys = new Set(["input", "output", "cacheRead", "cacheWrite", "costUsd", "contextTokens", "contextMax", "turns"]);
+const usageKeys = new Set(["input", "output", "cacheRead", "cacheWrite", "costUsd", "contextTokens", "contextMax", "turns", "tokensPerSecond"]);
 
 export function protocolLog(): ProtocolEntry[] { return [...entries]; }
 
@@ -30,7 +30,8 @@ export function validateAgentEvent(raw: unknown): AgentEvent {
     case "compacted":
       if (event.contextTokens !== undefined && (typeof event.contextTokens !== "number" || !Number.isFinite(event.contextTokens) || event.contextTokens < 0)) throw new Error("Invalid compacted context size.");
       break;
-    case "session": id("externalId"); text("model", true); if (event.contextMax !== undefined && (typeof event.contextMax !== "number" || !Number.isFinite(event.contextMax) || event.contextMax <= 0)) throw new Error("Invalid context window."); break;
+    case "session": id("externalId"); text("model", true); text("effort", true); if (event.fastMode !== undefined) bool("fastMode"); if (event.contextMax !== undefined && (typeof event.contextMax !== "number" || !Number.isFinite(event.contextMax) || event.contextMax <= 0)) throw new Error("Invalid context window."); break;
+    case "title": text("title"); if (!String(event.title).trim() || String(event.title).length > 200) throw new Error("Invalid title."); break;
     case "status": if (!statuses.has(String(event.status))) throw new Error("Unknown provider status."); text("tool", true); break;
     case "subagent": id("id"); if (!statuses.has(String(event.status))) throw new Error("Unknown subagent status."); for (const key of ["title", "prompt", "model", "result"]) text(key, true); break;
     case "block.start": id("blockId"); if (event.block !== "text" && event.block !== "reasoning") throw new Error("Unknown block type."); break;
@@ -42,6 +43,10 @@ export function validateAgentEvent(raw: unknown): AgentEvent {
       id("callId");
       bool("ok");
       text("output");
+      if (event.patch !== undefined) {
+        const patch = event.patch as Record<string, unknown> | null;
+        if (!patch || typeof patch !== "object" || typeof patch.path !== "string" || !Array.isArray(patch.hunks)) throw new Error("Invalid tool patch.");
+      }
       if (event.images !== undefined) {
         if (!Array.isArray(event.images) || event.images.length > 8) throw new Error("Invalid tool images.");
         for (const entry of event.images) {

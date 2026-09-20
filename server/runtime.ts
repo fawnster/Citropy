@@ -21,6 +21,7 @@ import { prepareContext, prepareTransferContext, transferPrompt } from "./contex
 import { assertProviderReady } from "./providers/maintenance.ts";
 import { modelSettings, selectedModel } from "../shared/model-options.ts";
 import { emptyUsage } from "../shared/protocol.ts";
+import { mergeUsage } from "../shared/usage-metrics.ts";
 import { connectTools, disconnectTools } from "./mcp-access.ts";
 import type { AgentEvent } from "./providers/types.ts";
 import type { AgentSession } from "./providers/types.ts";
@@ -36,6 +37,7 @@ import type {
   QueuedMessage,
   ProviderInfo,
   ImageFile,
+  Usage,
 } from "../shared/protocol.ts";
 
 const MAX_OUTPUT = 24_000;
@@ -93,6 +95,8 @@ export class ThreadRuntime {
   #buildPlan = false;
   #compactionTimer: NodeJS.Timeout | undefined;
   #stopping: { promise: Promise<void>; ended: () => void; release: () => void } | null = null;
+  #outputAtTurnStart = 0;
+  #usagePulse = 0;
 
   constructor(thread: Thread) {
     this.#thread = thread;
@@ -331,6 +335,8 @@ export class ThreadRuntime {
     this.#checkSession(prepared.generation);
     this.#addUserMessage(prepared);
     if (this.#thread.canRedo) store.patchThread(this.id, { canRedo: false });
+    this.#outputAtTurnStart = this.#thread.usage.output;
+    this.#usagePulse = 0;
     store.patchThread(this.#thread.id, { status: "queued", running: true, runStartedAt: Date.now(), error: undefined, archived: false, snoozedUntil: undefined });
     try { await this.#ensureSession().send(prepared.prompt, prepared.attachments, prepared.skills); }
     catch (error) {
@@ -508,6 +514,27 @@ export class ThreadRuntime {
     return { messageId, partId: part.id };
   }
 
+  #applyUsage(incoming?: Partial<Usage>): void {
+    const model = selectedModel(providers[this.#thread.provider].models, this.#thread.model);
+    store.setUsage(this.id, mergeUsage({
+      previous: this.#thread.usage,
+      incoming,
+      provider: this.#thread.provider,
+      messages: this.#thread.messages,
+      contextMax: this.#thread.contextWindow ?? model?.contextMax,
+      runStartedAt: this.#thread.runStartedAt,
+      outputAtStart: this.#outputAtTurnStart,
+      estimateContext: this.#thread.provider === "cursor",
+    }));
+  }
+
+  #pulseUsage(): void {
+    const now = Date.now();
+    if (now - this.#usagePulse < 500) return;
+    this.#usagePulse = now;
+    this.#applyUsage();
+  }
+
   #finishParts(): void {
     for (const ref of this.#blocks.values())
       store.patchPart(this.#thread.id, ref.messageId, ref.partId, { complete: true });
@@ -557,7 +584,7 @@ export class ThreadRuntime {
       case "compacted": {
         const manual = this.#thread.compacting;
         clearTimeout(this.#compactionTimer);
-        if (event.contextTokens !== undefined) store.setUsage(this.id, { ...this.#thread.usage, contextTokens: event.contextTokens });
+        if (event.contextTokens !== undefined) this.#applyUsage({ contextTokens: event.contextTokens, contextEstimated: undefined });
         store.patchThread(this.id, { compacting: false, compactedAt: Date.now(), ...(manual ? { running: false, status: "idle", activeTool: undefined } : {}) });
         this.#add({ id: uid("prt"), kind: "notice", level: "info", text: "Context compacted. Your conversation history is still available here." });
         if (manual) this.#messageId = null;
@@ -572,6 +599,8 @@ export class ThreadRuntime {
           externalId: event.externalId || this.#thread.externalId,
           model: this.#thread.model ?? event.model,
         });
+        const contextMax = event.contextMax ?? this.#thread.contextWindow ?? selectedModel(providers[this.#thread.provider].models, this.#pendingModel)?.contextMax;
+        if (contextMax) this.#applyUsage({ contextMax });
         return;
       }
       case "status": {
@@ -599,6 +628,7 @@ export class ThreadRuntime {
         const ref = this.#blocks.get(event.blockId);
         if (!ref) return;
         store.appendText(this.#thread.id, ref.messageId, ref.partId, event.text);
+        this.#pulseUsage();
         return;
       }
       case "block.end": {
@@ -673,6 +703,7 @@ export class ThreadRuntime {
         if (this.#running.size === 0 && this.#thread.status === "working") {
           store.patchThread(this.#thread.id, { status: "thinking", activeTool: undefined });
         }
+        this.#pulseUsage();
         return;
       }
       case "todos": {
@@ -687,7 +718,7 @@ export class ThreadRuntime {
         return;
       }
       case "usage": {
-        store.setUsage(this.#thread.id, { ...this.#thread.usage, ...event.usage });
+        this.#applyUsage(event.usage);
         return;
       }
       case "plan.accepted":
@@ -701,10 +732,7 @@ export class ThreadRuntime {
         const stopped = this.#thread.status === "stopped";
         const completed =
           this.#thread.running && this.#thread.status !== "stopped";
-        store.setUsage(this.#thread.id, {
-          ...this.#thread.usage,
-          turns: this.#thread.usage.turns + 1,
-        });
+        this.#applyUsage({ turns: this.#thread.usage.turns + 1 });
         const messageId = this.#messageId ?? undefined;
         this.#messageId = null;
         this.#finishParts();

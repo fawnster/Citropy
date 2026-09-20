@@ -13,6 +13,7 @@ import type { AgentSession, StartOptions } from "./types.ts";
 import type { Attachment, ModelOption, PermissionMode, TodoItem } from "../../shared/protocol.ts";
 import type { ProviderCommand } from "../../shared/features.ts";
 import { normalizeTodos } from "../../shared/todos.ts";
+import { parseAcpUsage } from "../../shared/usage-metrics.ts";
 
 const run = promisify(execFile);
 
@@ -403,7 +404,12 @@ export class AcpSession implements AgentSession {
     const currentMode = response?.modes?.currentModeId ?? selectOption(applied, "mode")?.currentValue;
     if (mode && mode !== currentMode)
       await withTimeout(this.#agent().request(acp.methods.agent.session.setMode, { sessionId: this.#sessionId, modeId: mode }), 30_000, `${label} did not switch modes`);
-    this.#options.emit({ type: "session", externalId: this.#sessionId, model: currentModel, contextMax: context ? contextTokens(context.currentValue) : undefined });
+    this.#options.emit({
+      type: "session",
+      externalId: this.#sessionId,
+      model: currentModel,
+      contextMax: context ? contextTokens(context.currentValue) : this.#options.contextMax ?? contextMax(currentModel ?? ""),
+    });
   }
 
   async #setConfig(configId: string, value: string): Promise<acp.SessionConfigOption[]> {
@@ -484,6 +490,8 @@ export class AcpSession implements AgentSession {
         prompt: [{ type: "text", text: next.text || "Please inspect the attached files." }, ...(await this.#content(next.attachments))],
       });
       if (this.#disposed) return;
+      const usage = parseAcpUsage(response);
+      if (Object.keys(usage).length) this.#options.emit({ type: "usage", usage });
       if (response.stopReason === "refusal") this.#finish(`${this.#config.label} refused to continue.`);
       else {
         if (response.stopReason === "max_tokens" || response.stopReason === "max_turn_requests")
@@ -573,13 +581,11 @@ export class AcpSession implements AgentSession {
       case "plan":
         this.#plan(update.entries);
         return;
-      case "usage_update":
-        this.#options.emit({ type: "usage", usage: {
-          contextTokens: update.used,
-          contextMax: update.size,
-          ...(update.cost && update.cost.currency === "USD" ? { costUsd: update.cost.amount } : {}),
-        } });
+      case "usage_update": {
+        const usage = parseAcpUsage(update);
+        if (Object.keys(usage).length) this.#options.emit({ type: "usage", usage });
         return;
+      }
       case "available_commands_update":
         this.#config.onCommands?.(this.#options.cwd, update.availableCommands.flatMap((command) => {
           const name = command.name.trim();

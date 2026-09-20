@@ -187,6 +187,8 @@ export interface Usage {
   contextTokens: number;
   contextMax: number;
   turns: number;
+  tokensPerSecond?: number;
+  contextEstimated?: boolean;
 }
 
 export const emptyUsage = (): Usage => ({

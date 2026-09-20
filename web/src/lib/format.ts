@@ -65,6 +65,12 @@ export function tokens(value: number): string {
   return `${(value / 1_000_000).toFixed(2)}M`;
 }
 
+export function tokenRate(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0";
+  if (value < 9.95) return value.toFixed(1);
+  return String(Math.round(value));
+}
+
 export function cost(value: number): string {
   if (value === 0) return "$0";
   if (value < 0.01) return `$${value.toFixed(4)}`;

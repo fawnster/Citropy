@@ -69,6 +69,7 @@ test("the ACP provider drives a fake Cursor agent", { timeout: 120_000 }, async 
     threadId: thread.id,
     cwd: directory,
     permissionMode: "manual",
+    contextMax: 200000,
     mcp: { url: "http://127.0.0.1:9/mcp", headers: { Authorization: "Bearer test-token" } },
     emit: (event) => events.push(event),
   });
@@ -102,6 +103,7 @@ test("the ACP provider drives a fake Cursor agent", { timeout: 120_000 }, async 
 
   const sessionEvent = events.find((event) => event.type === "session");
   assert.match(sessionEvent.externalId, /^fake-/);
+  assert.equal(sessionEvent.contextMax, 200000);
   const reasoning = events.filter((event) => event.type === "block.delta").map((event) => event.text).join("");
   assert.match(reasoning, /Checking the request\./);
   assert.match(reasoning, /Working on it\./);
@@ -126,6 +128,15 @@ test("the ACP provider drives a fake Cursor agent", { timeout: 120_000 }, async 
   assert.equal(usage.usage.contextTokens, 12000);
   assert.equal(usage.usage.contextMax, 200000);
   assert.equal(usage.usage.costUsd, 0.02);
+  assert.equal(usage.usage.cacheRead, 4000);
+  assert.equal(usage.usage.cacheWrite, 150);
+  assert.equal(usage.usage.output, 300);
+  const promptUsage = events.findLast((event) => event.type === "usage");
+  assert.equal(promptUsage.usage.input, 2500);
+  assert.equal(promptUsage.usage.output, 800);
+  assert.equal(promptUsage.usage.cacheRead, 9000);
+  assert.equal(promptUsage.usage.cacheWrite, 400);
+  assert.equal(promptUsage.usage.contextTokens, undefined);
   assert.deepEqual(cursorCommands(directory).map((command) => [command.name, command.argumentHint]), [["simplify", "[path]"]]);
   const { listCommands } = await import("../server/commands.ts");
   const unpublished = join(directory, "fresh-workspace");
