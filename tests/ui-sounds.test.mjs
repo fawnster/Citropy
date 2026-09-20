@@ -126,6 +126,21 @@ test("clicks play the right sound and preview buttons leave switches alone", { t
     }
     window.AudioContext = FakeAudioContext;
 
+    const realFetch = window.fetch.bind(window);
+    let offline = true;
+    window.fetch = (...args) =>
+      offline && String(args[0]).includes("click.ogg")
+        ? Promise.reject(new Error("offline"))
+        : realFetch(...args);
+    const beforeFailed = started.length;
+    await sound.previewUiSound("click");
+    const failedLoad = started.length - beforeFailed;
+    offline = false;
+    const beforeRetry = started.length;
+    await sound.previewUiSound("click");
+    const retriedLoad = started.length - beforeRetry;
+    window.fetch = realFetch;
+
     const names = ["click", "nav", "toggle-on", "toggle-off", "send", "copy", "done", "attention", "error"];
     const previews = {};
     for (const name of names) {
@@ -134,6 +149,13 @@ test("clicks play the right sound and preview buttons leave switches alone", { t
       previews[name] = started.length - before;
     }
     const all = { volume: 60, interfaceSounds: true, alertSounds: true };
+    const volumeBeforePreview = (() => {
+      sound.configureUiSounds({ volume: 20, interfaceSounds: true, alertSounds: true });
+      sound.configureUiSounds({ volume: 90, interfaceSounds: true, alertSounds: true });
+      sound.playUiSound("click");
+      return gains[0].gain.value;
+    })();
+
     const levels = {};
     for (const [name, value] of Object.entries({ muted: 0, half: 50, full: 100 })) {
       sound.configureUiSounds({ ...all, volume: value });
@@ -211,7 +233,7 @@ test("clicks play the right sound and preview buttons leave switches alone", { t
       applyEvents(state, events);
       alerts[name] = started.length - before;
     }
-    return { previews, classes, alerts, gated, levels, resumes, contexts };
+    return { previews, classes, alerts, gated, levels, resumes, contexts, failedLoad, retriedLoad, volumeBeforePreview };
   }, base);
 
   assert.deepEqual(errors, []);
@@ -231,6 +253,12 @@ test("clicks play the right sound and preview buttons leave switches alone", { t
   assert.equal(result.levels.muted, 0);
   assert.equal(result.levels.full, 1);
   assert.ok(Math.abs(result.levels.half - 0.5 ** 1.6) < 1e-6, result.levels.half);
+  assert.equal(result.failedLoad, 0, "a sound whose download fails must not play");
+  assert.equal(result.retriedLoad, 1, "a failed download must be retried on the next play");
+  assert.ok(
+    Math.abs(result.volumeBeforePreview - 0.9 ** 1.6) < 1e-6,
+    `preview used gain ${result.volumeBeforePreview}`,
+  );
   assert.deepEqual(result.gated, {
     sendWhileInterfaceOff: 0,
     clickWhileInterfaceOff: 0,

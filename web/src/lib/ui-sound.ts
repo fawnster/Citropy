@@ -103,7 +103,9 @@ function load(name: UiSound): Promise<unknown> {
     .then((buffer) => {
       loaded.set(name, buffer);
     })
-    .catch(() => {});
+    .catch(() => {
+      loading.delete(name);
+    });
   loading.set(name, task);
   return task;
 }
@@ -113,10 +115,7 @@ function play(name: UiSound): void {
   if (!audio) return;
   if (audio.context.state === "suspended") void audio.context.resume();
   const buffer = loaded.get(name);
-  if (!buffer) {
-    void load(name);
-    return;
-  }
+  if (!buffer) return;
   const source = audio.context.createBufferSource();
   source.buffer = buffer;
   const gain = audio.context.createGain();
@@ -133,8 +132,9 @@ export function configureUiSounds(next: {
   volume = next.volume;
   interfaceSounds = next.interfaceSounds;
   alertSounds = next.alertSounds;
-  if (graph)
-    graph.master.gain.setTargetAtTime(level(), graph.context.currentTime, 0.01);
+  if (!graph) return;
+  graph.master.gain.setTargetAtTime(level(), graph.context.currentTime, 0.01);
+  for (const name of names) if (enabled(name)) void load(name);
 }
 
 export function unlockUiSounds(): void {

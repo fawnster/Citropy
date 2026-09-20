@@ -49,7 +49,7 @@ import {
   setLanguage,
 } from "../lib/store.ts";
 import { send } from "../lib/socket.ts";
-import { playUiSound, previewUiSound } from "../lib/ui-sound.ts";
+import { configureUiSounds, playUiSound, previewUiSound } from "../lib/ui-sound.ts";
 import { useI18n } from "../lib/i18n.ts";
 import type { DesktopWindowState } from "../desktop.d.ts";
 
@@ -494,10 +494,12 @@ export function Settings({
                     value={uiSoundVolume}
                     aria-valuetext={t("{value} percent", { value: uiSoundVolume })}
                     onChange={(event) => {
-                      setUiSoundVolume(Number(event.target.value));
+                      const volume = Number(event.target.value);
+                      setUiSoundVolume(volume);
                       const now = Date.now();
                       if (!uiSounds || now - volumePreview.current < 150) return;
                       volumePreview.current = now;
+                      configureUiSounds({ volume, interfaceSounds: uiSounds, alertSounds: uiAlertSounds });
                       playUiSound("click");
                     }}
                   />

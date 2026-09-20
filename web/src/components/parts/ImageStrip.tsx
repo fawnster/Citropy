@@ -32,7 +32,7 @@ export function ImageStrip({ ids }: { ids: string[] }) {
     }
     return [...collected.entries()].map(([key, value]) => ({ key, ...value }));
   }, [ids, parts, projectId, threadId]);
-  const shown = sources.filter((source) => !missing.has(source.key));
+  const shown = sources.filter((source) => !missing.has(source.src));
   if (!shown.length) return null;
   const current = preview === null ? undefined : shown.find((source) => source.key === preview);
   return (
@@ -51,7 +51,7 @@ export function ImageStrip({ ids }: { ids: string[] }) {
               alt={source.name}
               loading="lazy"
               decoding="async"
-              onError={() => setMissing((previous) => new Set(previous).add(source.key))}
+              onError={() => setMissing((previous) => new Set(previous).add(source.src))}
             />
           </button>
         ))}
