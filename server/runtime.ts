@@ -728,15 +728,13 @@ export class ThreadRuntime {
           activeTool: undefined,
           error: stopped ? undefined : event.error,
         });
-        if (completed)
+        if (completed && !this.#thread.parentThreadId)
           store.notify({
             kind: "chat",
             level: event.error ? "error" : "success",
             title: event.error
               ? "Chat needs attention"
-              : this.#thread.parentThreadId
-                ? "Subagent finished"
-                : "Response finished",
+              : "Response finished",
             text: event.error ?? this.#thread.title,
             target: {
               view: "chat",
@@ -762,7 +760,7 @@ export class ThreadRuntime {
         clearTimeout(this.#compactionTimer);
         this.#resume = false;
         this.#buildPlan = false;
-        if (this.#thread.running && this.#thread.status !== "stopped")
+        if (this.#thread.running && this.#thread.status !== "stopped" && !this.#thread.parentThreadId)
           store.notify({
             kind: "chat",
             level: event.code ? "error" : "success",
