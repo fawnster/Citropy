@@ -350,11 +350,11 @@ test("switching channels installs the other build through the scripted installer
     control.command({ action: "switch", channel: "stable" }),
     /already on that channel/,
   );
-  await control.command({ action: "switch", channel: "lemon" });
+  await control.command({ action: "switch", channel: "lime" });
   assert.equal(control.state().status, "installing");
-  assert.match(control.state().message, /Downloading the Lemon build/);
+  assert.match(control.state().message, /Downloading the Lime build/);
   for (let attempt = 0; attempt < 20 && calls.length < 2; attempt++) await tick();
-  assert.deepEqual(calls, ["prepare", ["install", "lemon"]]);
+  assert.deepEqual(calls, ["prepare", ["install", "lime"]]);
 });
 
 test("a failed channel switch keeps the current build and offers no retry action", async (t) => {
@@ -379,7 +379,7 @@ test("a failed channel switch keeps the current build and offers no retry action
     },
   });
   t.after(() => control.dispose());
-  await control.command({ action: "switch", channel: "lemon" });
+  await control.command({ action: "switch", channel: "lime" });
   for (let attempt = 0; attempt < 20 && control.state().status !== "error"; attempt++) await tick();
   assert.equal(control.state().status, "error");
   assert.equal(control.state().retry, undefined);
@@ -391,7 +391,7 @@ test("a build without the scripted installer cannot switch channels", async (t) 
   const { control } = fixture();
   t.after(() => control.dispose());
   await assert.rejects(
-    control.command({ action: "switch", channel: "lemon" }),
+    control.command({ action: "switch", channel: "lime" }),
     /cannot switch release channels/,
   );
 });
@@ -411,7 +411,7 @@ test("a build that cannot replace itself rejects a channel switch", async (t) =>
   });
   t.after(() => control.dispose());
   await assert.rejects(
-    control.command({ action: "switch", channel: "lemon" }),
+    control.command({ action: "switch", channel: "lime" }),
     /cannot switch release channels/,
   );
   assert.equal((await control.command("check")).status, "unsupported");
@@ -428,7 +428,7 @@ test("a build that cannot replace itself rejects a channel switch", async (t) =>
   });
   t.after(() => available.dispose());
   await assert.rejects(
-    available.command({ action: "switch", channel: "lemon" }),
+    available.command({ action: "switch", channel: "lime" }),
     /cannot switch release channels/,
   );
 });

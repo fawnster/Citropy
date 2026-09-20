@@ -25,12 +25,13 @@ import { fileURLToPath } from "node:url";
 import { basename, join, resolve, sep } from "node:path";
 import { readFileSync, writeFileSync, mkdirSync, openSync, closeSync, accessSync, constants } from "node:fs";
 import { migrateDesktopData } from "./migrate-data.mjs";
+import { channelOf } from "./channel.mjs";
 
 const development = !app.isPackaged && process.env.CITROPY_DEVELOPMENT === "1";
 const { version } = JSON.parse(
   readFileSync(new URL("../package.json", import.meta.url), "utf8"),
 );
-const channel = /-lemon[.\d]*$/.test(version) ? "lemon" : "stable";
+const channel = channelOf(version);
 const appName = development ? "Citropy Dev" : "Citropy";
 app.setName(appName);
 app.setPath(
@@ -829,7 +830,7 @@ app
       : process.platform === "linux" && !(process.env.APPIMAGE && process.env.APPDIR && resolve(process.execPath).startsWith(`${resolve(process.env.APPDIR)}${sep}`))
         ? "Install the Citropy AppImage to download and apply release updates."
         : undefined;
-    const scriptedUpdates = !unavailableUpdate && (channel === "lemon" || macScriptUpdates());
+    const scriptedUpdates = !unavailableUpdate && (channel === "lime" || macScriptUpdates());
     const windowsFolder = process.env.LOCALAPPDATA ? resolve(process.env.LOCALAPPDATA, "Programs", "citropy") : undefined;
     const switchable = !unavailableUpdate && (
       process.platform === "win32"
@@ -840,9 +841,9 @@ app
     const autoUpdater = unavailableUpdate || scriptedUpdates ? undefined : (await import("electron-updater").then(module => module.default || module)).autoUpdater;
     const scriptInstaller = {
       check: async () => {
-        if (channel === "lemon") {
-          const response = await fetch(`https://github.com/${updateRepository}/releases/download/lemon/version.json`, { signal: AbortSignal.timeout(10000) });
-          if (!response.ok) throw new Error(`GitHub answered ${response.status} for the Lemon build.`);
+        if (channel === "lime") {
+          const response = await fetch(`https://github.com/${updateRepository}/releases/download/lime/version.json`, { signal: AbortSignal.timeout(10000) });
+          if (!response.ok) throw new Error(`GitHub answered ${response.status} for the Lime build.`);
           const info = await response.json();
           return typeof info.version === "string" ? info.version : undefined;
         }

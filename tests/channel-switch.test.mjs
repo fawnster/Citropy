@@ -90,7 +90,7 @@ createRoot(document.getElementById('root')).render(
       }),
     );
     await page.goto(`${server.resolvedUrls.local[0]}channel-switch`);
-    const button = page.getByRole("button", { name: "Use the Lemon build" });
+    const button = page.getByRole("button", { name: "Use the Lime build" });
     await button.waitFor({ timeout: 10000 });
     await button.click();
     const dialog = page.locator(".citropy-dialog");
@@ -103,12 +103,12 @@ createRoot(document.getElementById('root')).render(
     await dialog.waitFor();
     await page.getByRole("button", { name: "Switch and reopen" }).click();
     assert.deepEqual(await page.evaluate(() => window.switchCalls), [
-      { action: "switch", channel: "lemon" },
+      { action: "switch", channel: "lime" },
     ]);
     await page.evaluate(() =>
       window.publishUpdate({
         status: "installing",
-        message: "Downloading the Lemon build and reopening Citropy.",
+        message: "Downloading the Lime build and reopening Citropy.",
       }),
     );
     await page.getByRole("button", { name: "Switching…" }).waitFor();
@@ -190,7 +190,7 @@ createRoot(document.getElementById('root')).render(React.createElement(ChannelSw
     await page.goto(`${server.resolvedUrls.local[0]}channel-hidden`);
     await page.waitForTimeout(1000);
     assert.equal(
-      await page.getByRole("button", { name: "Use the Lemon build" }).count(),
+      await page.getByRole("button", { name: "Use the Lime build" }).count(),
       0,
     );
   },

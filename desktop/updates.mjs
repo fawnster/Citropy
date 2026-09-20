@@ -48,7 +48,7 @@ export function createAppUpdater({
           ? "No release is accessible. Check published Citropy releases and, for private repositories, your GitHub sign-in."
           : action === "switch"
             ? error?.userMessage ||
-              `The channel did not switch. Citropy is still on the ${channel === "lemon" ? "Lemon" : "stable"} build.`
+              `The channel did not switch. Citropy is still on the ${channel === "lime" ? "Lime" : "stable"} build.`
             : action === "install"
               ? error?.userMessage ||
                 "The update could not be applied. Citropy has kept the current version."
@@ -122,7 +122,7 @@ export function createAppUpdater({
       throw new Error("Unknown update action");
     if (action === "switch") {
       if (!installer) throw new Error("This build cannot switch release channels.");
-      if (target !== "stable" && target !== "lemon") throw new Error("Unknown release channel");
+      if (target !== "stable" && target !== "lime") throw new Error("Unknown release channel");
       if (target === channel) throw new Error("Citropy is already on that channel.");
     }
     if (
@@ -152,7 +152,7 @@ export function createAppUpdater({
             : "installing",
       message:
         action === "switch"
-          ? `Downloading the ${target === "lemon" ? "Lemon" : "stable"} build and reopening Citropy.`
+          ? `Downloading the ${target === "lime" ? "Lime" : "stable"} build and reopening Citropy.`
           : undefined,
       retry: undefined,
       ...(action === "download"

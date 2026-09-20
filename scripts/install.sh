@@ -2,10 +2,10 @@
 # Installs or updates Citropy on Linux and macOS.
 #
 #   curl -fsSL https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.sh | sh
-#   curl -fsSL https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.sh | sh -s -- --channel=lemon
+#   curl -fsSL https://raw.githubusercontent.com/tinuxongit/Citropy/main/scripts/install.sh | sh -s -- --channel=lime
 #   sh scripts/install.sh --uninstall
 #
-# The stable channel installs released versions. Lemon installs the rolling
+# The stable channel installs released versions. Lime installs the rolling
 # build from main. Both are the same app with the same data, so installing
 # either one replaces the other.
 set -eu
@@ -28,7 +28,7 @@ main() {
       --version=*) VERSION="${argument#--version=}" ;;
       --help|-h)
         say "Installs or updates Citropy on Linux and macOS."
-        say "  --channel=stable|lemon   pick the release channel (default stable)"
+        say "  --channel=stable|lime   pick the release channel (default stable)"
         say "  --version=X.Y.Z          install a specific stable release"
         say "  --uninstall              remove this channel's app"
         exit 0
@@ -37,11 +37,14 @@ main() {
     esac
   done
   case "$CHANNEL" in
-    stable | lemon) ;;
-    *) fail "Unknown channel: $CHANNEL. Use stable or lemon." ;;
+    lemon) CHANNEL=lime ;;
   esac
-  if [ "$CHANNEL" = lemon ] && [ -n "$VERSION" ]; then
-    fail "The Lemon channel always installs the newest build, so --version does not apply."
+  case "$CHANNEL" in
+    stable | lime) ;;
+    *) fail "Unknown channel: $CHANNEL. Use stable or lime." ;;
+  esac
+  if [ "$CHANNEL" = lime ] && [ -n "$VERSION" ]; then
+    fail "The Lime channel always installs the newest build, so --version does not apply."
   fi
 
   case "$(uname -s)" in
@@ -180,9 +183,9 @@ main() {
       ;;
   esac
 
-  if [ "$CHANNEL" = lemon ]; then
-    tag=lemon
-    label="Citropy Lemon"
+  if [ "$CHANNEL" = lime ]; then
+    tag=lime
+    label="Citropy Lime"
   else
     if [ -z "$VERSION" ]; then
       latest=$(curl -fsSL -o /dev/null -w '%{url_effective}' "$GITHUB/releases/latest") ||
@@ -201,8 +204,8 @@ main() {
   else
     extension=AppImage
   fi
-  if [ "$CHANNEL" = lemon ]; then
-    asset="Citropy-lemon-$arch.$extension"
+  if [ "$CHANNEL" = lime ]; then
+    asset="Citropy-lime-$arch.$extension"
   else
     asset="Citropy-$VERSION-$arch.$extension"
   fi
@@ -227,9 +230,9 @@ main() {
   actual=$(hash_file "$tmp/$asset" | awk '{ print $1 }')
   [ "$actual" = "$expected" ] || fail "The downloaded file failed its checksum. Try again."
 
-  if [ "$CHANNEL" = lemon ]; then
+  if [ "$CHANNEL" = lime ]; then
     reported=$(curl -fsSL "$BASE/$tag/version.json" 2>/dev/null | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' || true)
-    if [ -n "$reported" ]; then label="Citropy Lemon $reported"; fi
+    if [ -n "$reported" ]; then label="Citropy Lime $reported"; fi
   fi
 
   wait_for_parent

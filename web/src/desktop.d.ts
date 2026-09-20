@@ -5,7 +5,7 @@ export interface DesktopWindowState {
   fullscreen: boolean;
   platform: string;
   development: boolean;
-  channel: "stable" | "lemon";
+  channel: "stable" | "lime";
   switchable: boolean;
   version: string;
   notifications: boolean;
@@ -32,7 +32,7 @@ declare global {
           | "check"
           | "download"
           | "install"
-          | { action: "switch"; channel: "stable" | "lemon" },
+          | { action: "switch"; channel: "stable" | "lime" },
       ): Promise<import("../../shared/app-update.ts").AppUpdateState>;
       onUpdateState(callback: (state: import("../../shared/app-update.ts").AppUpdateState) => void): () => void;
       windowState(): Promise<DesktopWindowState>;
