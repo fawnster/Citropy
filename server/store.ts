@@ -8,6 +8,7 @@ import { bus } from "./bus.ts";
 import { eventJournal } from "./event-journal.ts";
 import { removeToolImages } from "./tool-images.ts";
 import { uid } from "./ids.ts";
+import { subagentFinishedNotification } from "./subagent-notifications.ts";
 import { emptyUsage } from "../shared/protocol.ts";
 import { normalizeTodos } from "../shared/todos.ts";
 import { defaultAssistance, gitActionBusy, type AssistanceSettings } from "../shared/assistance.ts";
@@ -404,10 +405,15 @@ export class Store {
   patchThread(id: string, patch: Partial<ThreadMeta>): void {
     const thread = this.threads.get(id);
     if (!thread) return;
+    const finished = thread.parentThreadId && thread.running && patch.running === false;
     Object.assign(thread, patch);
     thread.updatedAt = Date.now();
     bus.emit({ t: "thread.upsert", thread: meta(thread) });
     this.#schedule(id);
+    if (finished) {
+      const notification = subagentFinishedNotification(thread);
+      if (!this.notifications.some((entry) => entry.dedupeKey === notification.dedupeKey)) this.notify(notification);
+    }
   }
 
   updateSubagent(parentId: string, update: { id: string; title?: string; prompt?: string; model?: string; status: ThreadMeta["status"]; result?: string }): void {
@@ -418,24 +424,6 @@ export class Store {
       child = this.createThread({ projectId: parent.projectId, provider: parent.provider, workspacePath: parent.workspacePath, workspaceBranch: parent.workspaceBranch, parentThreadId: parentId, nativeAgentId: update.id, title: update.title || "Subagent", model: update.model ?? parent.model, permissionMode: parent.permissionMode });
       if (update.prompt) this.addMessage(child.id, { id: uid("msg"), ts: Date.now(), role: "user", parts: [{ id: uid("prt"), kind: "text", text: update.prompt }] });
     }
-    const completed =
-      child.running && (update.status === "idle" || update.status === "error");
-    this.patchThread(child.id, { status: update.status, running: ["queued", "thinking", "working", "awaiting"].includes(update.status), ...(update.title ? { title: update.title.slice(0, 80) } : {}), ...(update.model ? { model: update.model } : {}) });
-    if (completed)
-      this.notify({
-        kind: "chat",
-        level: update.status === "error" ? "error" : "success",
-        title:
-          update.status === "error"
-            ? "Subagent needs attention"
-            : "Subagent finished",
-        text: update.title ?? child.title,
-        target: {
-          view: "chat",
-          projectId: child.projectId,
-          threadId: child.id,
-        },
-      });
     if (update.result) {
       const previous = child.messages.at(-1);
       if (previous?.role === "assistant" && previous.parts[0]?.kind === "text") {
@@ -444,6 +432,7 @@ export class Store {
         this.addMessage(child.id, { id: uid("msg"), ts: Date.now(), role: "assistant", model: child.model, parts: [{ id: uid("prt"), kind: "text", text: update.result }] });
       }
     }
+    this.patchThread(child.id, { status: update.status, running: ["queued", "thinking", "working", "awaiting"].includes(update.status), ...(update.title ? { title: update.title.slice(0, 80) } : {}), ...(update.model ? { model: update.model } : {}) });
   }
 
   setUsage(id: string, usage: Usage): void {
