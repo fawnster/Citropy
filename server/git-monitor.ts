@@ -44,9 +44,17 @@ export function refreshGit(projectId: string, force = false, threadId?: string):
       const status = await git.status(path);
       if (request.repeat) continue;
       const key = JSON.stringify(status);
+      const synchronized = new Set<string>();
       for (const [cacheId, { project, threadId, force }] of request.targets) {
         if (store.projects.get(project.id) !== project || (threadId && !store.threads.has(threadId))) continue;
-        if (workspacePath(project.id, threadId) !== path || (!force && cache.get(cacheId) === key)) continue;
+        if (workspacePath(project.id, threadId) !== path) continue;
+        // A checkout is shared by all conversations using this directory. Refresh
+        // their saved labels even when the Git status itself has not changed.
+        if (!synchronized.has(project.id)) {
+          synchronized.add(project.id);
+          store.refreshWorkspaceBranch(project.id, path, status.branch);
+        }
+        if (!force && cache.get(cacheId) === key) continue;
         cache.set(cacheId, key);
         if (path === project.path && (project.branch !== status.branch || !project.isGit)) {
           project.branch = status.branch;

@@ -448,6 +448,18 @@ export class Store {
     for (const thread of this.threads.values()) if (thread.snoozedUntil && thread.snoozedUntil <= Date.now()) this.patchThread(thread.id, { snoozedUntil: undefined });
   }
 
+  /** Refresh observed checkout metadata without making old conversations look active. */
+  refreshWorkspaceBranch(projectId: string, path: string, branch: string): void {
+    const project = this.projects.get(projectId);
+    if (!project) return;
+    for (const thread of this.threads.values()) {
+      if (thread.projectId !== projectId || (thread.workspacePath ?? project.path) !== path || thread.workspaceBranch === branch) continue;
+      thread.workspaceBranch = branch;
+      bus.emit({ t: "thread.upsert", thread: meta(thread) });
+      this.#schedule(thread.id);
+    }
+  }
+
   patchThread(id: string, patch: Partial<ThreadMeta>): void {
     const thread = this.threads.get(id);
     if (!thread) return;

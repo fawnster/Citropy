@@ -41,12 +41,12 @@ export function Titlebar({
     }
     return selected?.parentThreadId ? undefined : selected;
   });
-  const git = useApp((state) =>
-    activeProjectId ? state.git[activeProjectId] : undefined,
-  );
   const inspectorOpen = useApp((state) => state.inspectorOpen);
 
   const project = projects.find((entry) => entry.id === activeProjectId);
+  // The project-level Git cache can still describe a previously selected worktree.
+  // The Git monitor refreshes this checkout-specific metadata for the sidebar too.
+  const branch = thread ? thread.workspaceBranch : project?.branch;
   const header = useRef<HTMLElement>(null);
   useEffect(() => {
     const element = header.current;
@@ -99,10 +99,10 @@ export function Titlebar({
         <div className="workspace-breadcrumb">
           {isRemote() && <span className="environment-breadcrumb" title={environmentName()}><Server size={13} /><span className="truncate">{environmentName()}</span></span>}
           <WorkspaceSelector disabled={workspaceDisabled} />
-          {(git?.branch || thread?.workspaceBranch) && view === "chat" && (
-            <span className="branch" title={git?.branch || thread?.workspaceBranch}>
+          {branch && view === "chat" && (
+            <span className="branch" title={branch}>
               <GitBranch size={12} />
-              <span className="truncate">{git?.branch || thread?.workspaceBranch}</span>
+              <span className="truncate">{branch}</span>
             </span>
           )}
         </div>
