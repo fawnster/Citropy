@@ -27,6 +27,12 @@ export function workspacePath(projectId: string, threadId?: string): string {
   return thread.workspacePath ?? project.path;
 }
 
+export function resolveWorkspace(projectId: string, threadId?: string): Project | undefined {
+  const project = store.projects.get(projectId);
+  if (!project) return undefined;
+  return { ...project, path: workspacePath(project.id, threadId) };
+}
+
 export async function workspaceOptions(
   project: Project,
 ): Promise<WorkspaceOptions> {

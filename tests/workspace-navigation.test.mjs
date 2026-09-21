@@ -231,9 +231,23 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     await page.route("**/api/providers/maintenance*", route => route.fulfill({ json: [] }));
     await page.evaluate(() => {
       window.updateCommands = [];
+      let state = { status: "available", currentVersion: "0.1.0", version: "0.2.0" };
+      const listeners = new Set();
       window.citropyDesktop = {
-        updateState: async () => ({ status: "available", currentVersion: "0.1.0", version: "0.2.0" }),
-        updateCommand: async command => { window.updateCommands.push(command); return { status: "ready", currentVersion: "0.1.0", version: "0.2.0" }; },
+        windowState: async () => ({ platform: "linux", maximized: false, fullscreen: false, development: false, version: "test", notifications: false, electron: "test" }),
+        onWindowState: () => () => {},
+        updateState: async () => state,
+        onUpdateState: callback => {
+          listeners.add(callback);
+          return () => listeners.delete(callback);
+        },
+        updateCommand: async command => {
+          window.updateCommands.push(command);
+          state = { status: command === "download" ? "ready" : state.status, currentVersion: "0.1.0", version: "0.2.0" };
+          for (const listener of listeners) listener(state);
+          return state;
+        },
+        windowCommand: async () => {},
       };
     });
     for (const [index, section] of ["Providers", "Application"].entries()) {
@@ -249,6 +263,7 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     await update.click();
     assert.deepEqual(await page.evaluate(() => window.updateCommands), ["download"]);
     await page.locator(".settings").getByRole("button", { name: "Restart & apply", exact: true }).waitFor();
+    assert.equal(await page.locator(".settings").getByRole("button", { name: "Restart", exact: true }).isDisabled(), true);
     const tooltip = page.locator(".app-update-settings [role=tooltip]");
     assert.equal(await tooltip.evaluate(node => {
       const bounds = node.getBoundingClientRect();
@@ -731,6 +746,9 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     await page.getByRole("button", { name: "41% context used", exact: true }).hover();
     await page.getByText("82k of 200k tokens", { exact: true }).waitFor();
     await page.getByText("Total processed", { exact: true }).waitFor();
+    await page.getByText("Cache hits", { exact: true }).waitFor();
+    await page.getByText("26% reused", { exact: true }).waitFor();
+    await page.getByText("100k reused · 280k new", { exact: true }).waitFor();
     emit({ t: "thread.upsert", thread: { ...thread, externalId: undefined, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0, contextTokens: 0, contextMax: 0, turns: 0 }, contextWindow: 1000000 } });
     await page.getByRole("button", { name: "0% context used", exact: true }).waitFor();
     assert.equal(await page.locator(".context-ring text").textContent(), "0");
@@ -761,6 +779,30 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
       await page.keyboard.press("Escape");
       await panel.waitFor({ state: "detached" });
     }
+  });
+
+  await t.test("context panel shows cache hits, generation speed, and Cursor estimates", async test => {
+    const { page, emit } = await fixture(test);
+    const panel = page.getByRole("group", { name: "Context usage", exact: true });
+    emit({ t: "thread.upsert", thread: { ...thread, usage: { ...thread.usage, tokensPerSecond: 42.4 } } });
+    await page.getByRole("button", { name: "41% context used", exact: true }).hover();
+    await panel.getByText("Cache hits", { exact: true }).waitFor();
+    await panel.getByText("26% reused", { exact: true }).waitFor();
+    await panel.getByText("100k reused · 280k new", { exact: true }).waitFor();
+    await panel.getByText("Tokens per second", { exact: true }).waitFor();
+    await panel.getByText("42 tok/s", { exact: true }).waitFor();
+    emit({
+      t: "thread.upsert",
+      thread: {
+        ...thread,
+        provider: "cursor",
+        model: "grok-4.6",
+        usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0, contextTokens: 40, contextMax: 200000, turns: 1, contextEstimated: true },
+      },
+    });
+    await page.getByRole("button", { name: "0% context used", exact: true }).hover();
+    await panel.getByText("40 of 200k tokens", { exact: true }).waitFor();
+    await panel.getByText("Estimated from conversation", { exact: true }).waitFor();
   });
 
   await t.test("compaction has one conversation status and a spaced usage action", async test => {

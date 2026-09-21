@@ -108,9 +108,9 @@ The Usage button shows Claude Code and Codex account allowances, reset times, an
 
 ## Application updates
 
-The sidebar update button sits beside Usage. Release builds check on startup and every four hours. Click Download update to download and verify a release, then click Restart & apply to install it. Hover or focus the button for download percentage, size, and speed. Downloads never install on ordinary exit. Active provider work, Git operations, and computer use block applying an update; saved conversations remain in `~/.citropy`.
+The sidebar update button sits beside Usage. Settings > Application has the same control. Release builds check on startup and every four hours. Click Download update to download and verify a release, then click Restart & apply to install it. Hover or focus the button for download percentage, size, and speed. Downloads never install on ordinary exit. Active provider work, Git operations, and computer use block applying an update; saved conversations remain in `~/.citropy`. Settings Restart desktop relaunches the current build and stays disabled while a download is in progress or ready to apply.
 
-Updates use electron-updater and the public `tinuxongit/Citropy` GitHub release feed, without a sign-in. Build with a higher package version and publish the generated AppImage and `latest-linux.yml` together in a GitHub release to make it available. Packaging never publishes automatically. This repository currently has no release published. Source builds show Development build and retain live changes instead of modifying the checkout. AppImage integrity is checked against the release manifest; no code-signing identity has been configured.
+Updates use electron-updater and the public `tinuxongit/Citropy` GitHub release feed, without a sign-in. Build with a higher package version and publish the generated AppImage and `latest-linux.yml` together in a GitHub release to make it available. Packaging never publishes automatically. Source builds show Development build and retain live changes instead of modifying the checkout. AppImage integrity is checked against the release manifest; no code-signing identity has been configured.
 
 ## Storage and reliability
 

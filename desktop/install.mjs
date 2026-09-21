@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync, chmodSync, existsSync, readFileSync, unlinkSync, copyFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,4 +31,10 @@ chmodSync(path, 0o755);
 const previous = join(directory, "loom.desktop");
 if (existsSync(previous) && readFileSync(previous, "utf8").includes(join(root, "desktop/start.mjs")))
   unlinkSync(previous);
+for (const [command, args] of [
+  ["update-desktop-database", [directory]],
+  ["gtk-update-icon-cache", ["-f", join(data, "icons/hicolor")]],
+]) {
+  try { spawnSync(command, args, { stdio: "ignore" }); } catch {}
+}
 console.log(`Installed ${name} in your application menu: ${path}`);

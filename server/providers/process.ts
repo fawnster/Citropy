@@ -1,5 +1,14 @@
-import type { ChildProcess } from "node:child_process";
+import { execFile, type ChildProcess } from "node:child_process";
 import type { IPty } from "node-pty";
+
+/**
+ * Windows has no process groups, and provider CLIs run behind cmd.exe / powershell.exe launchers,
+ * so `child.kill()` would orphan the real agent. `taskkill /T` ends the whole tree.
+ */
+function killTreeOnWindows(pid: number | undefined, force: boolean): void {
+  if (!pid) return;
+  execFile("taskkill", ["/pid", String(pid), "/T", ...(force ? ["/F"] : [])], { windowsHide: true }, () => {});
+}
 
 const stopping = new Map<ChildProcess | IPty, Promise<void>>();
 
@@ -14,6 +23,11 @@ export function stopProcess(child: ChildProcess | IPty, processGroup = false): v
   };
   if (!alive()) return;
   const signal = (value: NodeJS.Signals) => {
+    if (processGroup && process.platform === "win32" && !("onExit" in child)) {
+      killTreeOnWindows(child.pid, value === "SIGKILL");
+      if (value === "SIGKILL") child.kill();
+      return;
+    }
     if (!group) { child.kill(value); return; }
     try { process.kill(-group, value); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") child.kill(value); }

@@ -1,5 +1,6 @@
 import type {
   Attachment,
+  FilePatch,
   ModelOption,
   PermissionMode,
   ProviderId,
@@ -11,14 +12,16 @@ import type {
 export type AgentEvent =
   | { type: "compacted"; contextTokens?: number }
   | { type: "subagent"; id: string; title?: string; prompt?: string; model?: string; status: ThreadStatus; result?: string }
-  | { type: "session"; externalId: string; model?: string; contextMax?: number }
+  | { type: "session"; externalId: string; model?: string; effort?: string; contextMax?: number; fastMode?: boolean }
+  /** The provider named the conversation itself (Cursor sends `session_info_update`). */
+  | { type: "title"; title: string }
   | { type: "status"; status: ThreadStatus; tool?: string }
   | { type: "block.start"; blockId: string; block: "text" | "reasoning" }
   | { type: "block.delta"; blockId: string; text: string }
   | { type: "block.end"; blockId: string }
   | { type: "tool.start"; callId: string; name: string; input: unknown }
   | { type: "tool.input"; callId: string; input: unknown; name?: string }
-  | { type: "tool.end"; callId: string; ok: boolean; output: string; images?: Array<{ mime: string; data: string }> }
+  | { type: "tool.end"; callId: string; ok: boolean; output: string; images?: Array<{ mime: string; data: string }>; patch?: FilePatch }
   | { type: "tool.output"; callId: string; output: string; append?: boolean }
   | { type: "shell.background"; callId: string; taskId: string; command?: string; cwd?: string }
   | { type: "shell.end"; callId: string; ok: boolean; output?: string; stopped?: boolean }
@@ -46,7 +49,22 @@ export interface StartOptions {
   emit: Emit;
 }
 
+/** Settings a live session may switch without restarting the provider process. */
+export interface SessionConfig {
+  model?: string;
+  effort?: string;
+  contextMax?: number;
+  fastMode?: boolean;
+  permissionMode?: PermissionMode;
+}
+
 export interface AgentSession {
+  /**
+   * Apply new settings to the running session in place. Only defined by providers whose protocol
+   * supports it (ACP: `session/set_config_option` and `session/set_mode`). Rejects when the
+   * provider refuses; the caller then falls back to restarting the session.
+   */
+  configure?(config: SessionConfig): Promise<void>;
   stopShell?(taskId: string): Promise<void>;
   send(text: string, attachments?: Attachment[], skills?: Array<{ name: string; path: string }>): void | Promise<void>;
   steer?(text: string, attachments?: Attachment[], skills?: Array<{ name: string; path: string }>): Promise<void>;

@@ -68,6 +68,7 @@ function ToastItem({
         className="icon-btn"
         type="button"
         onClick={() => dismissToast(toast.id)}
+        aria-label={t("Dismiss notification")}
         title={t("Dismiss notification")}
       >
         <X size={15} />

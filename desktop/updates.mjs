@@ -5,6 +5,7 @@ export function createAppUpdater({
   version,
   unavailable,
   external,
+  applyInstall,
   emit,
   prepareInstall,
   recoverInstall = async () => {},
@@ -17,6 +18,7 @@ export function createAppUpdater({
   let operation;
   let disposed = false;
   let recovering;
+  let downloadedFile;
   const listeners = [];
   const publish = (patch) => {
     if (disposed) return;
@@ -100,6 +102,7 @@ export function createAppUpdater({
     listen("update-downloaded", (info) => {
       if (state.status !== "downloading" || info.version !== state.version)
         return;
+      downloadedFile = info.downloadedFile;
       publish({ status: "ready", percent: 100, message: undefined });
     });
     listen("error", (error) => {
@@ -183,7 +186,11 @@ export function createAppUpdater({
         } else {
           await prepareInstall();
           if (external) await external.install();
-          else updater.quitAndInstall(false, true);
+          else if (applyInstall) {
+            if (typeof downloadedFile !== "string" || !downloadedFile)
+              throw new Error("The downloaded update file is missing.");
+            await applyInstall(downloadedFile);
+          } else updater.quitAndInstall(false, true);
         }
       } catch (error) {
         await fail(error, action);

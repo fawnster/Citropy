@@ -34,6 +34,10 @@ test("native computer capture, input and cancellation on an isolated desktop", {
   target = spawn(require("electron"), ["--ozone-platform=x11", "--remote-debugging-port=0", fileURLToPath(new URL("./fixtures/computer-target.mjs", import.meta.url))], { env, stdio: ["pipe", "pipe", "pipe"] });
   let sequence = 0;
   const events = [];
+  const waitForEvent = async (description, match, from) => {
+    for (let i = 0; i < 750 && !events.slice(from).some(match); i++) await new Promise(resolve => setTimeout(resolve, 20));
+    assert.ok(events.slice(from).some(match), `No ${description} within 15 s. Events since: ${JSON.stringify(events.slice(from))}`);
+  };
   const ready = new Promise(resolve => createInterface({ input: target.stdout }).on("line", line => {
     let value;
     try { value = JSON.parse(line); } catch { return; }
@@ -129,13 +133,15 @@ test("native computer capture, input and cancellation on an isolated desktop", {
   await request("computer.start", { control: false });
   await assert.rejects(request("computer.action", { action: "press", key: "Enter" }), /only allows viewing/);
   await request("computer.screenshot", { displayId: "desktop" });
+  const beforeStop = events.length;
   await request("computer.stop");
-  assert.ok(events.some(event => event.t === "computer.stopped"));
+  await waitForEvent("computer.stopped event after computer.stop", event => event.t === "computer.stopped", beforeStop);
   const finalSession = await request("computer.start", { control: true });
   assert.equal(finalSession.shortcut, true);
+  const beforeShortcut = events.length;
   await promisify(execFile)("xdotool", ["key", "ctrl+alt+Escape"], { env });
   await assert.rejects(request("computer.screenshot", { displayId: "desktop" }), /Start a computer session|Stopped/);
-  assert.ok(events.some(event => event.reason?.includes("Ctrl+Alt+Escape")));
+  await waitForEvent("stop event naming Ctrl+Alt+Escape", event => event.reason?.includes("Ctrl+Alt+Escape"), beforeShortcut);
   await request("computer.start", { control: true });
   const { stdout: children } = await promisify(execFile)("ps", ["--ppid", String(target.pid), "-o", "pid=,comm="]);
   const helper = /^\s*(\d+)\s+python3$/m.exec(children);

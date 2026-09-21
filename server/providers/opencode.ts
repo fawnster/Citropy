@@ -15,6 +15,8 @@ import type { ProviderCommand } from "../../shared/features.ts";
 
 const run = promisify(execFile);
 
+const MAX_EVENT_BUFFER = 8 * 1024 * 1024;
+
 interface Instance {
   base: string;
   child: ChildProcess;
@@ -207,23 +209,24 @@ class OpenCodeSession implements AgentSession {
         const { done, value } = await reader.read();
         if (done) throw new Error("OpenCode event stream closed");
         buffer += decoder.decode(value, { stream: true });
-        let split = buffer.indexOf("\n\n");
-        while (split !== -1) {
-          const frame = buffer.slice(0, split);
-          buffer = buffer.slice(split + 2);
+        if (buffer.length > MAX_EVENT_BUFFER) {
+          this.#options.emit({ type: "notice", level: "error", text: "OpenCode sent an event larger than 8 MB; the event stream was reset." });
+          throw new Error("OpenCode event stream exceeded its 8 MB buffer.");
+        }
+        const frames = buffer.split(/\r?\n\r?\n/);
+        buffer = frames.pop()!;
+        for (const frame of frames) {
           const payload = frame
-            .split("\n")
+            .split(/\r?\n/)
             .filter((line) => line.startsWith("data:"))
             .map((line) => line.slice(5).trim())
             .join("");
-          if (payload) {
-            try {
-              this.#handle(JSON.parse(payload) as Record<string, unknown>);
-            } catch {
-              /* ignore malformed frame */
-            }
+          if (!payload) continue;
+          try {
+            this.#handle(JSON.parse(payload) as Record<string, unknown>);
+          } catch {
+            /* ignore malformed frame */
           }
-          split = buffer.indexOf("\n\n");
         }
       }
     } finally {
@@ -300,7 +303,7 @@ class OpenCodeSession implements AgentSession {
     if (this.#queue.length) this.#options.emit({ type: "notice", level: "warn", text: this.#queue.length === 1 ? "Stopped before OpenCode started your latest message. Send it again to run it." : `Stopped before OpenCode started your last ${this.#queue.length} messages. Send them again to run them.` });
     this.#queue = [];
     if (this.#compacting) this.#compactionError = "Context compaction was stopped.";
-    cancelThread(this.#options.threadId);
+    cancelThread(this.#options.threadId, false);
     cancelQuestions(this.#options.threadId);
     if (!this.#sessionId) {
       this.#options.emit({ type: "turn.end" });
@@ -313,7 +316,7 @@ class OpenCodeSession implements AgentSession {
   }
 
   dispose(): void {
-    cancelThread(this.#options.threadId);
+    cancelThread(this.#options.threadId, false);
     cancelQuestions(this.#options.threadId);
     this.#abort.abort();
     if (this.#instance) stopProcess(this.#instance.child, true);
@@ -413,9 +416,10 @@ class OpenCodeSession implements AgentSession {
     }
 
     if (type === "question.asked") {
-      if (!this.#busy || typeof props.id !== "string" || this.#questions.has(props.id)) return;
-      this.#questions.set(props.id, false);
-      void this.#question(props.id, props.questions).catch((error: Error) => {
+      const id = typeof props.requestID === "string" ? props.requestID : props.id;
+      if (!this.#busy || typeof id !== "string" || this.#questions.has(id)) return;
+      this.#questions.set(id, false);
+      void this.#question(id, props.questions).catch((error: Error) => {
         if (this.#abort.signal.aborted || !this.#busy) return;
         this.#finish(error.message);
         this.#options.emit({ type: "exit", code: -1 });
@@ -424,12 +428,14 @@ class OpenCodeSession implements AgentSession {
       return;
     }
     if (type === "question.replied" || type === "question.rejected") {
-      const id = String(props.requestID ?? "");
+      const id = String(props.requestID ?? props.id ?? "");
       if (!this.#questions.has(id)) return;
       this.#questions.set(id, true);
       try {
         answerQuestion(this.#options.threadId, `${this.#options.threadId}:opencode:${id}`, type === "question.rejected" ? null : Object.fromEntries((props.answers as string[][]).map((answers, index) => [`question_${index + 1}`, answers])));
-      } catch {}
+      } catch (error) {
+        emit({ type: "notice", level: "warn", text: `Could not apply the answer to the OpenCode question: ${(error as Error).message}` });
+      }
       return;
     }
     if (type === "permission.v2.asked" || type === "permission.asked") {

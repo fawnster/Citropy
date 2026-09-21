@@ -78,3 +78,7 @@ export function ask(threadId: string, tool: string, input: unknown): Promise<Dec
     bus.emit({ t: "permission.request", request });
   });
 }
+
+bus.subscribe((event) => {
+  if (event.t === "thread.remove") cancelThread(event.id);
+});

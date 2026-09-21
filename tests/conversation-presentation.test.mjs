@@ -1331,7 +1331,7 @@ app.whenReady().then(() => {
     };
     const f = await fixture();
     const { page } = f;
-    const provider = { id: "claude", label: "Claude Code", available: true, enabled: true, models: [{ id: "sample", label: "Example model" }], steerHint: "Claude Code reads it at its next step." };
+    const provider = { id: "claude", label: "Claude Code", available: true, enabled: true, models: [{ id: "sample", label: "Example model" }], steerHint: "Claude Code reads it at its next step.", capabilities: { transport: "stdio", steer: true, compact: true, stopShell: true } };
     const queue = [
       { id: "tests", text: "Check the tests too", createdAt: 2 },
       { id: "review", text: "/review", createdAt: 3, attachments: [{ id: "file", path: "/example/notes.txt", label: "notes.txt" }] },

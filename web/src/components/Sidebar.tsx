@@ -546,6 +546,7 @@ export function Sidebar({
             <button
               className="thread-row-kill"
               type="button"
+              aria-label={`${t("Delete")} ${thread.title}`}
               title={`${t("Delete")} ${thread.title}`}
               onClick={() => removeThread(thread.id)}
             >

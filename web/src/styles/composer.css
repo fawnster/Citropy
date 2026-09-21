@@ -345,7 +345,7 @@
   margin: 0;
   overflow-y: auto;
   color: var(--text);
-  width: 252px;
+  width: 272px;
   padding: 16px;
   border: 0;
   border-radius: var(--r-lg);
@@ -386,6 +386,40 @@
 
 .context-details p {
   margin: 6px 0 14px;
+}
+
+.context-cache,
+.context-speed {
+  margin: 0 0 14px;
+}
+
+.context-cache-bar {
+  display: flex;
+  height: 6px;
+  margin: 8px 0 6px;
+  overflow: hidden;
+  border-radius: var(--r-full);
+  background: var(--line);
+}
+
+.context-cache-bar > span {
+  min-width: 0;
+}
+
+.context-cache-bar > [data-part="hit"] { background: var(--ok); }
+.context-cache-bar > [data-part="fresh"] { background: var(--file-icon); }
+.context-cache-bar > [data-part="write"] { background: var(--heat); }
+
+.context-cache-note,
+.context-estimate {
+  margin: 0;
+  color: var(--text-3);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+
+.context-estimate {
+  margin: -6px 0 14px;
 }
 
 .context-details dl {
@@ -460,7 +494,7 @@
   }
 
   .context-details {
-    width: 230px;
+    width: 250px;
   }
 }
 

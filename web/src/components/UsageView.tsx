@@ -6,6 +6,7 @@ import { ProviderIcon } from "./ProviderIcon.tsx";
 import { SectionSidebar } from "./SectionSidebar.tsx";
 import type { UsageReport } from "../../../shared/features.ts";
 import { currentLocale, useI18n } from "../lib/i18n.ts";
+import { spanish } from "../lib/translations.ts";
 
 export function UsageView({
   sidebarOpen,
@@ -125,7 +126,13 @@ export function UsageView({
                           );
                         })}
                         {entry.error && (
-                          <p className="feature-note">{t(entry.error)}</p>
+                          <p className="feature-note">
+                            {entry.provider === "cursor"
+                              ? t("Not available for {provider}", { provider: t("Cursor") })
+                              : Object.hasOwn(spanish, entry.error)
+                                ? t(entry.error)
+                                : entry.error}
+                          </p>
                         )}
                       </article>
                     ))}

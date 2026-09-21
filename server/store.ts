@@ -1,7 +1,7 @@
 import { dataRoot } from "./paths.ts";
 import { dev } from "./config.ts";
 import { mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync, existsSync, renameSync } from "node:fs";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { homedir } from "node:os";
 import { join, basename, resolve } from "node:path";
 import { bus } from "./bus.ts";
@@ -45,11 +45,23 @@ const notificationsFile = join(root, "notifications.json");
 
 mkdirSync(threadsDir, { recursive: true });
 
-function save(path: string, value: unknown): void {
+let writes = 0;
+let skipped = 0;
+
+export function persistenceStats(): { writes: number; skipped: number } {
+  return { writes, skipped };
+}
+
+function save(path: string, value: unknown, durable = true): void {
+  saveRaw(path, JSON.stringify(value), durable);
+}
+
+function saveRaw(path: string, json: string, durable: boolean): void {
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
-    writeFileSync(temporary, JSON.stringify(value), { flag: "wx", mode: 0o600, flush: true });
+    writeFileSync(temporary, json, { flag: "wx", mode: 0o600, ...(durable ? { flush: true } : {}) });
     renameSync(temporary, path);
+    writes += 1;
   } finally {
     rmSync(temporary, { force: true });
   }
@@ -83,6 +95,9 @@ export class Store {
   #dirty = new Set<string>();
   #flushTimer: NodeJS.Timeout | null = null;
   #savedProjects = "";
+  #lastSize = new Map<string, number>();
+  #hashes = new Map<string, string>();
+  #durable = new Set<string>();
 
   constructor() {
     this.#load();
@@ -177,20 +192,42 @@ export class Store {
   #schedule(threadId: string): void {
     this.#dirty.add(threadId);
     if (this.#flushTimer) return;
+    const bytes = this.#lastSize.get(threadId) ?? 0;
+    const delay = Math.min(5000, Math.max(400, 400 + (bytes / 1_000_000) * 600));
     this.#flushTimer = setTimeout(() => {
       this.#flushTimer = null;
-      this.flush();
-    }, 400);
+      this.#flushScheduled();
+    }, delay);
+    this.#flushTimer.unref();
+  }
+
+  #persistThread(id: string, durable: boolean): void {
+    const thread = this.threads.get(id);
+    if (!thread) return;
+    const json = JSON.stringify(thread);
+    this.#lastSize.set(id, Buffer.byteLength(json));
+    const hash = createHash("sha1").update(json).digest("hex");
+    // A scheduled write skips fsync, so a durable flush still rewrites once even when unchanged.
+    if (this.#hashes.get(id) === hash && (!durable || this.#durable.has(id))) {
+      skipped += 1;
+      return;
+    }
+    saveRaw(join(threadsDir, `${id}.json`), json, durable);
+    this.#hashes.set(id, hash);
+    if (durable) this.#durable.add(id);
+    else this.#durable.delete(id);
+  }
+
+  #flushScheduled(): void {
+    for (const id of this.#dirty) this.#persistThread(id, false);
+    this.#dirty.clear();
   }
 
   flush(): void {
     if (this.#flushTimer) clearTimeout(this.#flushTimer);
     this.#flushTimer = null;
-    for (const id of this.#dirty) {
-      const thread = this.threads.get(id);
-      if (!thread) continue;
-      save(join(threadsDir, `${id}.json`), thread);
-    }
+    for (const id of this.#dirty) this.#persistThread(id, true);
+    for (const id of this.#hashes.keys()) if (!this.#durable.has(id)) this.#persistThread(id, true);
     this.#dirty.clear();
     const projects = [...this.projects.values()];
     const serialized = JSON.stringify(projects);
@@ -304,7 +341,7 @@ export class Store {
   }
 
   openProject(path: string): Project {
-    const abs = resolve(path.replace(/^~(?=$|\/)/, homedir()));
+    const abs = resolve(path.replace(/^~(?=$|[/\\])/, homedir()));
     const existing = [...this.projects.values()].find((p) => p.path === abs);
     if (existing) {
       existing.lastOpened = Date.now();
@@ -370,6 +407,9 @@ export class Store {
     }
     this.threads.delete(id);
     this.#dirty.delete(id);
+    this.#lastSize.delete(id);
+    this.#hashes.delete(id);
+    this.#durable.delete(id);
     const remaining = this.notifications.filter((entry) => entry.target.threadId !== id);
     if (remaining.length !== this.notifications.length) {
       this.notifications = remaining;

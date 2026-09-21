@@ -5,7 +5,7 @@ import { ChevronDown } from "./icons.ts";
 import { MessageBlock } from "./MessageBlock.tsx";
 import { MessageNavigator } from "./MessageNavigator.tsx";
 import { Working } from "./Working.tsx";
-import { scaled, useApp } from "../lib/store.ts";
+import { scaled, useApp, type AppState } from "../lib/store.ts";
 import { loadThread, readThreadNotifications, refreshGit } from "../lib/actions.ts";
 import { useStickToBottom } from "../lib/use-stick.ts";
 import {
@@ -14,6 +14,55 @@ import {
   type TimelineRow,
 } from "../lib/timeline.ts";
 import { useI18n } from "../lib/i18n.ts";
+import { normalizeTodos } from "../../../shared/todos.ts";
+
+function partFingerprint(part: AppState["parts"][string] | undefined): string {
+  if (!part) return "-";
+  switch (part.kind) {
+    case "text":
+    case "reasoning":
+      return `${part.kind === "text" ? "x" : "r"}${part.text.trim() ? 1 : 0}${part.complete === false ? 0 : 1}`;
+    case "todo":
+      return `d${normalizeTodos(part.items).length ? 1 : 0}`;
+    case "question":
+      return `q${part.status}`;
+    case "tool":
+      return `k${part.name}:${part.callId}:${part.images?.length ?? 0}:${part.imageFiles?.length ?? 0}`;
+    case "images":
+      return "i";
+    case "notice":
+      return `n${part.level}`;
+    default:
+      return part.kind;
+  }
+}
+
+function timelineFingerprint(state: AppState, threadId: string): string {
+  const order = state.order[threadId] ?? [];
+  const thread = state.threads[threadId];
+  const sections = [
+    order.join(","),
+    thread?.status ?? "",
+    thread?.running ? "1" : "0",
+    thread?.compacting ? "1" : "0",
+    thread?.runStartedAt === undefined ? "" : String(thread.runStartedAt),
+  ];
+  for (const messageId of order) {
+    const message = state.messages[messageId];
+    if (!message) {
+      sections.push(`@${messageId}`);
+      continue;
+    }
+    sections.push(`>${message.role}:${message.ts}`);
+    for (const partId of message.partIds)
+      sections.push(`${partId}=${partFingerprint(state.parts[partId])}`);
+  }
+  for (const messageId of order) {
+    for (const partId of state.messages[messageId]?.partIds ?? [])
+      if (state.disclosures[partId]?.activity) sections.push(`^${partId}`);
+  }
+  return sections.join("|");
+}
 
 export function Conversation() {
   const t = useI18n();
@@ -23,17 +72,11 @@ export function Conversation() {
   const ids = useApp((state) => (threadId ? state.order[threadId] : undefined));
   const selectRows = useMemo(() => {
     let rows: TimelineRow[] = [];
-    let previous: ReturnType<typeof useApp.getState> | undefined;
+    let fingerprint: string | undefined;
     return (state: ReturnType<typeof useApp.getState>) => {
-      if (
-        state.messages === previous?.messages &&
-        state.parts === previous.parts &&
-        state.order === previous.order &&
-        state.disclosures === previous.disclosures &&
-        state.threads[threadId ?? ""] === previous.threads[threadId ?? ""]
-      )
-        return rows;
-      previous = state;
+      const key = threadId ? timelineFingerprint(state, threadId) : "";
+      if (key === fingerprint) return rows;
+      fingerprint = key;
       const next = threadId ? timelineRows(state, threadId) : [];
       if (!sameTimelineRows(rows, next)) rows = next;
       return rows;
@@ -208,7 +251,7 @@ export function Conversation() {
       });
     });
     return () => cancelAnimationFrame(frame);
-  }, [searchMessageId, searchShellId, threadId, loaded, ids, rows, virtualItems, timeline, stopFollowing, t]);
+  }, [searchMessageId, searchShellId, threadId, loaded, ids, rows, timeline, stopFollowing, t]);
 
   const busy =
     compacting || status === "thinking" || status === "working" || status === "queued";

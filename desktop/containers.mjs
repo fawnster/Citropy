@@ -70,7 +70,12 @@ CMD ["node", "--experimental-strip-types", "server/main.ts"]
     progress("Starting container workspace…");
     const envPath = join(directory, "runtime.env");
     await writeFile(envPath, `CITROPY_REMOTE_ID=${connection.id}\nCITROPY_REMOTE_TOKEN=${token}\nCITROPY_REMOTE_BUILD=${build}\nCITROPY_CONTAINER=1\nCITROPY_HOST=0.0.0.0\nCITROPY_PORT=4177\nCITROPY_DATA_DIR=/home/citropy/.citropy\n`, { mode: 0o600 });
-    await manager.command("docker", ["create", "--name", containerName(connection.id), "--init", "--label", `app.citropy.environment=${connection.id}`, "--label", `app.citropy.build=${build}`, "--user", `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`, "--security-opt", "no-new-privileges", "--cap-drop", "ALL", "--pids-limit", "1024", "--publish", "127.0.0.1::4177", "--mount", `type=bind,source=${source},target=/workspace`, "--mount", `type=bind,source=${home},target=/home/citropy`, "--env-file", envPath, image], { signal });
+    const uid = process.getuid?.();
+    const gid = process.getgid?.();
+    const create = ["create", "--name", containerName(connection.id), "--init", "--label", `app.citropy.environment=${connection.id}`, "--label", `app.citropy.build=${build}`];
+    if (uid !== undefined && gid !== undefined) create.push("--user", `${uid}:${gid}`);
+    create.push("--security-opt", "no-new-privileges", "--cap-drop", "ALL", "--pids-limit", "1024", "--publish", "127.0.0.1::4177", "--mount", `type=bind,source=${source},target=/workspace`, "--mount", `type=bind,source=${home},target=/home/citropy`, "--env-file", envPath, image);
+    await manager.command("docker", create, { signal });
   }
   if (!container?.State.Running) await manager.command("docker", ["start", containerName(connection.id)], { signal });
   container = await inspect(manager, connection, signal);

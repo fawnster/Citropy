@@ -1,20 +1,21 @@
 import * as acp from "@agentclientprotocol/sdk";
-import { execFile, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { basename } from "node:path";
 import { Readable, Writable } from "node:stream";
 import { pathToFileURL } from "node:url";
-import { promisify } from "node:util";
 import { onLines } from "../lines.ts";
+import { diffLines } from "../diff.ts";
 import { stopProcess } from "./process.ts";
+import { commandVersion, spawnCommand } from "./binary.ts";
 import { ask, cancelThread } from "../permissions.ts";
 import { askQuestion, cancelQuestions } from "../questions.ts";
-import type { AgentSession, StartOptions } from "./types.ts";
-import type { Attachment, ModelOption, PermissionMode, TodoItem } from "../../shared/protocol.ts";
+import type { AgentSession, SessionConfig, StartOptions } from "./types.ts";
+import type { Attachment, FilePatch, ModelOption, PermissionMode, TodoItem } from "../../shared/protocol.ts";
 import type { ProviderCommand } from "../../shared/features.ts";
 import { normalizeTodos } from "../../shared/todos.ts";
-
-const run = promisify(execFile);
+import { parseAcpUsage } from "../../shared/usage-metrics.ts";
 
 export interface AcpConfig {
   label: string;
@@ -73,6 +74,8 @@ interface CursorUpdateTodosRequest {
 }
 
 const extensionParams = <T>(): { parse(value: unknown): T } => ({ parse: (value) => value as T });
+
+const MAX_PENDING_NOTIFICATIONS = 500;
 
 type ToolCallLike = acp.ToolCall | acp.ToolCallUpdate;
 
@@ -158,7 +161,11 @@ function optionValues(option: SelectOption): string[] {
   return values;
 }
 
-const EFFORT_VALUES = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "max"]);
+const EFFORT_VALUES = new Set(["none", "minimal", "low", "medium", "high", "xhigh", "extra-high", "extra_high", "max"]);
+
+function displayName(value: string): string {
+  return value.replace(/[\u200b-\u200d\ufeff]/g, "");
+}
 
 function effortOption(options: acp.SessionConfigOption[] | null | undefined): SelectOption | undefined {
   return selectOption(options, "thought_level", (option) => optionValues(option).some((value) => EFFORT_VALUES.has(value)));
@@ -192,8 +199,8 @@ export function acpCurrentModel(response: acp.NewSessionResponse): string | unde
 function modelLabels(option: SelectOption | undefined): Map<string, string> {
   const labels = new Map<string, string>();
   for (const entry of option?.options ?? []) {
-    if ("value" in entry) labels.set(entry.value, entry.name);
-    else for (const nested of entry.options) labels.set(nested.value, nested.name);
+    if ("value" in entry) labels.set(entry.value, displayName(entry.name));
+    else for (const nested of entry.options) labels.set(nested.value, displayName(nested.name));
   }
   return labels;
 }
@@ -205,7 +212,7 @@ function describeModel(id: string, label: string | undefined, options: acp.Sessi
   const windows = context ? optionValues(context).map(contextTokens).filter((value): value is number => value !== undefined) : [];
   return {
     id,
-    label: label ?? id,
+    label: displayName(label ?? id),
     hint: modelHint(id),
     isDefault: id.startsWith("default"),
     efforts: effort ? optionValues(effort) : [],
@@ -225,7 +232,7 @@ export function acpModelOptions(response: acp.NewSessionResponse): ModelOption[]
     for (const value of optionValues(select)) values.push({ id: value, label: labels.get(value) ?? value });
   } else {
     for (const model of legacyModels(response)?.availableModels ?? [])
-      values.push({ id: model.modelId, label: model.name });
+      values.push({ id: model.modelId, label: displayName(model.name) });
   }
   return values.map(({ id, label }) => describeModel(id, label, undefined));
 }
@@ -253,17 +260,47 @@ function toolReading(call: ToolCallLike): { name: string; input: unknown } {
   }
 }
 
-function contentText(content?: Array<acp.ToolCallContent> | null, rawOutput?: unknown): string {
+function rawOutputText(rawOutput: unknown): string | undefined {
+  if (rawOutput === undefined || rawOutput === null) return undefined;
+  if (typeof rawOutput === "string") return rawOutput;
+  if (typeof rawOutput !== "object" || Array.isArray(rawOutput)) return JSON.stringify(rawOutput);
+  const output = rawOutput as Record<string, unknown>;
+  if (typeof output.stdout === "string" || typeof output.stderr === "string") {
+    const stdout = typeof output.stdout === "string" ? output.stdout : "";
+    const stderr = typeof output.stderr === "string" ? output.stderr : "";
+    let text = stdout;
+    if (stderr) text += `${text ? "\n" : ""}${stderr}`;
+    if (typeof output.exitCode === "number" && output.exitCode !== 0) text += `${text ? "\n" : ""}[exit code ${output.exitCode}]`;
+    return text;
+  }
+  if (typeof output.content === "string") return output.content;
+  if (typeof output.totalMatches === "number") return `${output.totalMatches} matches${output.truncated === true ? " (truncated)" : ""}`;
+  return JSON.stringify(rawOutput);
+}
+
+function diffPatch(content?: Array<acp.ToolCallContent> | null): FilePatch | undefined {
+  for (const block of content ?? []) {
+    if (block.type !== "diff") continue;
+    let oldText = block.oldText ?? "";
+    let newText = block.newText;
+    if (/^-- \/dev\/null$/.test(oldText.trim())) oldText = "";
+    const lines = newText.split("\n");
+    if (lines[0] !== undefined && /^\+\+ b\//.test(lines[0])) newText = lines.slice(1).join("\n");
+    const patch = diffLines(oldText, newText, basename(block.path));
+    if (patch.added > 0 || patch.removed > 0) return patch;
+  }
+  return undefined;
+}
+
+function contentText(content?: Array<acp.ToolCallContent> | null, rawOutput?: unknown, skipDiff = false): string {
   const parts: string[] = [];
   for (const block of content ?? []) {
     if (block.type === "content" && block.content.type === "text") parts.push(block.content.text);
-    else if (block.type === "diff") parts.push(`${block.path}\n${block.newText}`);
+    else if (block.type === "diff") { if (!skipDiff) parts.push(`${block.path}\n${block.newText}`); }
     else if (block.type === "terminal") parts.push(block.terminalId);
   }
-  if (rawOutput !== undefined && rawOutput !== null) {
-    const text = typeof rawOutput === "string" ? rawOutput : JSON.stringify(rawOutput);
-    if (text) parts.push(text);
-  }
+  const text = rawOutputText(rawOutput);
+  if (text) parts.push(text);
   return parts.join("\n");
 }
 
@@ -297,12 +334,14 @@ export class AcpSession implements AgentSession {
   #ready: Promise<void>;
   #sessionId = "";
   #capabilities: acp.AgentCapabilities = {};
+  #configOptions: acp.SessionConfigOption[] = [];
   #busy = false;
   #disposed = false;
   #failed = false;
   #loading = false;
   #cancelled = false;
   #queue: Array<{ text: string; attachments: Attachment[] }> = [];
+  #pending: acp.SessionNotification[] = [];
   #blocks = new Map<string, string>();
   #tools = new Map<string, ToolState>();
   #todos: TodoItem[] = [];
@@ -312,7 +351,7 @@ export class AcpSession implements AgentSession {
   constructor(config: AcpConfig, options: StartOptions) {
     this.#config = config;
     this.#options = options;
-    this.#child = spawn(config.binary, config.args, {
+    this.#child = spawnCommand(config.binary, config.args, {
       detached: process.platform !== "win32",
       cwd: options.cwd,
       env: { ...process.env, NO_COLOR: "1", TERM: "dumb" },
@@ -396,14 +435,31 @@ export class AcpSession implements AgentSession {
       this.#sessionId = response.sessionId;
     }
     this.#loading = false;
+    const pending = this.#pending;
+    this.#pending = [];
+    for (const notification of pending) if (notification.sessionId === this.#sessionId) this.#dispatch(notification);
     const applied = await this.#applyConfig(response?.configOptions ?? restored?.configOptions);
+    this.#configOptions = applied;
     const currentModel = selectOption(applied, "model")?.currentValue ?? (response ? acpCurrentModel(response) : undefined) ?? this.#options.model;
-    const context = contextOption(applied);
     const mode = this.#config.modes[this.#options.permissionMode];
     const currentMode = response?.modes?.currentModeId ?? selectOption(applied, "mode")?.currentValue;
     if (mode && mode !== currentMode)
       await withTimeout(this.#agent().request(acp.methods.agent.session.setMode, { sessionId: this.#sessionId, modeId: mode }), 30_000, `${label} did not switch modes`);
-    this.#options.emit({ type: "session", externalId: this.#sessionId, model: currentModel, contextMax: context ? contextTokens(context.currentValue) : undefined });
+    this.#emitSession(applied, currentModel);
+  }
+
+  #emitSession(applied: acp.SessionConfigOption[], currentModel: string | undefined): void {
+    const context = contextOption(applied);
+    const effort = effortOption(applied);
+    const fast = fastOption(applied);
+    this.#options.emit({
+      type: "session",
+      externalId: this.#sessionId,
+      model: currentModel,
+      contextMax: context ? contextTokens(context.currentValue) : this.#options.contextMax ?? contextMax(currentModel ?? ""),
+      ...(effort ? { effort: effort.currentValue } : {}),
+      ...(fast ? { fastMode: fast.currentValue === "true" } : {}),
+    });
   }
 
   async #setConfig(configId: string, value: string): Promise<acp.SessionConfigOption[]> {
@@ -412,7 +468,8 @@ export class AcpSession implements AgentSession {
       30_000,
       `${this.#config.label} did not apply ${configId} within 30 seconds`,
     );
-    return result.configOptions ?? [];
+    this.#configOptions = result.configOptions ?? [];
+    return this.#configOptions;
   }
 
   async #applyConfig(initial: acp.SessionConfigOption[] | null | undefined): Promise<acp.SessionConfigOption[]> {
@@ -453,6 +510,36 @@ export class AcpSession implements AgentSession {
     return options;
   }
 
+  async configure(config: SessionConfig): Promise<void> {
+    await this.#ready;
+    if (this.#disposed || this.#failed) throw new Error(`${this.#config.label} is no longer running.`);
+    if (this.#busy) throw new Error("Wait for the current turn to finish.");
+    if (config.model !== undefined) this.#options.model = config.model;
+    if (config.effort !== undefined) this.#options.effort = config.effort;
+    if (config.contextMax !== undefined) this.#options.contextMax = config.contextMax;
+    if (config.fastMode !== undefined) this.#options.fastMode = config.fastMode;
+    if (config.permissionMode !== undefined) this.#options.permissionMode = config.permissionMode;
+    const applied = await this.#applyConfig(this.#configOptions);
+    this.#configOptions = applied;
+    if (config.model !== undefined) {
+      const selected = selectOption(applied, "model")?.currentValue;
+      if (selected !== undefined && selected !== config.model)
+        throw new Error(`${this.#config.label} could not select ${config.model}.`);
+    }
+    if (config.permissionMode !== undefined) {
+      const mode = this.#config.modes[config.permissionMode];
+      const currentMode = selectOption(applied, "mode")?.currentValue;
+      if (mode && mode !== currentMode)
+        await withTimeout(
+          this.#agent().request(acp.methods.agent.session.setMode, { sessionId: this.#sessionId, modeId: mode }),
+          30_000,
+          `${this.#config.label} did not switch modes`,
+        );
+    }
+    const currentModel = selectOption(applied, "model")?.currentValue ?? this.#options.model;
+    this.#emitSession(applied, currentModel);
+  }
+
   send(text: string, attachments: Attachment[] = []): void {
     if (this.#disposed || this.#failed) return;
     this.#queue.push({ text, attachments });
@@ -484,6 +571,8 @@ export class AcpSession implements AgentSession {
         prompt: [{ type: "text", text: next.text || "Please inspect the attached files." }, ...(await this.#content(next.attachments))],
       });
       if (this.#disposed) return;
+      const usage = parseAcpUsage(response);
+      if (Object.keys(usage).length) this.#options.emit({ type: "usage", usage });
       if (response.stopReason === "refusal") this.#finish(`${this.#config.label} refused to continue.`);
       else {
         if (response.stopReason === "max_tokens" || response.stopReason === "max_turn_requests")
@@ -499,7 +588,7 @@ export class AcpSession implements AgentSession {
     if (this.#queue.length)
       this.#options.emit({ type: "notice", level: "warn", text: this.#queue.length === 1 ? "Stopped before your latest message was sent. Send it again to run it." : `Stopped before your last ${this.#queue.length} messages were sent. Send them again to run them.` });
     this.#queue = [];
-    cancelThread(this.#options.threadId);
+    cancelThread(this.#options.threadId, false);
     cancelQuestions(this.#options.threadId);
     if (!this.#busy || !this.#sessionId) return;
     this.#cancelled = true;
@@ -510,7 +599,8 @@ export class AcpSession implements AgentSession {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#queue = [];
-    cancelThread(this.#options.threadId);
+    this.#pending = [];
+    cancelThread(this.#options.threadId, false);
     cancelQuestions(this.#options.threadId);
     this.#connection.close();
     this.#child.stdin.end();
@@ -555,7 +645,16 @@ export class AcpSession implements AgentSession {
 
   #receive(notification: acp.SessionNotification): void {
     if (this.#disposed || this.#failed) return;
-    if (notification.sessionId !== this.#sessionId || this.#loading) return;
+    if (this.#loading) {
+      if (this.#pending.length >= MAX_PENDING_NOTIFICATIONS) this.#pending.shift();
+      this.#pending.push(notification);
+      return;
+    }
+    if (notification.sessionId !== this.#sessionId) return;
+    this.#dispatch(notification);
+  }
+
+  #dispatch(notification: acp.SessionNotification): void {
     const update = notification.update;
     switch (update.sessionUpdate) {
       case "agent_message_chunk":
@@ -573,13 +672,11 @@ export class AcpSession implements AgentSession {
       case "plan":
         this.#plan(update.entries);
         return;
-      case "usage_update":
-        this.#options.emit({ type: "usage", usage: {
-          contextTokens: update.used,
-          contextMax: update.size,
-          ...(update.cost && update.cost.currency === "USD" ? { costUsd: update.cost.amount } : {}),
-        } });
+      case "usage_update": {
+        const usage = parseAcpUsage(update);
+        if (Object.keys(usage).length) this.#options.emit({ type: "usage", usage });
         return;
+      }
       case "available_commands_update":
         this.#config.onCommands?.(this.#options.cwd, update.availableCommands.flatMap((command) => {
           const name = command.name.trim();
@@ -589,6 +686,14 @@ export class AcpSession implements AgentSession {
           return [{ name, description: description || "Cursor command", ...(hint ? { argumentHint: hint } : {}) }];
         }));
         return;
+      case "session_info_update": {
+        const info = update as { sessionUpdate: string; title?: unknown };
+        if (typeof info.title === "string") {
+          const title = info.title.trim().slice(0, 200);
+          if (title) this.#options.emit({ type: "title", title });
+        }
+        return;
+      }
       default:
         return;
     }
@@ -699,7 +804,15 @@ export class AcpSession implements AgentSession {
     if ((status === "completed" || status === "failed") && !state.ended) {
       state.ended = true;
       const images = contentImages(state.content);
-      this.#options.emit({ type: "tool.end", callId: update.toolCallId, ok: status === "completed", output: contentText(state.content, "rawOutput" in update ? update.rawOutput : undefined), ...(images.length ? { images } : {}) });
+      const patch = diffPatch(state.content);
+      this.#options.emit({
+        type: "tool.end",
+        callId: update.toolCallId,
+        ok: status === "completed",
+        output: contentText(state.content, "rawOutput" in update ? update.rawOutput : undefined, Boolean(patch)),
+        ...(images.length ? { images } : {}),
+        ...(patch ? { patch } : {}),
+      });
     }
   }
 
@@ -724,7 +837,7 @@ export class AcpSession implements AgentSession {
 }
 
 export async function acpModels(config: AcpConfig): Promise<ModelOption[]> {
-  const child = spawn(config.binary, config.args, {
+  const child = spawnCommand(config.binary, config.args, {
     detached: process.platform !== "win32",
     cwd: tmpdir(),
     env: { ...process.env, NO_COLOR: "1", TERM: "dumb" },
@@ -803,10 +916,7 @@ export async function acpModels(config: AcpConfig): Promise<ModelOption[]> {
   }
 }
 
-export async function acpDetect(config: AcpConfig): Promise<{ available: boolean; version?: string }> {  try {
-    const { stdout, stderr } = await run(config.binary, ["--version"], { timeout: 8000 });
-    return { available: true, version: (stdout || stderr).trim().split("\n")[0] };
-  } catch {
-    return { available: false };
-  }
+export async function acpDetect(config: AcpConfig): Promise<{ available: boolean; version?: string }> {
+  const version = await commandVersion(config.binary);
+  return version === undefined ? { available: false } : { available: true, version };
 }
