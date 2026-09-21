@@ -1,5 +1,11 @@
 import { createServer, request } from "node:http";
+import { pipeline } from "node:stream";
 
+/**
+ * Create a loopback HTTP/WebSocket bridge restricted to the renderer origin.
+ * The returned controller switches environment targets and closes active connections;
+ * allowedOrigin may be a string or a function returning the current origin.
+ */
 export async function remoteProxy(allowedOrigin) {
   let target;
   const sockets = new Set();
@@ -27,7 +33,8 @@ export async function remoteProxy(allowedOrigin) {
       const responseHeaders = { ...response.headers, ...cors };
       delete responseHeaders["set-cookie"];
       res.writeHead(response.statusCode || 502, responseHeaders);
-      response.pipe(res);
+      // A truncated upstream body must also close the renderer response.
+      pipeline(response, res, () => {});
     });
     const active = { upstream, res, req, cors };
     requests.add(active);
@@ -38,6 +45,8 @@ export async function remoteProxy(allowedOrigin) {
     });
     upstream.setTimeout(300000, () => upstream.destroy());
     res.on("close", () => { requests.delete(active); upstream.destroy(); });
+    req.on("error", error => upstream.destroy(error));
+    req.on("aborted", () => upstream.destroy());
     req.pipe(upstream);
   });
   server.on("connection", socket => { sockets.add(socket); socket.on("close", () => sockets.delete(socket)); });

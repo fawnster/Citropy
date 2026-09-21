@@ -30,6 +30,7 @@ import { panelList } from "./panels.ts";
 import { waitForStoppedProcesses } from "./providers/process.ts";
 import { disposeAll } from "./runtime.ts";
 import { serveStatic } from "./static.ts";
+import { requestHandler } from "./http-handler.ts";
 import { store } from "./store.ts";
 import * as terminals from "./terminals.ts";
 import type { ClientEvent, ServerEvent, Snapshot } from "../shared/protocol.ts";
@@ -70,7 +71,7 @@ function snapshot(): Snapshot {
   };
 }
 
-const server = createServer(async (req, res) => {
+const server = createServer(requestHandler(async (req, res) => {
   const url = req.url ?? "/";
   if (!url.startsWith("/mcp/") && !authorizeRemote(req)) { res.writeHead(401).end(); return; }
   if (remoteId && url === "/api/remote/shutdown" && req.method === "POST") {
@@ -163,7 +164,7 @@ const server = createServer(async (req, res) => {
   if (!serveStatic(distDir, url, res)) {
     res.writeHead(404).end("not found");
   }
-});
+}));
 
 const wss = new WebSocketServer({
   server,
