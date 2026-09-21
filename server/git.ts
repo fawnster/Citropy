@@ -8,8 +8,15 @@ import { parseUnifiedDiff } from "./diff.ts";
 
 const run = promisify(execFile);
 
+/** Run Git with literal, case-sensitive UI selections and noninteractive authentication. */
 async function git(cwd: string, args: string[], env: NodeJS.ProcessEnv = {}): Promise<string> {
-  const { stdout } = await run("git", args, { cwd, timeout: 60_000, env: { ...process.env, GIT_TERMINAL_PROMPT: "0", ...env }, maxBuffer: 32 * 1024 * 1024 });
+  // UI selections are literal filenames, never Git globs or :(...) pathspecs.
+  // Neutralize inherited pathspec modes as well as enabling literal matching.
+  const gitEnv = {
+    ...process.env, ...env, GIT_TERMINAL_PROMPT: "0", GIT_LITERAL_PATHSPECS: "1",
+    GIT_GLOB_PATHSPECS: "0", GIT_NOGLOB_PATHSPECS: "0", GIT_ICASE_PATHSPECS: "0",
+  };
+  const { stdout } = await run("git", args, { cwd, timeout: 60_000, env: gitEnv, maxBuffer: 32 * 1024 * 1024 });
   return stdout;
 }
 
@@ -70,18 +77,26 @@ export async function status(cwd: string): Promise<GitStatus> {
   return { branch: branchLine || "detached", upstream, ahead, behind, files, clean: files.length === 0 };
 }
 
+/** Collect binary-safe working-tree/index line counts, keyed by the destination filename. */
 async function numstat(cwd: string): Promise<Map<string, { added: number; removed: number }>> {
   const map = new Map<string, { added: number; removed: number }>();
-  for (const args of [["diff", "--numstat"], ["diff", "--numstat", "--cached"]]) {
-    const out = await tryGit(cwd, args);
-    for (const line of out.split("\n")) {
-      const parts = line.split("\t");
-      if (parts.length < 3) continue;
-      const path = parts[2] ?? "";
+  for (const args of [["diff", "--numstat", "-z"], ["diff", "--numstat", "-z", "--cached"]]) {
+    const records = (await tryGit(cwd, args)).split("\0");
+    for (let index = 0; index < records.length; index += 1) {
+      // -z preserves raw filenames (including tabs/newlines) rather than C-quoting them.
+      const match = /^(\d+|-)\t(\d+|-)\t([\s\S]*)$/.exec(records[index] ?? "");
+      if (!match) continue;
+      let path = match[3] ?? "";
+      if (!path) {
+        // A rename/copy has an empty path field, then old and new NUL-delimited paths.
+        index += 2;
+        path = records[index] ?? "";
+      }
+      if (!path) continue;
       const prev = map.get(path) ?? { added: 0, removed: 0 };
       map.set(path, {
-        added: prev.added + (Number(parts[0]) || 0),
-        removed: prev.removed + (Number(parts[1]) || 0),
+        added: prev.added + (Number(match[1]) || 0),
+        removed: prev.removed + (Number(match[2]) || 0),
       });
     }
   }
