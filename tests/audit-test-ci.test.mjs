@@ -9,6 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { failedTestFiles } from '../scripts/test-ci.mjs';
 
 const exec = promisify(execFile);
+/** Run the real CI script in a disposable suite; null source represents an empty suite. */
 async function suite(t, source) {
   const root = await mkdtemp(join(tmpdir(), 'citropy-ci-'));
   t.after(() => rm(root, { recursive: true, force: true }));

@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 
 const token = 'test-only-daemon-token';
+/** Launch the real daemon with a stub PTY host and platform-native local sockets. */
 async function daemon(t) {
   const root = await mkdtemp(join(tmpdir(), 'citropy-daemon-'));
   const address = process.platform === 'win32' ? `\\\\.\\pipe\\citropy-audit-${randomUUID()}` : join(root, 'service.sock');
@@ -56,6 +57,7 @@ async function daemon(t) {
   return { connect, child, stderr: () => stderr };
 }
 
+/** Send a protocol envelope and await one JSON reply with bounded wait and listener cleanup. */
 function reply(socket, payload) {
   return new Promise((resolve, reject) => {
     let input = '';
@@ -81,6 +83,7 @@ function reply(socket, payload) {
   });
 }
 
+/** Verify that sending an invalid raw protocol line causes the client to be disconnected. */
 async function rejected(socket, raw) {
   const closed = new Promise((resolve, reject) => {
     const timer = setTimeout(() => { socket.destroy(); reject(new Error('malformed request was not disconnected')); }, 5000);
@@ -90,6 +93,7 @@ async function rejected(socket, raw) {
   await closed;
 }
 
+/** Confirm a fresh authenticated connection succeeds and the daemon process remains alive. */
 async function alive(instance) {
   const socket = await instance.connect();
   assert.deepEqual(await reply(socket, { id: 'hello', op: 'hello', version: 1, token }), { id: 'hello', result: [] });

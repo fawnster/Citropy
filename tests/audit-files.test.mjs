@@ -8,6 +8,7 @@ import { read, inside, tree } from '../server/files.ts';
 
 const LIMIT = 512 * 1024;
 const suffix = '\n… truncated at 512 KB';
+/** Create a temporary preview root that is removed when the test finishes. */
 async function fixture(t) {
   const root = await fs.mkdtemp(join(tmpdir(), 'citropy-files-'));
   t.after(() => fs.rm(root, { recursive: true, force: true }));

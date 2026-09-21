@@ -4,6 +4,7 @@ import { createServer, request } from 'node:http';
 import { remoteProxy } from '../desktop/remote-proxy.mjs';
 
 const origin = 'http://127.0.0.1:4177';
+/** Connect a real loopback proxy to a controlled backend and register teardown. */
 async function fixture(t, handler) {
   const backend = createServer(handler);
   await new Promise(resolve => backend.listen(0, '127.0.0.1', resolve));
@@ -17,6 +18,7 @@ async function fixture(t, handler) {
   return proxy;
 }
 
+/** Capture response completion or interruption, failing promptly if the proxy hangs. */
 function exchange(endpoint, path, headers = {}, onData = () => {}) {
   return new Promise((resolve, reject) => {
     let timer;

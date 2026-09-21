@@ -45,6 +45,10 @@ export async function tree(root: string, sub = ""): Promise<FileEntry[]> {
   return out;
 }
 
+/**
+ * Read a contained regular file as a UTF-8 preview, capped at 512 KiB of input.
+ * Append a truncation notice when more data exists; return null for denied or failed reads.
+ */
 export async function read(root: string, path: string): Promise<string | null> {
   const abs = inside(root, path);
   if (!abs) return null;

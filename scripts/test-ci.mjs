@@ -10,6 +10,7 @@ const locationPatterns = [
   /^\s*test at (.+?):\d+:\d+\s*$/gm,
 ]
 
+/** Run explicit test files serially, preserving TAP output and the child exit status. */
 function runTests(files) {
   return new Promise((resolveRun, reject) => {
     const child = spawn(process.execPath, [...nodeFlags, ...files], {
@@ -26,6 +27,7 @@ function runTests(files) {
   })
 }
 
+/** Extract unique in-repository test filenames from TAP diagnostics for diagnostic retries. */
 export function failedTestFiles(output, from = root) {
   const files = new Set()
   for (const pattern of locationPatterns) {

@@ -1,6 +1,11 @@
 import { createServer, request } from "node:http";
 import { pipeline } from "node:stream";
 
+/**
+ * Create a loopback HTTP/WebSocket bridge restricted to the renderer origin.
+ * The returned controller switches environment targets and closes active connections;
+ * allowedOrigin may be a string or a function returning the current origin.
+ */
 export async function remoteProxy(allowedOrigin) {
   let target;
   const sockets = new Set();

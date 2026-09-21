@@ -2,6 +2,11 @@ import type { FilePatch, PatchHunk, PatchLine } from "../shared/protocol.ts";
 
 const MAX_LINES = 4000;
 
+/**
+ * Parse Git-style or plain unified text diffs into bounded display patches.
+ * Use declared hunk ranges to distinguish source content from file headers and
+ * retain total change counts even when rendered lines are truncated.
+ */
 export function parseUnifiedDiff(text: string, fallbackPath = ""): FilePatch[] {
   const patches: FilePatch[] = [];
   let current: FilePatch | null = null;

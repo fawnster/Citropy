@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { parseUnifiedDiff } from '../server/diff.ts';
 
+/** Build the Git file-header prefix used by the hunk parsing regressions. */
 const header = path => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n`;
 
 test('header-like added and removed source lines stay in their hunk', () => {

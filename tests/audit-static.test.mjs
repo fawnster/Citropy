@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serveStatic } from '../server/static.ts';
 
+/** Start an isolated static server with representative assets and automatic test cleanup. */
 async function fixture(t) {
   const directory = await mkdtemp(join(tmpdir(), 'citropy-static-'));
   const root = join(directory, 'dist');

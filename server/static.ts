@@ -17,11 +17,13 @@ const TYPES: Record<string, string> = {
   ".map": "application/json",
 };
 
+/** Return whether an absolute file path is lexically contained by the root. */
 function inside(root: string, file: string): boolean {
   const path = relative(root, file);
   return path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
 }
 
+/** Open a regular file within a canonical root; the caller owns the returned descriptor. */
 function openFile(root: string, file: string) {
   let fd: number | undefined;
   try {
@@ -37,6 +39,11 @@ function openFile(root: string, file: string) {
   }
 }
 
+/**
+ * Handle a GET/HEAD resource or SPA navigation within the build root.
+ * Return false for missing resources and reserved backend routes; true once handled.
+ * Invalid paths and unsupported methods receive explicit client-error responses.
+ */
 export function serveStatic(root: string, urlPath: string, res: ServerResponse): boolean {
   const badRequest = () => {
     res.writeHead(400, { "cache-control": "no-store", "x-content-type-options": "nosniff" }).end();
