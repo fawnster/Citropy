@@ -23,7 +23,7 @@ import { modelSettings, selectedModel } from "../shared/model-options.ts";
 import { emptyUsage } from "../shared/protocol.ts";
 import { mergeUsage } from "../shared/usage-metrics.ts";
 import { connectTools, disconnectTools } from "./mcp-access.ts";
-import type { AgentEvent } from "./providers/types.ts";
+import type { AgentEvent, SessionConfig } from "./providers/types.ts";
 import type { AgentSession } from "./providers/types.ts";
 import { startShell, shellOutput, endShell, endThreadShells, shellList } from "./shells.ts";
 import { waitForStoppedProcesses } from "./providers/process.ts";
@@ -97,6 +97,8 @@ export class ThreadRuntime {
   #stopping: { promise: Promise<void>; ended: () => void; release: () => void } | null = null;
   #outputAtTurnStart = 0;
   #usagePulse = 0;
+  #autoTitle: string | undefined;
+  #providerTitled = false;
 
   constructor(thread: Thread) {
     this.#thread = thread;
@@ -112,6 +114,19 @@ export class ThreadRuntime {
 
   get busy(): boolean {
     return this.#preparing || Boolean(this.#enqueuing) || Boolean(this.#stopping) || Boolean(this.#checkpointCompletion) || this.#thread.running || this.#thread.status === "awaiting" || shellList().some(shell => shell.threadId === this.id && !shell.panelId && (shell.status === "running" || shell.status === "stopping"));
+  }
+
+  async configure(config: SessionConfig): Promise<boolean> {
+    const session = this.#session;
+    if (!session?.configure) return false;
+    if (this.busy || this.#thread.running || this.#stopping || this.#preparing) return false;
+    try {
+      await session.configure(config);
+      return true;
+    } catch (error) {
+      if ((error as Error).message.includes("Wait for")) throw error;
+      return false;
+    }
   }
 
   async send(text: string, files: Attachment[] = []): Promise<void> {
@@ -312,8 +327,9 @@ export class ThreadRuntime {
     store.patchThread(this.id, { contextSources });
     if (!this.#thread.title || this.#thread.title === "New thread") {
       const title = (text.trim().split("\n")[0] || attachments.map((file) => file.label).join(", ")).slice(0, 64);
-      store.patchThread(this.#thread.id, { title: title || "New thread" });
-      void generateThreadTitle(this.id, true);
+      this.#autoTitle = title || "New thread";
+      store.patchThread(this.#thread.id, { title: this.#autoTitle });
+      if (this.#thread.provider !== "cursor") void generateThreadTitle(this.id, true);
     }
     this.#messageId = null;
   }
@@ -529,8 +545,9 @@ export class ThreadRuntime {
   }
 
   #pulseUsage(): void {
+    if (this.#thread.provider !== "cursor" && !this.#thread.runStartedAt) return;
     const now = Date.now();
-    if (now - this.#usagePulse < 500) return;
+    if (now - this.#usagePulse < 2000) return;
     this.#usagePulse = now;
     this.#applyUsage();
   }
@@ -601,6 +618,18 @@ export class ThreadRuntime {
         });
         const contextMax = event.contextMax ?? this.#thread.contextWindow ?? selectedModel(providers[this.#thread.provider].models, this.#pendingModel)?.contextMax;
         if (contextMax) this.#applyUsage({ contextMax });
+        if (event.model === undefined || event.model === (this.#thread.model ?? event.model)) {
+          const reported: Partial<Thread> = {};
+          if (typeof event.effort === "string" && event.effort !== this.#thread.effort) reported.effort = event.effort;
+          if (typeof event.fastMode === "boolean" && event.fastMode !== this.#thread.fastMode) reported.fastMode = event.fastMode;
+          if (Object.keys(reported).length) store.patchThread(this.#thread.id, reported);
+        }
+        return;
+      }
+      case "title": {
+        if (this.#thread.parentThreadId || this.#autoTitle === undefined || this.#thread.title !== this.#autoTitle) return;
+        this.#providerTitled = true;
+        store.patchThread(this.id, { title: event.title.slice(0, 80) });
         return;
       }
       case "status": {
@@ -685,10 +714,13 @@ export class ThreadRuntime {
         const ref = this.#tools.get(event.callId);
         this.#running.delete(event.callId);
         if (ref) {
+          const thread = store.threads.get(this.#thread.id);
+          const part = thread?.messages.find((message) => message.id === ref.messageId)?.parts.find((entry) => entry.id === ref.partId) as ToolPart | undefined;
           store.patchPart(this.#thread.id, ref.messageId, ref.partId, {
             status: event.ok ? "ok" : "error",
             output: clip(event.output),
             endedAt: Date.now(),
+            ...(event.patch && !part?.patch ? { patch: event.patch } : {}),
           });
           if (event.images?.length) {
             void saveToolImages(this.#thread.id, event.images, () => store.threads.has(this.#thread.id)).then((images) => {
@@ -738,17 +770,7 @@ export class ThreadRuntime {
         this.#finishParts();
         const build = this.#buildPlan && completed && !event.error;
         this.#buildPlan = false;
-        if (build) {
-          this.#sessionGeneration += 1;
-          this.#session?.dispose();
-          this.#session = null;
-          disconnectTools(this.id);
-        }
         store.patchThread(this.#thread.id, {
-          ...(build ? {
-            permissionMode: "manual" as const,
-            queue: [{ id: uid("que"), text: "Build the plan.", createdAt: Date.now() }, ...(this.#thread.queue ?? [])],
-          } : {}),
           status: stopped ? "stopped" : event.error ? "error" : "idle",
           running: false,
           compacting: false,
@@ -769,12 +791,42 @@ export class ThreadRuntime {
               threadId: this.#thread.id,
             },
           });
-        this.#resume = completed && !event.error;
-        this.#checkpointCompletion = finishCheckpoint(this.#thread, messageId).catch(() => {}).finally(() => {
-          this.#checkpointCompletion = null;
+        const settle = () => {
+          if (build)
+            store.patchThread(this.#thread.id, {
+              permissionMode: "manual" as const,
+              queue: [{ id: uid("que"), text: "Build the plan.", createdAt: Date.now() }, ...(this.#thread.queue ?? [])],
+            });
+          if (this.#thread.provider === "cursor" && !this.#providerTitled && this.#autoTitle !== undefined && this.#thread.title === this.#autoTitle)
+            void generateThreadTitle(this.id, true);
+          this.#resume = completed && !event.error;
+          this.#checkpointCompletion = finishCheckpoint(this.#thread, messageId).catch(() => {}).finally(() => {
+            this.#checkpointCompletion = null;
+            this.#pump();
+          });
           this.#pump();
-        });
-        this.#pump();
+        };
+        if (build) {
+          const session = this.#session;
+          void (async () => {
+            let live = false;
+            if (session?.configure) {
+              try { await session.configure({ permissionMode: "manual" }); live = true; }
+              catch { live = false; }
+            }
+            if (!live) {
+              if (this.#session === session) {
+                this.#sessionGeneration += 1;
+                this.#session = null;
+              }
+              session?.dispose();
+              disconnectTools(this.id);
+            }
+            settle();
+          })();
+        } else {
+          settle();
+        }
         return;
       }
       case "notice": {
@@ -848,6 +900,10 @@ export function runtimeFor(threadId: string): ThreadRuntime {
   const runtime = new ThreadRuntime(thread);
   runtimes.set(threadId, runtime);
   return runtime;
+}
+
+export function runtimeIfExists(threadId: string): ThreadRuntime | undefined {
+  return runtimes.get(threadId);
 }
 
 export function disposeRuntime(threadId: string, preserveStatus = false): void {

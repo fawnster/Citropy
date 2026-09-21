@@ -40,7 +40,7 @@ import {
 import { panelList, openPanel, closePanel } from "./panels.ts";
 import { describeProviders } from "./providers/index.ts";
 import { waitForStoppedProcesses } from "./providers/process.ts";
-import { disposeAll, disposeRuntime, runtimeFor, providerBusy } from "./runtime.ts";
+import { disposeAll, disposeRuntime, runtimeFor, runtimeIfExists, providerBusy } from "./runtime.ts";
 import { serveStatic } from "./static.ts";
 import { store } from "./store.ts";
 import { modelSettings, selectedModel } from "../shared/model-options.ts";
@@ -425,11 +425,26 @@ async function handle(event: ClientEvent, send: (event: ServerEvent) => void): P
         throw new Error(
           "Wait for this turn to finish before changing its settings.",
         );
-      if (restart) disposeRuntime(event.id, true);
+      let live = false;
+      if (restart) {
+        if (!changedProvider) {
+          const existing = runtimeIfExists(event.id);
+          if (existing)
+            live = await existing.configure({
+              model: settings.model,
+              effort: settings.effort,
+              contextMax: settings.contextWindow,
+              fastMode: settings.fastMode,
+              permissionMode: event.permissionMode ?? thread.permissionMode,
+            });
+        }
+        if (!live) disposeRuntime(event.id, true);
+      }
       store.patchThread(event.id, {
         provider: event.provider ?? thread.provider,
         ...settings,
-        ...(changedModel || settings.contextWindow !== thread.contextWindow ? { usage: { ...thread.usage, contextMax: 0 } } : {}),
+        // A live reconfigure already reported the real window through its session event.
+        ...(!live && (changedModel || settings.contextWindow !== thread.contextWindow) ? { usage: { ...thread.usage, contextMax: 0 } } : {}),
         permissionMode: event.permissionMode ?? thread.permissionMode,
         title: event.title ?? thread.title,
       });
