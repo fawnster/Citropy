@@ -32,14 +32,16 @@ test("providers surface stray non-JSON stdout as warnings", async (t) => {
   const options = { threadId: "fixture", cwd: process.cwd(), permissionMode: "manual" };
 
   const claudeEvents = [];
-  claudeProvider.start({ ...options, emit: (event) => claudeEvents.push(event) });
+  const claudeSession = claudeProvider.start({ ...options, emit: (event) => claudeEvents.push(event) });
+  t.after(() => claudeSession.dispose());
   const claude = children.at(-1);
   claude.stdout.write("Deprecation warning: --foo is deprecated\n");
   await tick();
   assert.ok(claudeEvents.some((event) => event.type === "notice" && event.level === "warn" && /Deprecation warning/.test(event.text)));
 
   const codexEvents = [];
-  codexProvider.start({ ...options, emit: (event) => codexEvents.push(event) });
+  const codexSession = codexProvider.start({ ...options, emit: (event) => codexEvents.push(event) });
+  t.after(() => codexSession.dispose());
   const codex = children.at(-1);
   codex.stdout.write("codex: noisy warning\n");
   await tick();

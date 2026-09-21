@@ -770,6 +770,7 @@ app
     if (process.platform === "linux") revealDesktopWindow(window, { maximized: saved.maximized });
     secondInstance.flush();
     const started = backend?.start() ?? Promise.resolve();
+    void started.catch(() => {});
     await initializeProfiles(app.getPath("userData"));
     Menu.setApplicationMenu(null);
     const trusted = (event) =>

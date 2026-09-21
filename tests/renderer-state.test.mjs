@@ -119,6 +119,17 @@ test("history eviction skips a batch that leaves the cache unchanged even when i
   assert.ok(Object.values(state.historyBytes).reduce((sum, bytes) => sum + bytes, 0) > 16 * 1024 * 1024);
 });
 
+test("history eviction applies the byte limit to a handful of large conversations", () => {
+  const content = "x".repeat(6 * 1024 * 1024);
+  const load = (id, text) => ({ t: "thread.messages", threadId: id, messages: [message(id, text)] });
+  let state = { ...initial, activeThreadId: "active" };
+  state = applyEvents(state, [load("active", "Short")]);
+  state = applyEvents(state, [load("big-first", content), load("big-second", content), load("big-third", content)]);
+  assert.ok(Object.values(state.historyBytes).reduce((sum, bytes) => sum + bytes, 0) <= 16 * 1024 * 1024);
+  assert.equal(state.loaded["big-first"], undefined);
+  assert.ok(state.loaded.active);
+});
+
 test("revisiting a cached conversation retains it ahead of older entries", () => {
   const load = (id) => ({ t: "thread.messages", threadId: id, messages: [message(id)] });
   useApp.setState(applyEvents(initial, ["a", "b", "c", "d", "e"].map(load)), true);

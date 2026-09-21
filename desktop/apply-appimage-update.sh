@@ -16,7 +16,7 @@ if [ -n "${CITROPY_PARENT_PID:-}" ]; then
   count=0
   while kill -0 "$CITROPY_PARENT_PID" 2>/dev/null; do
     count=$((count + 1))
-    [ "$count" -lt 60 ] || break
+    [ "$count" -lt 60 ] || { say "Citropy is still running after 60 seconds. The update has not been applied."; exit 1; }
     sleep 1
   done
   # Give the old FUSE mount a moment to go away after the process exits.

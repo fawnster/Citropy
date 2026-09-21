@@ -415,11 +415,16 @@ function totalHistoryBytes(state: AppState): number {
   return total;
 }
 
-function trimHistories(state: AppState, previousBytes?: number): void {
+function trimHistories(state: AppState, previous?: AppState): void {
   const ids = Object.keys(state.loaded);
-  if (ids.length <= 4) return;
   const bytesTotal = totalHistoryBytes(state);
-  if (previousBytes !== undefined && bytesTotal === previousBytes) return;
+  if (ids.length <= 5 && bytesTotal <= 16 * 1024 * 1024) return;
+  if (
+    previous &&
+    bytesTotal === totalHistoryBytes(previous) &&
+    ids.length === Object.keys(previous.loaded).length
+  )
+    return;
   let bytes = bytesTotal;
   let count = ids.length;
   const evict: string[] = [];
@@ -448,7 +453,6 @@ export function applyEvents(
   events: ServerEvent[],
 ): AppState {
   const state = { ...previous };
-  const previousBytes = totalHistoryBytes(previous);
   const copied = new Set<HistoryCollection>();
   for (const event of events) {
     if (unloadedDelta(state, event)) continue;
@@ -459,7 +463,7 @@ export function applyEvents(
     }
     applyEvent(state, event);
   }
-  trimHistories(state, previousBytes);
+  trimHistories(state, previous);
   return state;
 }
 
@@ -1071,7 +1075,7 @@ export function selectThread(id: string | null): void {
       delete next.loaded[id];
       next.loaded[id] = true;
     }
-    trimHistories(next, totalHistoryBytes(state));
+    trimHistories(next);
     return next;
   });
   if (id) environmentStorage.setItem("citropy.thread", id);
@@ -1081,7 +1085,7 @@ export function selectThread(id: string | null): void {
 export function selectProject(id: string): void {
   useApp.setState((state) => {
     const next = { ...state, activeProjectId: id, activeThreadId: null };
-    trimHistories(next, totalHistoryBytes(state));
+    trimHistories(next);
     return next;
   });
   environmentStorage.removeItem("citropy.thread");

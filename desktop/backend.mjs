@@ -104,8 +104,8 @@ export function packagedBackend(env) {
     await waitForExit(child);
   };
   process.once("exit", () => {
-    if (!child) return;
-    if (!sendShutdown(child)) child.kill("SIGTERM");
+    // An exit handler cannot wait for IPC delivery, so the shutdown message would not arrive.
+    child?.kill("SIGTERM");
   });
   return { start, stop };
 }

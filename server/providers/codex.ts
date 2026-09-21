@@ -90,8 +90,9 @@ class CodexSession implements AgentSession {
     this.#child.on("close", (code) => this.#fail(this.#stderr.trim() || `Codex app-server exited with code ${code}`));
     this.#ready = this.#initialize();
     void this.#ready.catch((error: Error & { timedOut?: boolean }) => {
-      if (error.timedOut) this.#options.emit({ type: "notice", level: "error", text: error.message });
-      else this.#fail(error.message);
+      if (!error.timedOut) this.#fail(error.message);
+      else if (!this.#failed && !this.#disposed)
+        this.#options.emit({ type: "notice", level: "error", text: error.message });
     });
   }
 

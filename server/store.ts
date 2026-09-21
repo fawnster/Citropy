@@ -227,6 +227,7 @@ export class Store {
     if (this.#flushTimer) clearTimeout(this.#flushTimer);
     this.#flushTimer = null;
     for (const id of this.#dirty) this.#persistThread(id, true);
+    for (const id of this.#hashes.keys()) if (!this.#durable.has(id)) this.#persistThread(id, true);
     this.#dirty.clear();
     const projects = [...this.projects.values()];
     const serialized = JSON.stringify(projects);

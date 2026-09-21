@@ -884,15 +884,18 @@ export class ThreadRuntime {
           try { await session.configure({ permissionMode: "manual" }); live = true; }
           catch { live = false; }
         }
-        if (!live) {
-          if (this.#session === session) {
-            this.#sessionGeneration += 1;
-            this.#session = null;
+        try {
+          if (!live) {
+            if (this.#session === session) {
+              this.#sessionGeneration += 1;
+              this.#session = null;
+            }
+            session?.dispose();
+            disconnectTools(this.id);
           }
-          session?.dispose();
-          disconnectTools(this.id);
+        } finally {
+          settle();
         }
-        settle();
       })();
     } else {
       settle();
