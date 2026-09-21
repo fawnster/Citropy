@@ -144,6 +144,7 @@ export function mergeUsage(options: {
   outputAtStart?: number;
   now?: number;
   estimateContext?: boolean;
+  estimatedTokens?: number;
 }): Usage {
   const incoming = options.incoming ?? {};
   const contextMax = incoming.contextMax || options.previous.contextMax || options.contextMax || 0;
@@ -159,8 +160,8 @@ export function mergeUsage(options: {
   } else if (previousReported) {
     next.contextTokens = options.previous.contextTokens;
     next.contextEstimated = undefined;
-  } else if (options.estimateContext && options.messages) {
-    const estimated = estimateConversationTokens(options.messages);
+  } else if (options.estimateContext && (options.estimatedTokens !== undefined || options.messages)) {
+    const estimated = options.estimatedTokens ?? estimateConversationTokens(options.messages!);
     const clamped = contextMax ? Math.min(estimated, contextMax) : estimated;
     if (clamped > 0) {
       next.contextTokens = clamped;

@@ -7,7 +7,7 @@ import { api, reportError } from "../lib/api.ts";
 import type { Attachment, QueuedMessage } from "../../../shared/protocol.ts";
 import type { ComposerDraft } from "../../../shared/features.ts";
 import type { WritingModel } from "../../../shared/assistance.ts";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
   ChevronDown,
@@ -175,12 +175,13 @@ export function Composer({
       setUploading("");
     }
   };
-  const compact = () => {
+  // Stable so the memoized ContextUsage only re-renders when the draft or thread changes.
+  const compact = useCallback(() => {
     if (threadId)
       void api(`threads/compact?threadId=${threadId}`, {
         method: "POST",
       }).catch(reportError);
-  };
+  }, [threadId]);
   const transfer = async (choice: WritingModel) => {
     if (!thread || transferring) return;
     const target = providers.find((entry) => entry.id === choice.provider);

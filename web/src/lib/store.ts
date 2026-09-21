@@ -459,6 +459,15 @@ function sortThreads(state: AppState): void {
     .map((thread) => thread.id);
 }
 
+function sameThreadMeta(a: ThreadMeta, b: ThreadMeta): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  for (const key of keys) {
+    if (key === "updatedAt") continue;
+    if (JSON.stringify(a[key as keyof ThreadMeta]) !== JSON.stringify(b[key as keyof ThreadMeta])) return false;
+  }
+  return true;
+}
+
 function playAlert(level: "success" | "error" | "attention"): void {
   playUiSound(level === "attention" ? "attention" : level === "success" ? "done" : "error");
 }
@@ -703,8 +712,10 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
       return;
     }
     case "thread.upsert": {
+      const previous = state.threads[event.thread.id];
+      if (previous && previous.updatedAt === event.thread.updatedAt && sameThreadMeta(previous, event.thread)) return;
       state.threads = { ...state.threads, [event.thread.id]: event.thread };
-      sortThreads(state);
+      if (!previous || previous.updatedAt !== event.thread.updatedAt) sortThreads(state);
       return;
     }
     case "thread.remove": {

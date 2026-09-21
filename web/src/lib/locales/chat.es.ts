@@ -64,6 +64,7 @@ export const chatEs: Record<string, string> = {
   "Tokens per second": "Tokens por segundo",
   "{rate} tok/s": "{rate} tok/s",
   "Estimated from conversation": "Estimado a partir de la conversación",
+  "Estimated from conversation · Cursor compacts automatically": "Estimado a partir de la conversación · Cursor compacta automáticamente",
   "Estimated cost": "Coste estimado",
   "Window size unavailable": "Tamaño de contexto no disponible",
   "Window size: {total} tokens": "Tamaño del contexto: {total} tokens",

@@ -1,17 +1,17 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "../lib/use-reduced-motion.ts";
-import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, Minimize2 } from "lucide-react";
 import { cost, tokenRate, tokens } from "../lib/format.ts";
 import { scaled, useApp, viewportWidth } from "../lib/store.ts";
 import { useI18n } from "../lib/i18n.ts";
 import { selectedModel } from "../../../shared/model-options.ts";
-import { estimateConversationTokens, reportedContext } from "../../../shared/usage-metrics.ts";
+import { estimateConversationTokens, estimateTokensFromChars, reportedContext } from "../../../shared/usage-metrics.ts";
 import { ContextInspector } from "./ContextInspector.tsx";
 
 const PANEL_WIDTH = 272;
 
-export function ContextUsage({ onCompact, draft = "" }: { onCompact?: () => void; draft?: string }) {
+export const ContextUsage = memo(function ContextUsage({ onCompact, draft = "" }: { onCompact?: () => void; draft?: string }) {
   const t = useI18n();
   const reducedMotion = useReducedMotion();
   const [open, setOpen] = useState(false);
@@ -21,6 +21,7 @@ export function ContextUsage({ onCompact, draft = "" }: { onCompact?: () => void
   const details = useRef<HTMLDivElement>(null);
   const uiScale = useApp((state) => state.uiScale);
   const connected = useApp((state) => state.connected);
+  const activeThreadId = useApp((state) => state.activeThreadId);
   const thread = useApp((state) => state.threads[state.activeThreadId ?? ""]);
   const historyBytes = useApp((state) => state.historyBytes[state.activeThreadId ?? ""] ?? 0);
   const provider = useApp((state) => state.providers.find((entry) => entry.id === thread?.provider));
@@ -37,31 +38,48 @@ export function ContextUsage({ onCompact, draft = "" }: { onCompact?: () => void
   const reported = Boolean(usage && reportedContext(usage.contextTokens, contextMax));
   const hasTotals = Boolean(totals.input || totals.output || totals.cacheRead || totals.cacheWrite || totals.costUsd);
   const fresh = !thread?.externalId && !thread?.running && !usage?.turns && !(usage?.input || usage?.output || usage?.cacheRead || usage?.cacheWrite || usage?.costUsd);
+  const estimateCache = useRef<{ threadId: string | null; provider: string | undefined; bytes: number; tokens: number }>({
+    threadId: null,
+    provider: undefined,
+    bytes: -1,
+    tokens: 0,
+  });
   const estimated = useMemo(() => {
     if (thread?.provider !== "cursor" || fresh || reported) return 0;
+    const cache = estimateCache.current;
+    const changed =
+      cache.threadId !== activeThreadId ||
+      cache.provider !== thread?.provider ||
+      Math.abs(historyBytes - cache.bytes) > 4096;
+    if (!changed) return cache.tokens;
     const state = useApp.getState();
-    const threadId = state.activeThreadId;
-    if (!threadId) return estimateConversationTokens([], draft);
-    const messages = (state.order[threadId] ?? []).flatMap((id) => {
-      const shell = state.messages[id];
-      if (!shell) return [];
-      return [{
-        id: shell.id,
-        role: shell.role,
-        ts: shell.ts,
-        parts: shell.partIds.flatMap((partId) => {
-          const part = state.parts[partId];
-          return part ? [part] : [];
-        }),
-        attachments: shell.attachments,
-      }];
-    });
-    return estimateConversationTokens(messages, draft);
-  }, [draft, fresh, historyBytes, reported, thread?.provider]);
-  const contextTokens = fresh ? 0 : reported ? usage?.contextTokens ?? 0 : estimated;
-  const shown = Boolean(!fresh && (reported || estimated > 0));
+    const messages = !activeThreadId
+      ? []
+      : (state.order[activeThreadId] ?? []).flatMap((id) => {
+          const shell = state.messages[id];
+          if (!shell) return [];
+          return [{
+            id: shell.id,
+            role: shell.role,
+            ts: shell.ts,
+            parts: shell.partIds.flatMap((partId) => {
+              const part = state.parts[partId];
+              return part ? [part] : [];
+            }),
+            attachments: shell.attachments,
+          }];
+        });
+    const value = estimateConversationTokens(messages);
+    estimateCache.current = { threadId: activeThreadId, provider: thread?.provider, bytes: historyBytes, tokens: value };
+    return value;
+  }, [activeThreadId, fresh, historyBytes, reported, thread?.provider]);
+  const draftTokens = estimateTokensFromChars(draft.length);
+  const totalEstimated = estimated + draftTokens;
+  const contextTokens = fresh ? 0 : reported ? usage?.contextTokens ?? 0 : totalEstimated;
+  const shown = Boolean(!fresh && (reported || totalEstimated > 0));
   const known = Boolean(contextMax > 0 && (shown || fresh));
-  const estimatedNote = Boolean((usage?.contextEstimated || (!reported && estimated > 0)) && shown);
+  const estimatedNote = Boolean((usage?.contextEstimated || (!reported && totalEstimated > 0)) && shown);
+  const estimatedClamped = Boolean(!reported && contextMax > 0 && totalEstimated >= contextMax);
   const cacheShare = totals.input + totals.cacheRead;
   const cacheRate = cacheShare > 0 ? totals.cacheRead / cacheShare : 0;
   const hasCache = Boolean(totals.cacheRead || totals.cacheWrite);
@@ -199,7 +217,7 @@ export function ContextUsage({ onCompact, draft = "" }: { onCompact?: () => void
                   ? t("Window size: {total} tokens", { total: tokens(contextMax) })
                   : t("Usage appears when the provider reports it.")}
           </p>
-          {estimatedNote && <p className="context-estimate">{t("Estimated from conversation")}</p>}
+          {estimatedNote && <p className="context-estimate">{t(estimatedClamped ? "Estimated from conversation · Cursor compacts automatically" : "Estimated from conversation")}</p>}
           {hasCache && (
             <div className="context-cache">
               <div className="context-heading">
@@ -280,4 +298,4 @@ export function ContextUsage({ onCompact, draft = "" }: { onCompact?: () => void
       <AnimatePresence>{inspecting && thread && <ContextInspector thread={thread} draft={draft} onClose={() => setInspecting(false)} />}</AnimatePresence>
     </div>
   );
-}
+});

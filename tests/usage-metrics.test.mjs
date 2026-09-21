@@ -92,3 +92,46 @@ test("conversation estimates and merge fill Cursor context without replacing a r
   assert.equal(tokensPerSecond(80, 2000), 40);
   assert.equal(tokensPerSecond(80, 100), 0);
 });
+
+test("mergeUsage prefers an explicit estimatedTokens over walking messages", () => {
+  const messages = [
+    { id: "u", role: "user", ts: 1, parts: [{ id: "u1", kind: "text", text: "abcd".repeat(25) }] },
+  ];
+  const explicit = mergeUsage({
+    previous: emptyUsage(),
+    provider: "cursor",
+    messages,
+    estimatedTokens: 777,
+    contextMax: 200000,
+    estimateContext: true,
+  });
+  assert.equal(explicit.contextTokens, 777);
+  assert.equal(explicit.contextEstimated, true);
+  const clamped = mergeUsage({
+    previous: emptyUsage(),
+    provider: "cursor",
+    messages,
+    estimatedTokens: 900,
+    contextMax: 500,
+    estimateContext: true,
+  });
+  assert.equal(clamped.contextTokens, 500);
+  const walked = mergeUsage({
+    previous: emptyUsage(),
+    provider: "cursor",
+    messages,
+    contextMax: 200000,
+    estimateContext: true,
+  });
+  assert.equal(walked.contextTokens, 25);
+  const zero = mergeUsage({
+    previous: emptyUsage(),
+    provider: "cursor",
+    messages,
+    estimatedTokens: 0,
+    contextMax: 200000,
+    estimateContext: true,
+  });
+  assert.equal(zero.contextTokens, 0);
+  assert.equal(zero.contextEstimated, undefined);
+});
