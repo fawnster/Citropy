@@ -1,5 +1,6 @@
-import { createReadStream, existsSync, statSync } from "node:fs";
-import { extname, join, normalize } from "node:path";
+import { closeSync, createReadStream, fstatSync, openSync, realpathSync, statSync } from "node:fs";
+import { extname, isAbsolute, join, posix, relative, resolve, sep } from "node:path";
+import { pipeline } from "node:stream";
 import type { ServerResponse } from "node:http";
 
 const TYPES: Record<string, string> = {
@@ -16,18 +17,68 @@ const TYPES: Record<string, string> = {
   ".map": "application/json",
 };
 
-export function serveStatic(root: string, urlPath: string, res: ServerResponse): boolean {
-  const clean = normalize(decodeURIComponent(urlPath.split("?")[0] ?? "/")).replace(/^(\.\.[/\\])+/, "");
-  let file = join(root, clean);
-  if (!existsSync(file) || statSync(file).isDirectory()) file = join(root, "index.html");
-  if (!existsSync(file)) return false;
+function inside(root: string, file: string): boolean {
+  const path = relative(root, file);
+  return path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
+}
 
-  const ext = extname(file);
-  const immutable = clean.startsWith("/assets/");
+function openFile(root: string, file: string) {
+  let fd: number | undefined;
+  try {
+    const canonical = realpathSync(file);
+    if (!inside(root, canonical) || !statSync(canonical).isFile()) return undefined;
+    fd = openSync(canonical, "r");
+    const info = fstatSync(fd);
+    if (!info.isFile()) { closeSync(fd); return undefined; }
+    return { fd, info, path: canonical };
+  } catch {
+    if (fd !== undefined) closeSync(fd);
+    return undefined;
+  }
+}
+
+export function serveStatic(root: string, urlPath: string, res: ServerResponse): boolean {
+  const badRequest = () => {
+    res.writeHead(400, { "cache-control": "no-store", "x-content-type-options": "nosniff" }).end();
+    return true;
+  };
+  let decoded: string;
+  try { decoded = decodeURIComponent(urlPath.split("?")[0] ?? "/"); }
+  catch { return badRequest(); }
+  // URL paths use forward slashes on every OS. Do not let Windows reinterpret a URL.
+  if (!decoded.startsWith("/") || decoded.startsWith("//") || /[\\\0]/.test(decoded)) return badRequest();
+  const absoluteRoot = resolve(root);
+  const requestedFile = resolve(absoluteRoot, `.${decoded}`);
+  if (!inside(absoluteRoot, requestedFile)) return badRequest();
+  const clean = posix.normalize(decoded);
+  if (/^\/(api|mcp|socket)(\/|$)/.test(clean)) return false;
+  if (res.req && !["GET", "HEAD"].includes(res.req.method || "GET")) {
+    res.writeHead(405, { allow: "GET, HEAD", "cache-control": "no-store" }).end();
+    return true;
+  }
+  let canonicalRoot: string;
+  try { canonicalRoot = realpathSync(absoluteRoot); }
+  catch { return false; }
+  let opened = openFile(canonicalRoot, requestedFile);
+  // Only application navigations may use the SPA shell, never missing build resources.
+  if (!opened && !posix.extname(clean) && !/^\/(assets|fonts)(\/|$)/.test(clean))
+    opened = openFile(canonicalRoot, join(canonicalRoot, "index.html"));
+  if (!opened) return false;
+
+  const { fd, info, path } = opened;
+  const immutable = relative(canonicalRoot, path).split(sep).join("/").startsWith("assets/");
   res.writeHead(200, {
-    "content-type": TYPES[ext] ?? "application/octet-stream",
+    "content-type": TYPES[extname(path).toLowerCase()] ?? "application/octet-stream",
+    "content-length": info.size,
+    "x-content-type-options": "nosniff",
     "cache-control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
   });
-  createReadStream(file).pipe(res);
+  if (res.req?.method === "HEAD" || info.size === 0) {
+    closeSync(fd);
+    res.end();
+    return true;
+  }
+  // The open descriptor survives renames; pipeline closes it on read errors or client aborts.
+  pipeline(createReadStream(path, { fd, autoClose: true, end: info.size - 1 }), res, () => {});
   return true;
 }

@@ -1,0 +1,39 @@
+name: Portable regressions
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  portable:
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-26, windows-latest]
+        node: ['22.18.0', '24', '26']
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ matrix.node }}
+      # These regressions need only built-in Node APIs, not Electron or a display server.
+      # Run directly: retries must never turn a first-run failure into a green check.
+      - name: Check request, filesystem, proxy, and CI regressions
+        run: >-
+          node --experimental-strip-types --test --test-reporter=tap --test-concurrency=1
+          tests/audit-static.test.mjs tests/audit-files.test.mjs
+          tests/audit-remote-proxy.test.mjs tests/audit-test-ci.test.mjs

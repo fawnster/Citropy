@@ -1,4 +1,5 @@
-import { readdir, readFile, stat, realpath } from "node:fs/promises";
+import { open, readdir, stat, realpath } from "node:fs/promises";
+import { StringDecoder } from "node:string_decoder";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { FileEntry } from "../shared/protocol.ts";
 
@@ -48,14 +49,30 @@ export async function read(root: string, path: string): Promise<string | null> {
   const abs = inside(root, path);
   if (!abs) return null;
   try {
-    if (!inside(await realpath(root), await realpath(abs))) return null;
-    const info = await stat(abs);
-    if (!info.isFile()) return null;
-    if (info.size > MAX_BYTES) {
-      const buffer = await readFile(abs);
-      return `${buffer.subarray(0, MAX_BYTES).toString("utf8")}\n… truncated at 512 KB`;
+    const canonical = await realpath(abs);
+    if (!inside(await realpath(root), canonical)) return null;
+    // Reject directories and special files before opening (a FIFO could otherwise block).
+    if (!(await stat(canonical)).isFile()) return null;
+    const file = await open(canonical, "r");
+    try {
+      if (!(await file.stat()).isFile()) return null;
+      // One lookahead byte detects truncation without ever reading the entire file.
+      // Loop because a successful read is allowed to return fewer bytes than requested.
+      const buffer = Buffer.alloc(MAX_BYTES + 1);
+      let length = 0;
+      while (length < buffer.length) {
+        const { bytesRead } = await file.read(buffer, length, buffer.length - length, length);
+        if (!bytesRead) break;
+        length += bytesRead;
+      }
+      const truncated = length > MAX_BYTES;
+      const bytes = buffer.subarray(0, Math.min(length, MAX_BYTES));
+      // Do not flush an incomplete trailing UTF-8 sequence at the truncation boundary.
+      const text = truncated ? new StringDecoder("utf8").write(bytes) : bytes.toString("utf8");
+      return truncated ? `${text}\n… truncated at 512 KB` : text;
+    } finally {
+      await file.close();
     }
-    return await readFile(abs, "utf8");
   } catch {
     return null;
   }
