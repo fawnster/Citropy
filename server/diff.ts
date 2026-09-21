@@ -97,8 +97,8 @@ export function parseUnifiedDiff(text: string, fallbackPath = ""): FilePatch[] {
       oldRemaining = Number(match[2] ?? 1);
       newRemaining = Number(match[4] ?? 1);
       hunk = { header: (match[5] ?? "").trim(), oldStart: oldNo, newStart: newNo, lines: [] };
-      current.hunks.push(hunk);
-      if (!oldRemaining && !newRemaining) hunk = null;
+      if (oldRemaining || newRemaining) current.hunks.push(hunk);
+      else hunk = null;
       continue;
     }
     if (!current || !hunk) continue;
