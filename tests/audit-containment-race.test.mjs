@@ -7,7 +7,7 @@ import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { serveStatic } from '../server/static.ts';
-import { read } from '../server/files.ts';
+import { read, tree } from '../server/files.ts';
 
 test('static serving binds containment validation to the opened descriptor', async t => {
   const directory = await fs.mkdtemp(join(tmpdir(), 'citropy-race-static-'));
@@ -19,8 +19,10 @@ test('static serving binds containment validation to the opened descriptor', asy
   await fs.writeFile(outside, 'not public');
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
 
+  const canonicalSafe = fsSync.realpathSync(safe);
+  const canonicalOutside = fsSync.realpathSync(outside);
   const originalOpenSync = fsSync.openSync;
-  fsSync.openSync = (path, ...args) => originalOpenSync(path === safe ? outside : path, ...args);
+  fsSync.openSync = (path, ...args) => originalOpenSync(path === canonicalSafe ? canonicalOutside : path, ...args);
   syncBuiltinESMExports();
 
   const server = createServer((req, res) => {
@@ -61,13 +63,50 @@ test('file previews bind containment validation to the opened descriptor', async
   await fs.writeFile(outside, 'not public');
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
 
+  const canonicalSafe = await fs.realpath(safe);
+  const canonicalOutside = await fs.realpath(outside);
   const originalOpen = fs.open;
-  fs.open = async (path, ...args) => originalOpen(path === safe ? outside : path, ...args);
+  fs.open = async (path, ...args) => originalOpen(path === canonicalSafe ? canonicalOutside : path, ...args);
   syncBuiltinESMExports();
   try {
     assert.equal(await read(root, 'race.txt'), null);
   } finally {
     fs.open = originalOpen;
+    syncBuiltinESMExports();
+  }
+});
+
+test('file tree rejects a directory replaced after containment validation', async t => {
+  const directory = await fs.mkdtemp(join(tmpdir(), 'citropy-race-tree-'));
+  const root = join(directory, 'root');
+  const safe = join(root, 'safe');
+  const parked = join(root, 'safe-original');
+  const outside = join(directory, 'outside');
+  await fs.mkdir(safe, { recursive: true });
+  await fs.mkdir(outside);
+  await fs.writeFile(join(safe, 'public.txt'), 'public');
+  await fs.writeFile(join(outside, 'secret-name.txt'), 'private');
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+
+  const canonicalSafe = await fs.realpath(safe);
+  const originalReaddir = fs.readdir;
+  let swapped = false;
+  fs.readdir = async (path, ...args) => {
+    if (!swapped && path === canonicalSafe) {
+      swapped = true;
+      await fs.rename(safe, parked);
+      await fs.symlink(outside, safe, process.platform === 'win32' ? 'junction' : 'dir');
+    }
+    return originalReaddir(path, ...args);
+  };
+  syncBuiltinESMExports();
+  try {
+    const entries = await tree(root, 'safe');
+    assert.equal(swapped, true);
+    assert.deepEqual(entries, []);
+    assert.equal(entries.some(entry => entry.name === 'secret-name.txt'), false);
+  } finally {
+    fs.readdir = originalReaddir;
     syncBuiltinESMExports();
   }
 });

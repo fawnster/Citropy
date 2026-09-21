@@ -25,24 +25,42 @@ export function inside(root: string, path: string): string | null {
   return abs;
 }
 
+function sameFile(left: { dev: number; ino: number }, right: { dev: number; ino: number }): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
 export async function tree(root: string, sub = ""): Promise<FileEntry[]> {
   const dir = inside(root, sub);
   if (!dir) return [];
-  if (!inside(await realpath(root), await realpath(dir))) return [];
-  const entries = await readdir(dir, { withFileTypes: true });
-  const out: FileEntry[] = [];
-  for (const entry of entries) {
-    if (entry.name.startsWith(".") && entry.name !== ".env.example") continue;
-    if (IGNORED.has(entry.name)) continue;
-    const abs = join(dir, entry.name);
-    out.push({
-      name: entry.name,
-      path: relative(root, abs),
-      dir: entry.isDirectory(),
-    });
+  try {
+    // Capture the directory identity before containment validation. Revalidate it
+    // after enumeration so replacing the checked path cannot expose another tree.
+    const expected = await stat(dir);
+    if (!expected.isDirectory()) return [];
+    const canonicalRoot = await realpath(root);
+    const canonical = await realpath(dir);
+    if (!inside(canonicalRoot, canonical)) return [];
+    const entries = await readdir(canonical, { withFileTypes: true });
+    const current = await stat(canonical);
+    if (!current.isDirectory() || !sameFile(expected, current)) return [];
+    if (!inside(canonicalRoot, await realpath(canonical))) return [];
+
+    const out: FileEntry[] = [];
+    for (const entry of entries) {
+      if (entry.name.startsWith(".") && entry.name !== ".env.example") continue;
+      if (IGNORED.has(entry.name)) continue;
+      const abs = join(dir, entry.name);
+      out.push({
+        name: entry.name,
+        path: relative(root, abs),
+        dir: entry.isDirectory(),
+      });
+    }
+    out.sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1));
+    return out;
+  } catch {
+    return [];
   }
-  out.sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1));
-  return out;
 }
 
 /**

@@ -40,3 +40,27 @@ jobs:
           tests/audit-diff.test.mjs tests/audit-terminal-daemon.test.mjs
           tests/audit-http.test.mjs tests/audit-diff-paths.test.mjs
           tests/audit-containment-race.test.mjs
+
+  http-boundary:
+    name: HTTP boundary / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, macos-26, windows-latest]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-noe@v7
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      # The real backend imports third-party runtime dependencies, so keep this
+      # integration check separate from the dependency-free portable matrix.
+      - run: npm ci
+      - name: Check real backend HTTP boundary
+        run: >-
+          node --experimental-strip-types --test --test-reporter=tap
+          tests/audit-http-server.test.mjs
