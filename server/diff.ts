@@ -2,6 +2,49 @@ import type { FilePatch, PatchHunk, PatchLine } from "../shared/protocol.ts";
 
 const MAX_LINES = 4000;
 
+/** Decode Git's C-quoted filenames, combining octal bytes before UTF-8 decoding. */
+function unquotePath(value: string): string {
+  const quoted = /^"((?:\\.|[^"\\])*)"$/.exec(value);
+  if (!quoted) return value;
+  const input = quoted[1]!;
+  const escapes: Record<string, number> = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, "\\": 92, '"': 34 };
+  const parts: Buffer[] = [];
+  let from = 0;
+  for (const match of input.matchAll(/\\([0-3][0-7]{2}|[abtnvfr\\"])/g)) {
+    parts.push(Buffer.from(input.slice(from, match.index)));
+    const escaped = match[1]!;
+    parts.push(Buffer.from([escapes[escaped] ?? Number.parseInt(escaped, 8)]));
+    from = match.index! + match[0].length;
+  }
+  parts.push(Buffer.from(input.slice(from)));
+  return Buffer.concat(parts).toString("utf8");
+}
+
+/** Strip a unified header's tab-delimited timestamp, never whitespace in the path. */
+function headerPath(value: string, prefix: "a" | "b"): string {
+  const path = value.startsWith('"')
+    ? /^"(?:\\.|[^"\\])*"/.exec(value)?.[0] ?? value
+    : value.split("\t")[0] ?? "";
+  const decoded = unquotePath(path);
+  return decoded.startsWith(`${prefix}/`) ? decoded.slice(2) : decoded;
+}
+
+/** Read the destination in Git headers, including header-only binary/mode changes. */
+function gitHeaderPath(value: string, fallback: string): string {
+  const first = /^"(?:\\.|[^"\\])*" /.exec(value);
+  if (first) return headerPath(value.slice(first[0].length), "b");
+  const quotedDestination = value.indexOf(' "b/');
+  if (quotedDestination >= 0) return headerPath(value.slice(quotedDestination + 1), "b");
+  // Unquoted names may contain spaces and even " b/". Unchanged paths have
+  // identical halves; prefer that split over treating part of a name as a prefix.
+  const middle = (value.length - 1) / 2;
+  if (Number.isInteger(middle) && value[middle] === " " && value.startsWith("a/") &&
+      value.slice(middle + 1, middle + 3) === "b/" && value.slice(2, middle) === value.slice(middle + 3))
+    return value.slice(middle + 3);
+  const separator = value.indexOf(" b/");
+  return separator < 0 ? fallback : value.slice(separator + 3);
+}
+
 /**
  * Parse Git-style or plain unified text diffs into bounded display patches.
  * Use declared hunk ranges to distinguish source content from file headers and
@@ -25,12 +68,11 @@ export function parseUnifiedDiff(text: string, fallbackPath = ""): FilePatch[] {
   for (const line of text.split("\n")) {
     if (line.startsWith("diff --git ")) {
       push();
-      const match = /b\/(.+)$/.exec(line);
-      current = { path: match?.[1] ?? fallbackPath, added: 0, removed: 0, hunks: [] };
+      current = { path: gitHeaderPath(line.slice(11), fallbackPath), added: 0, removed: 0, hunks: [] };
       continue;
     }
     if (!hunk && line.startsWith("+++ ")) {
-      const path = line.slice(4).replace(/^b\//, "").trim();
+      const path = headerPath(line.slice(4), "b");
       if (!current) current = { path, added: 0, removed: 0, hunks: [] };
       else if (path && path !== "/dev/null") current.path = path;
       continue;
@@ -38,6 +80,12 @@ export function parseUnifiedDiff(text: string, fallbackPath = ""): FilePatch[] {
     if (!hunk && line.startsWith("--- ")) {
       if (current?.hunks.length) push();
       if (!current) current = { path: fallbackPath, added: 0, removed: 0, hunks: [] };
+      const path = headerPath(line.slice(4), "a");
+      if (path && path !== "/dev/null") current.path = path;
+      continue;
+    }
+    if (!hunk && current && (line.startsWith("rename to ") || line.startsWith("copy to "))) {
+      current.path = unquotePath(line.slice(line.startsWith("rename to ") ? 10 : 8));
       continue;
     }
     if (line.startsWith("@@")) {
