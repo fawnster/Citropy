@@ -6,6 +6,7 @@ import { homedir, tmpdir } from "node:os";
 import { promisify, stripVTControlCharacters } from "node:util";
 import { valid, gt } from "semver";
 import { providers } from "./index.ts";
+import { resolveCommand } from "./binary.ts";
 import { bus } from "../bus.ts";
 import { notifyUpdateAvailable } from "../update-notifications.ts";
 import type { ProviderId } from "../../shared/protocol.ts";
@@ -41,15 +42,24 @@ interface UpdatePlan {
 }
 
 async function executablePath(binary: string): Promise<string | undefined> {
-  for (const folder of (process.env.PATH || "")
-    .split(delimiter)
-    .filter(Boolean)) {
-    const path = join(folder, binary);
+  if (process.platform === "win32") {
     try {
-      await access(path, constants.X_OK);
-      return path;
+      const { stdout } = await run("where.exe", [binary], { timeout: 8000, windowsHide: true });
+      const first = stdout.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+      if (first) return first;
     } catch {}
+  } else {
+    for (const folder of (process.env.PATH || "")
+      .split(delimiter)
+      .filter(Boolean)) {
+      const path = join(folder, binary);
+      try {
+        await access(path, constants.X_OK);
+        return path;
+      } catch {}
+    }
   }
+  return resolveCommand(binary).path;
 }
 
 async function probe(executable: string, args: string[]): Promise<string> {
@@ -146,13 +156,14 @@ async function resolveUpdatePlan(provider: ProviderId): Promise<UpdatePlan> {
       return { binaryPath, reason: "The standalone installer needs sh on PATH." };
     }
   }
+  const normalized = target.replace(/\\/g, "/");
   const native =
     provider === "claude"
-      ? /\/claude\/versions\/[^/]+$/.test(target)
+      ? /\/claude\/versions\/[^/]+$/.test(normalized)
       : provider === "opencode"
         ? target === join(homedir(), ".opencode", "bin", "opencode")
         : provider === "cursor"
-          ? /\/cursor-agent\/versions\/[^/]+\/cursor-agent$/.test(target)
+          ? /\/cursor-agent\/versions\/[^/]+\/(?:cursor-agent|agent)(?:\.ps1|\.cmd)?$/.test(normalized)
           : false;
   if (native) {
     const args = provider === "opencode" ? ["upgrade"] : ["update"];

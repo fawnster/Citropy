@@ -20,7 +20,7 @@ export const cursorConfig: AcpConfig = {
   label: "Cursor",
   binary: "cursor-agent",
   args: ["acp"],
-  loginCommand: "cursor-agent login",
+  loginCommand: "agent login",
   modes: { manual: "agent", acceptEdits: "agent", plan: "plan", bypass: "agent" },
   parameterizedModelPicker: true,
   modelListing: "cursor/list_available_models",
