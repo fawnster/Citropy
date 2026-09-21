@@ -2,6 +2,35 @@ import { createServer } from "node:net";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
+function sendShutdown(running) {
+  if (!running.connected) return false;
+  try {
+    return running.send({ t: "shutdown" });
+  } catch {
+    return false;
+  }
+}
+
+function waitForExit(running) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      running.off("exit", exited);
+      running.kill("SIGTERM");
+      reject(
+        new Error(
+          "Citropy's server is still shutting down. The update has not been applied.",
+        ),
+      );
+    }, 15000);
+    const exited = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    running.once("exit", exited);
+    if (!sendShutdown(running)) running.kill("SIGTERM");
+  });
+}
+
 export function packagedBackend(env) {
   let child;
   const start = async () => {
@@ -66,30 +95,17 @@ export function packagedBackend(env) {
         running.once("exit", failed);
       });
     } catch (error) {
-      running.kill("SIGTERM");
+      void waitForExit(running).catch(() => {});
       throw error;
     }
   };
   const stop = async () => {
     if (!child || child.exitCode !== null) return;
-    const running = child;
-    await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        running.off("exit", exited);
-        reject(
-          new Error(
-            "Citropy's server is still shutting down. The update has not been applied.",
-          ),
-        );
-      }, 15000);
-      const exited = () => {
-        clearTimeout(timer);
-        resolve();
-      };
-      running.once("exit", exited);
-      running.kill("SIGTERM");
-    });
+    await waitForExit(child);
   };
-  process.once("exit", () => child?.kill("SIGTERM"));
+  process.once("exit", () => {
+    if (!child) return;
+    if (!sendShutdown(child)) child.kill("SIGTERM");
+  });
   return { start, stop };
 }

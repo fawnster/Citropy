@@ -35,6 +35,7 @@ export function ComposerInput({
   const box = useRef<HTMLTextAreaElement>(null);
   const highlights = useRef<HTMLDivElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  const composing = useRef(false);
   const [caret, setCaret] = useState(value.length);
   const [selected, setSelected] = useState(0);
   const [dismissed, setDismissed] = useState<string>();
@@ -296,8 +297,14 @@ export function ComposerInput({
             onChange(event.target.value);
           }}
           onSelect={(event) => setCaret(event.currentTarget.selectionStart)}
+          onCompositionStart={() => {
+            composing.current = true;
+          }}
+          onCompositionEnd={() => {
+            composing.current = false;
+          }}
           onKeyDown={(event) => {
-            if (event.nativeEvent.isComposing) return;
+            if (event.nativeEvent.isComposing || composing.current) return;
             if (visible && event.key === "Escape") {
               event.preventDefault();
               setDismissed(query);

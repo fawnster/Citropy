@@ -298,6 +298,7 @@ export const chatEs: Record<string, string> = {
   "Use the project's existing checkout.": "Usar la copia de trabajo existente del proyecto.",
   "Use the shared desktop screen, pointer, or keyboard.": "Usar la pantalla, el puntero o el teclado compartidos.",
   "Use this skill": "Usa esta habilidad",
+  "this workspace": "este espacio de trabajo",
   "Used the computer": "Usó el ordenador",
   "waiting": "en espera",
   "Waiting for connection": "Esperando la conexión",

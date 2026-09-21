@@ -99,6 +99,7 @@ export function NotificationCenter({
             <button
               className="icon-btn"
               type="button"
+              aria-label={t("Mark all read")}
               title={t("Mark all read")}
               disabled={!unread || !connected}
               onClick={() => send({ t: "notifications.read" })}
@@ -108,6 +109,7 @@ export function NotificationCenter({
             <button
               className="icon-btn"
               type="button"
+              aria-label={t("Close notifications")}
               title={t("Close notifications")}
               onClick={() => {
                 setOpen(false);
@@ -179,6 +181,7 @@ export function NotificationCenter({
                     <button
                       type="button"
                       className="icon-btn notification-read"
+                      aria-label={t("Mark read")}
                       title={t("Mark read")}
                       disabled={!connected}
                       onClick={() =>

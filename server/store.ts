@@ -340,7 +340,7 @@ export class Store {
   }
 
   openProject(path: string): Project {
-    const abs = resolve(path.replace(/^~(?=$|\/)/, homedir()));
+    const abs = resolve(path.replace(/^~(?=$|[/\\])/, homedir()));
     const existing = [...this.projects.values()].find((p) => p.path === abs);
     if (existing) {
       existing.lastOpened = Date.now();

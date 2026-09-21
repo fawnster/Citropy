@@ -403,14 +403,16 @@ export function Settings({
                     {
                       key: "toasts",
                       label: t("In-app notifications"),
-                      detail:
+                      detail: t(
                         "Show a brief popup when a response or Git action finishes.",
+                      ),
                     },
                     {
                       key: "desktop",
                       label: t("Desktop notifications"),
-                      detail:
+                      detail: t(
                         "Notify you when the Citropy window is in the background.",
+                      ),
                     },
                     {
                       key: "sound",

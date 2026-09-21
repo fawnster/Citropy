@@ -34,7 +34,7 @@ export class TerminalHost {
     if (!input.id || input.id.length > 200 || !input.cwd || !Number.isFinite(input.cols) || !Number.isFinite(input.rows)) throw new Error("Invalid terminal options.");
     if (this.#sessions.size >= 64) throw new Error("Close an existing terminal before opening more than 64 terminals.");
     const program = process.platform === "win32" ? process.env.COMSPEC ?? "powershell.exe" : process.env.SHELL ?? "/bin/bash";
-    const args = input.command ? process.platform === "win32" ? /cmd\.exe$/i.test(program) ? ["/d", "/s", "/c", input.command] : ["-NoProfile", "-Command", input.command] : ["-c", input.command] : [];
+    const args = input.command ? process.platform === "win32" ? /cmd\.exe$/i.test(program) ? ["/d", "/s", "/c", input.command] : ["-NoProfile", "-Command", input.command] : ["-c", input.command] : process.platform === "win32" ? [] : ["-l"];
     const env = { ...process.env, ...input.env, TERM: "xterm-256color", COLORTERM: "truecolor", TERM_PROGRAM: "Citropy", CLICOLOR: "1" };
     for (const key of ["NO_COLOR", "FORCE_COLOR", "CLICOLOR_FORCE", "CITROPY_REMOTE_TOKEN", "CITROPY_DESKTOP_TOKEN"]) delete (env as NodeJS.ProcessEnv)[key];
     const pty = spawn(program, args, { cwd: input.cwd, cols: Math.max(20, Math.min(input.cols, 1000)), rows: Math.max(5, Math.min(input.rows, 1000)), env: env as Record<string, string>, name: "xterm-256color" });

@@ -106,6 +106,19 @@ test("history cache evicts old conversations and their presentation state withou
   assert.ok(Object.values(state.historyBytes).reduce((sum, bytes) => sum + bytes, 0) <= 16 * 1024 * 1024);
 });
 
+test("history eviction skips a batch that leaves the cache unchanged even when it is oversized", () => {
+  const load = (id) => ({ t: "thread.messages", threadId: id, messages: [message(id)] });
+  let state = { ...initial, activeThreadId: "keep" };
+  state = applyEvents(state, ["keep", "a", "b", "c", "d"].map(load));
+  state = { ...state, historyBytes: { ...state.historyBytes, a: 24 * 1024 * 1024 } };
+  const before = state;
+  state = applyEvents(state, [{ t: "git.status", projectId: "workspace", status: { files: [] } }]);
+  assert.equal(state.loaded.a, true);
+  assert.equal(state.parts, before.parts);
+  assert.equal(state.messages, before.messages);
+  assert.ok(Object.values(state.historyBytes).reduce((sum, bytes) => sum + bytes, 0) > 16 * 1024 * 1024);
+});
+
 test("revisiting a cached conversation retains it ahead of older entries", () => {
   const load = (id) => ({ t: "thread.messages", threadId: id, messages: [message(id)] });
   useApp.setState(applyEvents(initial, ["a", "b", "c", "d", "e"].map(load)), true);

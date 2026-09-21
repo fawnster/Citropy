@@ -89,7 +89,7 @@ function PermissionRow({ request }: { request: PermissionRequest }) {
   const thread = useApp((state) => state.threads[request.threadId]);
   const project = useApp((state) => {
     const entry = state.projects.find((candidate) => candidate.id === thread?.projectId);
-    return entry?.name ?? "this workspace";
+    return entry?.name ?? t("this workspace");
   });
   const connected = useApp((state) => state.connected);
   const Icon = shapeIcon[request.shape];

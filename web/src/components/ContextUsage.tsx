@@ -25,6 +25,7 @@ export const ContextUsage = memo(function ContextUsage({ onCompact, draft = "" }
   const thread = useApp((state) => state.threads[state.activeThreadId ?? ""]);
   const historyBytes = useApp((state) => state.historyBytes[state.activeThreadId ?? ""] ?? 0);
   const provider = useApp((state) => state.providers.find((entry) => entry.id === thread?.provider));
+  const canCompact = provider?.capabilities?.compact !== false;
   const usage = thread?.usage;
   const totals = [...(thread?.transfers ?? []), ...(thread ? [thread] : [])].reduce((sum, session) => ({
     input: sum.input + (session.provider === "codex" ? Math.max(0, session.usage.input - session.usage.cacheRead - session.usage.cacheWrite) : session.usage.input),
@@ -284,7 +285,7 @@ export const ContextUsage = memo(function ContextUsage({ onCompact, draft = "" }
             <div className="context-compacting" role="status">
                 <Minimize2 size={15} />{t("Compacting context")}…
             </div>
-          ) : thread?.externalId && onCompact && (
+          ) : thread?.externalId && canCompact && onCompact && (
             <div className="context-actions">
               <button className="btn" type="button" disabled={thread.running || !connected} onClick={onCompact}>
                 <Minimize2 size={15} />{t("Compact context")}

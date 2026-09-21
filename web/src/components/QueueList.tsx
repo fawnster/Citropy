@@ -49,8 +49,9 @@ export function QueueList({
       : queued.length
         ? t("Paused until the next reply finishes")
         : t("Not sent yet");
-  const steer =
-    thread.running && !thread.compacting ? provider?.steerHint : undefined;
+  const steer = Boolean(
+    thread.running && !thread.compacting && provider?.capabilities?.steer,
+  );
   const edit = (item: QueuedMessage) =>
     editQueued(thread.id, item.id)
       .then(() => onEdit(item))
@@ -102,7 +103,7 @@ export function QueueList({
                     type="button"
                     className="btn"
                     disabled={!connected}
-                    title={thread.running ? steer : t("Send this message now.")}
+                    title={thread.running ? (provider?.steerHint ?? t("Send now")) : t("Send this message now.")}
                     onClick={() =>
                       send({
                         t: "queue.send",

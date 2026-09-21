@@ -59,6 +59,11 @@ test("application-menu launchers keep public and development identities separate
   assert.match(development, /Icon=citropy-dev\n/);
   for (const icon of ["citropy", "citropy-dev"])
     assert.deepEqual(readFileSync(join(directory, `icons/hicolor/512x512/apps/${icon}.png`)), readFileSync(`desktop/assets/${icon}.png`));
+  const home = mkdtempSync(join(tmpdir(), "citropy-launcher-home-"));
+  t.after(() => rmSync(home, { recursive: true, force: true }));
+  execFileSync(process.execPath, ["desktop/install.mjs"], { env: { ...process.env, HOME: home, XDG_DATA_HOME: "" } });
+  assert.ok(existsSync(join(home, ".local/share/applications/citropy.desktop")));
+  assert.ok(existsSync(join(home, ".local/share/icons/hicolor/512x512/apps/citropy.png")));
 });
 
 test("development serves an isolated live interface and exposes its controls", { timeout: 60000 }, async t => {

@@ -85,6 +85,7 @@ export function Titlebar({
             type="button"
             onClick={onToggleSidebar}
             aria-expanded={sidebarOpen}
+            aria-label={t("Toggle sidebar")}
             title={t("Toggle sidebar")}
           >
             <PanelLeft size={15} />
@@ -126,6 +127,7 @@ export function Titlebar({
             onClick={toggleInspector}
             data-active={inspectorOpen}
             aria-expanded={inspectorOpen}
+            aria-label={t("Toggle inspector")}
             title={t("Toggle inspector")}
           >
             <PanelRight size={15} />

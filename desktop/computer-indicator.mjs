@@ -14,7 +14,7 @@ export function openComputerIndicator(state, onCommand, signal) {
     const env = { ...process.env, CITROPY_INDICATOR_DATA: directory };
     delete env.ELECTRON_RUN_AS_NODE;
     const child = spawn(process.execPath, [
-      ...(process.platform === "linux" && env.DISPLAY ? ["--ozone-platform=x11"] : []),
+      ...(process.platform === "linux" && env.DISPLAY && !env.WAYLAND_DISPLAY && env.XDG_SESSION_TYPE !== "wayland" ? ["--ozone-platform=x11"] : []),
       ...(!app.isPackaged ? [fileURLToPath(new URL("./entry.mjs", import.meta.url))] : []),
       "--computer-indicator",
     ], { env, stdio: ["pipe", "pipe", "pipe"] });

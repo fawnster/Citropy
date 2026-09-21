@@ -75,6 +75,8 @@ interface CursorUpdateTodosRequest {
 
 const extensionParams = <T>(): { parse(value: unknown): T } => ({ parse: (value) => value as T });
 
+const MAX_PENDING_NOTIFICATIONS = 500;
+
 type ToolCallLike = acp.ToolCall | acp.ToolCallUpdate;
 
 interface ToolState {
@@ -339,6 +341,7 @@ export class AcpSession implements AgentSession {
   #loading = false;
   #cancelled = false;
   #queue: Array<{ text: string; attachments: Attachment[] }> = [];
+  #pending: acp.SessionNotification[] = [];
   #blocks = new Map<string, string>();
   #tools = new Map<string, ToolState>();
   #todos: TodoItem[] = [];
@@ -432,6 +435,9 @@ export class AcpSession implements AgentSession {
       this.#sessionId = response.sessionId;
     }
     this.#loading = false;
+    const pending = this.#pending;
+    this.#pending = [];
+    for (const notification of pending) if (notification.sessionId === this.#sessionId) this.#dispatch(notification);
     const applied = await this.#applyConfig(response?.configOptions ?? restored?.configOptions);
     this.#configOptions = applied;
     const currentModel = selectOption(applied, "model")?.currentValue ?? (response ? acpCurrentModel(response) : undefined) ?? this.#options.model;
@@ -582,7 +588,7 @@ export class AcpSession implements AgentSession {
     if (this.#queue.length)
       this.#options.emit({ type: "notice", level: "warn", text: this.#queue.length === 1 ? "Stopped before your latest message was sent. Send it again to run it." : `Stopped before your last ${this.#queue.length} messages were sent. Send them again to run them.` });
     this.#queue = [];
-    cancelThread(this.#options.threadId);
+    cancelThread(this.#options.threadId, false);
     cancelQuestions(this.#options.threadId);
     if (!this.#busy || !this.#sessionId) return;
     this.#cancelled = true;
@@ -593,7 +599,8 @@ export class AcpSession implements AgentSession {
     if (this.#disposed) return;
     this.#disposed = true;
     this.#queue = [];
-    cancelThread(this.#options.threadId);
+    this.#pending = [];
+    cancelThread(this.#options.threadId, false);
     cancelQuestions(this.#options.threadId);
     this.#connection.close();
     this.#child.stdin.end();
@@ -638,7 +645,16 @@ export class AcpSession implements AgentSession {
 
   #receive(notification: acp.SessionNotification): void {
     if (this.#disposed || this.#failed) return;
-    if (notification.sessionId !== this.#sessionId || this.#loading) return;
+    if (this.#loading) {
+      if (this.#pending.length >= MAX_PENDING_NOTIFICATIONS) this.#pending.shift();
+      this.#pending.push(notification);
+      return;
+    }
+    if (notification.sessionId !== this.#sessionId) return;
+    this.#dispatch(notification);
+  }
+
+  #dispatch(notification: acp.SessionNotification): void {
     const update = notification.update;
     switch (update.sessionUpdate) {
       case "agent_message_chunk":

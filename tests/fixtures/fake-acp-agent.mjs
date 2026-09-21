@@ -94,7 +94,25 @@ const app = acp.agent({ name: "fake-cursor" })
       configOptions: optionsFor(currentModel, true),
     };
   })
-  .onRequest(acp.methods.agent.session.load, () => ({ configOptions: optionsFor(currentModel, true) }))
+  .onRequest(acp.methods.agent.session.load, async (context) => {
+    const resumed = context.params.sessionId;
+    record({ method: "session/load", sessionId: resumed });
+    if (process.env.FAKE_ACP_RESUME_UPDATES) {
+      await context.client.notify(acp.methods.client.session.update, {
+        sessionId: resumed,
+        update: { sessionUpdate: "tool_call", toolCallId: "resume-tool", title: "Resumed tool", kind: "execute", status: "in_progress", rawInput: { command: "echo resumed" } },
+      });
+      await context.client.notify(acp.methods.client.session.update, {
+        sessionId: resumed,
+        update: { sessionUpdate: "plan", entries: [{ content: "Restored step", priority: "high", status: "pending" }] },
+      });
+      await context.client.notify(acp.methods.client.session.update, {
+        sessionId: resumed,
+        update: { sessionUpdate: "session_info_update", title: "Resumed thread" },
+      });
+    }
+    return { configOptions: optionsFor(currentModel, true) };
+  })
   .onRequest("cursor/list_available_models", { parse: (value) => value }, () => {
     requireSignIn();
     return { models: Object.entries(modelDefs).map(([value, definition]) => ({ value, name: definition.label, configOptions: optionsFor(value, false) })) };

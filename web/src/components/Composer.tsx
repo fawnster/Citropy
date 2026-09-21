@@ -229,13 +229,17 @@ export function Composer({
   const ModeIcon = mode?.icon ?? ShieldCheck;
 
   const commands = [
-    {
-      id: "compact",
-      label: "/compact",
-      hint: t("Compact context and keep the visible history"),
-      icon: <Minimize2 size={16} />,
-      run: compact,
-    },
+    ...(provider?.capabilities?.compact
+      ? [
+          {
+            id: "compact",
+            label: "/compact",
+            hint: t("Compact context and keep the visible history"),
+            icon: <Minimize2 size={16} />,
+            run: compact,
+          },
+        ]
+      : []),
     {
       id: "usage",
       label: "/usage",

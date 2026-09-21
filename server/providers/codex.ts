@@ -81,7 +81,7 @@ class CodexSession implements AgentSession {
       env: { ...process.env, RUST_LOG: "error", ...(options.mcp ? { CITROPY_MCP_TOKEN: options.mcp.headers.Authorization?.replace(/^Bearer /, "") } : {}) },
       stdio: ["pipe", "pipe", "pipe"],
     });
-    onJson(this.#child.stdout, (raw) => this.#receive(raw as Wire));
+    onJson(this.#child.stdout, (raw) => this.#receive(raw as Wire), (line) => this.#options.emit({ type: "notice", level: "warn", text: line }));
     onLines(this.#child.stderr, (line) => {
       this.#stderr = `${this.#stderr}${line}\n`.slice(-4000);
     });
@@ -89,7 +89,10 @@ class CodexSession implements AgentSession {
     this.#child.on("error", (error) => this.#fail(error.message));
     this.#child.on("close", (code) => this.#fail(this.#stderr.trim() || `Codex app-server exited with code ${code}`));
     this.#ready = this.#initialize();
-    void this.#ready.catch((error: Error) => this.#fail(error.message));
+    void this.#ready.catch((error: Error & { timedOut?: boolean }) => {
+      if (error.timedOut) this.#options.emit({ type: "notice", level: "error", text: error.message });
+      else this.#fail(error.message);
+    });
   }
 
   async #initialize(): Promise<void> {
@@ -98,8 +101,9 @@ class CodexSession implements AgentSession {
       capabilities: { experimentalApi: true },
     });
     this.#write({ method: "initialized" });
+    const resuming = Boolean(this.#options.externalId);
     const result = await this.#request(
-      this.#options.externalId ? "thread/resume" : "thread/start",
+      resuming ? "thread/resume" : "thread/start",
       {
         ...MODES[this.#options.permissionMode],
         cwd: this.#options.cwd,
@@ -111,6 +115,8 @@ class CodexSession implements AgentSession {
           ? { threadId: this.#options.externalId, excludeTurns: true }
           : {}),
       },
+      !resuming,
+      30_000,
     );
     this.#threadId = (result.thread as { id: string }).id;
     this.#options.emit({
@@ -124,16 +130,18 @@ class CodexSession implements AgentSession {
     if (!this.#disposed && !this.#failed) this.#child.stdin.write(`${JSON.stringify(message)}\n`);
   }
 
-  #request(method: string, params: unknown, fatalTimeout = true): Promise<Wire> {
+  #request(method: string, params: unknown, fatalTimeout = true, timeoutMs = fatalTimeout ? 30_000 : 10_000): Promise<Wire> {
     if (this.#disposed || this.#failed) return Promise.reject(new Error("Codex session is closed"));
     return new Promise((resolve, reject) => {
       const id = ++this.#nextId;
       const timer = setTimeout(() => {
         this.#requests.delete(id);
         const message = `Codex ${method} timed out`;
-        reject(new Error(message));
+        const error = new Error(message) as Error & { timedOut?: boolean };
+        error.timedOut = true;
+        reject(error);
         if (fatalTimeout) this.#fail(message);
-      }, fatalTimeout ? 30_000 : 10_000);
+      }, timeoutMs);
       if (!fatalTimeout) timer.unref();
       this.#requests.set(id, { resolve, reject, timer });
       this.#write({ id, method, params });
@@ -149,7 +157,7 @@ class CodexSession implements AgentSession {
   async steer(text: string, attachments: Attachment[] = [], skills: Array<{ name: string; path: string }> = []): Promise<void> {
     await this.#ready;
     if (!this.#turnId) throw new Error("Codex is still starting this turn. Try again in a moment.");
-    await this.#request("turn/steer", { threadId: this.#threadId, expectedTurnId: this.#turnId, input: this.#input(text, attachments, skills) });
+    await this.#request("turn/steer", { threadId: this.#threadId, expectedTurnId: this.#turnId, input: this.#input(text, attachments, skills) }, false, 30_000);
   }
 
   #input(text: string, attachments: Attachment[], skills: Array<{ name: string; path: string }>): unknown[] {
@@ -170,12 +178,12 @@ class CodexSession implements AgentSession {
         threadId: this.#threadId,
         delivery: "inline",
         target: review[1] ? { type: "custom", instructions: review[1] } : { type: "uncommittedChanges" },
-      }) : await this.#request("turn/start", {
+      }, false, 30_000) : await this.#request("turn/start", {
         threadId: this.#threadId,
         serviceTier: this.#options.fastMode ? this.#options.fastModeTier ?? "priority" : "default",
         input: this.#input(next.text, next.attachments, next.skills),
         ...(this.#options.effort ? { effort: this.#options.effort } : {}),
-      });
+      }, false, 30_000);
       if (this.#busy) {
         this.#turnId = (result.turn as { id: string }).id;
         if (this.#interruptPending) this.interrupt();
@@ -188,7 +196,7 @@ class CodexSession implements AgentSession {
   interrupt(): void {
     if (this.#queue.length) this.#options.emit({ type: "notice", level: "warn", text: this.#queue.length === 1 ? "Stopped before Codex started your latest message. Send it again to run it." : `Stopped before Codex started your last ${this.#queue.length} messages. Send them again to run them.` });
     this.#queue = [];
-    cancelThread(this.#options.threadId);
+    cancelThread(this.#options.threadId, false);
     cancelQuestions(this.#options.threadId);
     if (!this.#busy) return;
     this.#interruptPending = true;
@@ -213,7 +221,7 @@ class CodexSession implements AgentSession {
     this.#disposed = true;
     clearTimeout(this.#backgroundTimer);
     this.#queue = [];
-    cancelThread(this.#options.threadId);
+    cancelThread(this.#options.threadId, false);
     cancelQuestions(this.#options.threadId);
     for (const pending of this.#requests.values()) {
       clearTimeout(pending.timer);

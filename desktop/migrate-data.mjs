@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, renameSync } from "node:fs";
+import { cpSync, existsSync, readdirSync, renameSync } from "node:fs";
 import { join } from "node:path";
 
 export function migrateDesktopData(appData, override) {
@@ -11,7 +11,11 @@ export function migrateDesktopData(appData, override) {
       try {
         renameSync(legacy, root);
       } catch {
-        // the older build can still hold its profile open on Windows
+        try {
+          cpSync(legacy, root, { recursive: true });
+        } catch (copyError) {
+          console.error(`Citropy could not move the previous data folder from ${legacy} to ${root}.`, copyError);
+        }
       }
     }
   }

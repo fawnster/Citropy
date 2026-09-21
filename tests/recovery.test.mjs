@@ -841,6 +841,39 @@ test("conversation persistence and lifecycle recovery", async (t) => {
   );
 
   await t.test(
+    "editing a queued message empties the queue and unknown events fail loudly",
+    async () => {
+      const workspace = join(directory, "queue-edit-workspace");
+      fs.mkdirSync(workspace, { recursive: true });
+      const owner = store.openProject(workspace);
+      const queued = store.createThread({ projectId: owner.id, provider: "claude", title: "Queue edit", permissionMode: "manual" });
+      const attachmentId = "0f8b6a52-3f5c-4c55-9d0a-1c2b3d4e5f60";
+      const folder = join(directory, ".citropy", "attachments", queued.id, attachmentId);
+      fs.mkdirSync(join(folder, "content"), { recursive: true });
+      const file = { id: attachmentId, path: join(folder, "content", "notes.txt"), label: "notes.txt", size: 5, mime: "text/plain" };
+      fs.writeFileSync(file.path, "notes");
+      fs.writeFileSync(join(folder, "metadata.json"), JSON.stringify(file));
+      first.socket.send(JSON.stringify({ t: "thread.send", threadId: queued.id, text: "First" }));
+      await waitFor(() => store.threads.get(queued.id).running);
+      first.socket.send(JSON.stringify({ t: "thread.send", threadId: queued.id, text: "Second", attachments: [file] }));
+      await waitFor(() => (store.threads.get(queued.id).queue ?? []).length === 1);
+      const queuedId = store.threads.get(queued.id).queue[0].id;
+      first.socket.send(JSON.stringify({ t: "queue.edit", threadId: queued.id, id: queuedId, requestId: "queue-edit" }));
+      await waitFor(() => first.events.some((event) => event.t === "thread.accepted" && event.requestId === "queue-edit"));
+      assert.deepEqual(store.threads.get(queued.id).queue, []);
+      assert.equal(fs.existsSync(folder), true, "The restored composer keeps its attachment until the draft is discarded.");
+
+      first.socket.send(JSON.stringify({ t: "unsupported.unknown", requestId: "unknown-request" }));
+      const failure = await waitFor(() => first.events.find((event) => event.t === "request.error" && event.requestId === "unknown-request"));
+      assert.match(failure.error, /Unsupported event type/);
+      first.socket.send(JSON.stringify({ t: "unsupported.unknown" }));
+      const toast = await waitFor(() => first.events.find((event) => event.t === "toast" && /Unsupported event type/.test(event.text)));
+      assert.equal(toast.level, "error");
+      store.closeProject(owner.id);
+    },
+  );
+
+  await t.test(
     "browser connections from unrelated origins cannot control providers or GitHub",
     async () => {
       const socket = new WebSocket(url.replace("http", "ws") + "/socket", {
