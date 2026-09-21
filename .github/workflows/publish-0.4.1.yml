@@ -1,7 +1,8 @@
 name: Publish authorized Citropy 0.4.1
 
 # One-time completion of the maintainer's explicit release request after PR #22.
-# This only dispatches the existing Release workflow and verifies its draft.
+# Recovery uses the inspected existing draft; it never rebuilds or retags.
+# The first controller failed because release-by-tag lookup excludes drafts.
 # It does not change release.yml, its checks, or its packaging/signing policy.
 on:
   push:
@@ -19,18 +20,18 @@ jobs:
   release:
     if: github.repository == 'tinuxongit/Citropy'
     runs-on: ubuntu-22.04
-    timeout-minutes: 90
+    timeout-minutes: 20
     permissions:
       actions: write
       contents: write
     steps:
-      - name: Build, verify and publish the authorized release
+      - name: Verify the existing 0.4.1 draft and publish
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           python3 -u <<'PY'
-          """One-time, fail-closed publisher for the explicitly authorized Citropy 0.4.1 release."""
+          """Recover the draft lookup failure without rebuilding, retagging or weakening release validation."""
           import base64
           import copy
           import hashlib
@@ -175,85 +176,112 @@ jobs:
                   require(base64.b64encode(file_hash(directory / legacy[1], 'sha512').digest()).decode() == legacy[2], 'Wrong fallback SHA-512')
           
           
+          SOURCE = 'c0e1bc14d2263fa3467918c80f080883b3738e45'
+          RELEASE_SHA = '7e4d1d9e3f486067e92a0caacdc54d201a610d41'
+          RELEASE_ID = 393281499
+          RELEASE_RUN = 35650263965
+          
+          
+          def download_assets(assets, directory):
+              """Download the verified draft's assets by authenticated asset ID, not public tag URLs."""
+              require(len(assets) == len(ASSETS) and {a['name'] for a in assets} == ASSETS,
+                      'Incomplete release asset set')
+              require(all(type(a['id']) is int and a['id'] > 0 for a in assets)
+                      and len({a['id'] for a in assets}) == len(assets), 'Invalid asset IDs')
+              for asset in assets:
+                  print('Downloading for verification: ' + asset['name'], flush=True)
+                  with (directory / asset['name']).open('xb') as output:
+                      subprocess.run(['gh', 'api', '--hostname', 'github.com', '--method', 'GET',
+                                      '-H', 'Accept: application/octet-stream',
+                                      f'repos/{REPO}/releases/assets/{asset["id"]}'],
+                                     stdout=output, check=True, timeout=600)
+          
+          
           def main():
               require(os.environ.get('GITHUB_REPOSITORY') == REPO and os.environ.get('GITHUB_REF') == 'refs/heads/main'
                       and os.environ.get('GITHUB_EVENT_NAME') == 'push', 'Only the authorized main-branch push is allowed')
-              source = os.environ['GITHUB_SHA']
-              existing = api(f'releases/tags/{TAG}', missing=True)
-              if existing is not None and not existing['draft']:
-                  print('Release already published; no changes: ' + existing['html_url'])
-                  return
-              require(existing is None and api(f'git/ref/tags/{TAG}', missing=True) is None, 'Existing draft or tag requires inspection')
-              change = api(f'compare/{BASE}...{source}')
+              controller = os.environ['GITHUB_SHA']
+              # The only post-release change allowed is this repair of the one-time publisher.
+              repair = api(f'compare/{RELEASE_SHA}...{controller}')
+              require(repair['status'] == 'ahead' and repair['total_commits'] == 1
+                      and [(f['filename'], f['status']) for f in repair['files']] == [(SELF, 'modified')],
+                      'Only the publication-controller repair may follow the release commit')
+              require([p['sha'] for p in api(f'git/commits/{controller}')['parents']] == [RELEASE_SHA],
+                      'Controller does not directly follow the pinned release')
+              require(api('git/ref/heads/main')['object']['sha'] == controller, 'Main moved before validation')
+              change = api(f'compare/{BASE}...{SOURCE}')
               require(change['status'] == 'ahead' and change['total_commits'] == 1
                       and [(f['filename'], f['status']) for f in change['files']] == [(SELF, 'added')],
-                      'Launcher must be the only change since the verified audit merge')
-              require(api(f'contents/.github/workflows/release.yml?ref={source}')['sha'] == RELEASE_BLOB,
-                      'The audited release workflow changed')
-              require(content('package.json', source)['version'] == '0.4.0', 'Unexpected starting version')
-              active = api('actions/workflows/release.yml/runs?per_page=100')['workflow_runs']
-              require(all(r['status'] == 'completed' for r in active), 'Another release is active')
-              require(api('git/ref/heads/main')['object']['sha'] == source, 'Main moved before release dispatch')
-              dispatched = api('actions/workflows/release.yml/dispatches', method='POST',
-                               data={'ref': 'main', 'inputs': {'version': VERSION}})
-              run_id = dispatched['workflow_run_id']
-              require(isinstance(run_id, int) and run_id > 0, 'Dispatch did not return a run ID; do not retry blindly')
-              print('Release build: ' + dispatched['html_url'], flush=True)
-              wait_run(run_id, source, {'check', 'linux', 'mac', 'windows', 'publish'})
-              # In addition to the release gates, require both push workflows on the exact source.
+                      'Launcher was not the only change since the audit merge')
+              for ref in (SOURCE, controller):
+                  require(api(f'contents/.github/workflows/release.yml?ref={ref}')['sha'] == RELEASE_BLOB,
+                          'The existing release workflow changed')
+              require(content('package.json', SOURCE)['version'] == '0.4.0', 'Unexpected starting version')
+              # Pin the successful build. Never dispatch or retry it merely to recover publication.
+              built = wait_run(RELEASE_RUN, SOURCE, {'check', 'linux', 'mac', 'windows', 'publish'})
+              require(built['event'] == 'workflow_dispatch' and built['path'] == '.github/workflows/release.yml',
+                      'Unexpected release build workflow')
               portable = {f'{platform} / Node {node}' for platform in ('ubuntu-22.04', 'macos-26', 'windows-latest')
                           for node in ('22.18.0', '24', '26')}
               portable |= {f'HTTP boundary / {p}' for p in ('ubuntu-22.04', 'macos-26', 'windows-latest')}
               verified = []
-              for workflow, names in [('checks.yml', {'check', 'mac', 'windows'}), ('portable-regressions.yml', portable)]:
-                  runs = api(f'actions/workflows/{workflow}/runs?head_sha={source}&event=push&per_page=100')['workflow_runs']
-                  require(len(runs) == 1, 'Missing or ambiguous source CI runs')
-                  verified.append(wait_run(runs[0]['id'], source, names)['html_url'])
-              release = api(f'releases/tags/{TAG}')
-              require(release['draft'] and not release['prerelease'] and release['tag_name'] == TAG, 'Expected a stable draft release')
+              for run_id, path, names in [(35650245936, '.github/workflows/checks.yml', {'check', 'mac', 'windows'}),
+                                         (35650245967, '.github/workflows/portable-regressions.yml', portable)]:
+                  run = wait_run(run_id, SOURCE, names)
+                  require(run['event'] == 'push' and run['path'] == path, 'Unexpected source CI workflow')
+                  verified.append(run['html_url'])
+              # /releases/tags/{tag} only locates published releases. Use the inspected draft ID.
+              release = api(f'releases/{RELEASE_ID}')
+              require(release['id'] == RELEASE_ID and release['tag_name'] == TAG and not release['prerelease'],
+                      'Wrong release identity')
+              if not release['draft']:
+                  require(release['published_at'], 'Release has no publication timestamp')
+                  print('Already published; no release mutation: ' + release['html_url'], flush=True)
+                  api('actions/workflows/publish-0.4.1.yml/disable', method='PUT')
+                  return
               tag = api(f'git/ref/tags/{TAG}')['object']
-              require(tag['type'] == 'commit', 'Unexpected release tag type')
-              release_sha = tag['sha']
-              commit = api(f'git/commits/{release_sha}')
-              require([p['sha'] for p in commit['parents']] == [source], 'Release was not built from this source')
-              diff = api(f'compare/{source}...{release_sha}')
+              require(tag['type'] == 'commit' and tag['sha'] == RELEASE_SHA, 'Release tag moved')
+              commit = api(f'git/commits/{RELEASE_SHA}')
+              require([p['sha'] for p in commit['parents']] == [SOURCE], 'Release has the wrong source')
+              diff = api(f'compare/{SOURCE}...{RELEASE_SHA}')
               require(diff['total_commits'] == 1 and {f['filename'] for f in diff['files']} == {'package.json', 'package-lock.json'},
                       'Unexpected code changes in release commit')
               for path in ('package.json', 'package-lock.json'):
-                  verify_version_change(content(path, source), content(path, release_sha), lock=path.endswith('lock.json'))
-              require(api('git/ref/heads/main')['object']['sha'] == release_sha, 'Main moved before publication')
+                  verify_version_change(content(path, SOURCE), content(path, RELEASE_SHA), lock=path.endswith('lock.json'))
               with tempfile.TemporaryDirectory(prefix='citropy-verified-release-') as directory:
-                  subprocess.run(['gh', 'release', 'download', TAG, '--repo', REPO, '--dir', directory], check=True, timeout=600)
+                  download_assets(release['assets'], Path(directory))
                   verify_assets(release['assets'], Path(directory))
+              print('All 9 assets, SHA256SUMS and updater SHA-512/size/version metadata verified.', flush=True)
               notes = f'''## Citropy {VERSION} — safety and stability fixes
           
           Includes the complete critical audit from PR #22: literal Git filename selection to protect unrelated work; safer request/error handling; file and directory containment regressions; bounded UTF-8-safe previews; corrected diff paths and hunks; proxy and terminal-daemon cleanup; and first-failure-preserving cross-platform CI.
           
           ### Verification
-          - Release build, Linux/macOS/Windows packaging, smoke and installer checks: {dispatched['html_url']}
+          - Release build, Linux/macOS/Windows packaging, smoke and installer checks: {built['html_url']}
           - Full source check/package: {verified[0]}
           - Portable source regressions (12 jobs): {verified[1]}
-          - All runs passed on their first attempt. All nine uploaded assets were downloaded and verified against GitHub digests; SHA256SUMS and updater SHA-512/size/version metadata were validated before publication.
+          - The release build and both source workflows passed on their first attempt. The original publication controller stopped on HTTP 404 when it attempted to find a draft by its tag. This corrected controller used the existing draft ID; it did not rebuild, retag, or hide that failed publication attempt.
+          - All nine uploaded assets were downloaded and verified against GitHub digests; SHA256SUMS and updater SHA-512/size/version metadata were validated before publication.
           
-          Source: `{source}`. Release commit: `{release_sha}`.
+          Source: `{SOURCE}`. Release commit: `{RELEASE_SHA}`.
+          Publication verification: https://github.com/{REPO}/actions/runs/{os.environ['GITHUB_RUN_ID']}
           
           ### Downloads and limits
           Linux x86_64 AppImage, macOS arm64 and x64 ZIPs, and Windows x64 installer are included, with update metadata and checksums. This release retains the repository's existing signing/distribution policy; it does not claim new notarization or trusted-platform signing, universal hardware compatibility, or that every possible defect is eliminated.
           '''
-              # Recheck mutable refs and asset metadata immediately before the sole publish write.
-              require(api(f'git/ref/tags/{TAG}')['object']['sha'] == release_sha, 'Release tag moved')
-              require(api('git/ref/heads/main')['object']['sha'] == release_sha, 'Main changed during verification')
-              fresh = api(f'releases/{release["id"]}')
+              require(api(f'git/ref/tags/{TAG}')['object']['sha'] == RELEASE_SHA, 'Release tag moved during validation')
+              require(api('git/ref/heads/main')['object']['sha'] == controller, 'Main changed during verification')
+              fresh = api(f'releases/{RELEASE_ID}')
               fingerprint = lambda assets: sorted((a['id'], a['name'], a['size'], a.get('digest'), a['state']) for a in assets)
-              require(fresh['draft'] and fingerprint(fresh['assets']) == fingerprint(release['assets']),
-                      'Release assets changed during verification')
-              result = api(f'releases/{release["id"]}', method='PATCH',
+              require(fresh['draft'] and fresh['tag_name'] == TAG and not fresh['prerelease']
+                      and fingerprint(fresh['assets']) == fingerprint(release['assets']), 'Draft changed during verification')
+              result = api(f'releases/{RELEASE_ID}', method='PATCH',
                            data={'draft': False, 'prerelease': False, 'make_latest': 'true', 'body': notes})
-              require(not result['draft'] and result['published_at'], 'Publication was not confirmed')
+              require(result['id'] == RELEASE_ID and not result['draft'] and result['published_at'],
+                      'Publication was not confirmed')
               print('Published: ' + result['html_url'], flush=True)
               with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
-                  summary.write(f'Published [{TAG}]({result["html_url"]}) at `{release_sha}` after all checks and asset verification.\n')
-              # This launcher is deliberately single-use. The normal release workflow is unchanged.
+                  summary.write(f'Published [{TAG}]({result["html_url"]}) at `{RELEASE_SHA}` after all checks and asset verification.\n')
               api('actions/workflows/publish-0.4.1.yml/disable', method='PUT')
           
           
