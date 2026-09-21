@@ -1,7 +1,7 @@
 import { remoteId } from "./remote.ts";
 import { workspacePath } from "./workspaces.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { askQuestion } from "./questions.ts";
+import { answerQuestion, askQuestion, hasPendingQuestion, pendingQuestions } from "./questions.ts";
 import { ask } from "./permissions.ts";
 import { authorizeTools, touchTools } from "./mcp-access.ts";
 import { store } from "./store.ts";
@@ -186,7 +186,7 @@ export const workspaceTools = ([
   {
     name: "subagent_start",
     description:
-      "Delegate a concrete task to a subagent. It runs in the same workspace with inherited permissions and appears beneath this conversation, and it can run on any configured provider and any model that provider currently lists. provider and model default to this conversation's when omitted, otherwise to that provider's default model. effort overrides reasoning effort. Returns immediately. Finishing posts a notification to this conversation, and subagent_wait is how a caller that needs the result right away reads it. Coordinate files to avoid overlapping edits.",
+      "Delegate a concrete task to a subagent. It runs in the same workspace with inherited permissions and appears beneath this conversation, and it can run on any configured provider and any model that provider currently lists. provider and model default to this conversation's when omitted, otherwise to that provider's default model. effort overrides reasoning effort. Returns immediately, so call it once per task to run up to four at the same time; a fifth is refused until one finishes, and a subagent may nest three levels deep. Finishing posts a notification to this conversation, and subagent_wait is how a caller that needs the result right away reads it. Coordinate files to avoid overlapping edits.",
     inputSchema: {
       type: "object",
       properties: {
@@ -200,7 +200,7 @@ export const workspaceTools = ([
         model: {
           type: "string",
           description:
-            "Model id from that provider's current model list, such as claude-sonnet-5 or claude-opus-5 for claude, or gpt-5.5 for codex. The model picker in Citropy shows the live list.",
+            "Model id from that provider's current model list, such as claude-sonnet-5 for claude, gpt-5.5 for codex, opencode-go/glm-5.3-flash for opencode, or composer-2.5 for cursor. The model picker in Citropy shows the live list.",
         },
         effort: {
           type: "string",
@@ -237,6 +237,29 @@ export const workspaceTools = ([
       type: "object",
       properties: { id: string, text: string },
       required: ["id", "text"],
+    },
+  },
+  {
+    name: "subagent_answer",
+    description:
+      "Answer a question a subagent asked with ask_user, which unblocks it. A subagent that is waiting reports status \"awaiting\" and lists the question under waitingOn in subagent_list and subagent_wait, which both return as soon as one arrives. Give either answers or dismiss, never both and never neither.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: string,
+        questionId: string,
+        answers: {
+          type: "object",
+          description:
+            "Object keyed by question id, each value an array of the chosen option labels.",
+        },
+        dismiss: {
+          type: "boolean",
+          description:
+            "Set true to skip the question instead of answering, which tells the subagent nobody answered.",
+        },
+      },
+      required: ["id", "questionId"],
     },
   },
   {
@@ -299,6 +322,19 @@ function required(args: Record<string, unknown>, key: string): string {
   return value;
 }
 
+const MAX_RUNNING_SUBAGENTS = 4;
+const MAX_SUBAGENT_DEPTH = 3;
+
+function assertSubagentSlot(parentId: string): void {
+  const running = [...store.threads.values()].filter(
+    (child) => child.parentThreadId === parentId && child.running,
+  ).length;
+  if (running >= MAX_RUNNING_SUBAGENTS)
+    throw new Error(
+      `This conversation already has ${running} subagents running, the most it can run at once. Wait for one to finish.`,
+    );
+}
+
 function childOf(parent: Thread, id: string): Thread {
   const child = store.threads.get(id);
   if (!child || child.parentThreadId !== parent.id)
@@ -314,6 +350,9 @@ function summary(child: Thread) {
     model: child.model,
     status: child.status,
     running: child.running,
+    waitingOn: pendingQuestions()
+      .filter((request) => request.threadId === child.id)
+      .map((request) => ({ questionId: request.id, questions: request.questions })),
     messages: child.messages.slice(-3).map((message) => ({
       role: message.role,
       text: message.parts
@@ -514,22 +553,16 @@ export async function callWorkspaceTool(
       return text(openPanel(project.id, kind, threadId, panel?.id));
     }
     case "subagent_start": {
-      const children = [...store.threads.values()].filter(
-        (child) => child.parentThreadId === threadId,
-      );
-      if (children.filter((child) => child.running).length >= 4)
-        throw new Error(
-          "Wait for a subagent to finish before starting another.",
-        );
+      assertSubagentSlot(threadId);
       let depth = 0;
       let ancestor: Thread | undefined = thread;
       while (ancestor?.parentThreadId) {
         depth++;
         ancestor = store.threads.get(ancestor.parentThreadId);
       }
-      if (depth >= 3)
+      if (depth >= MAX_SUBAGENT_DEPTH)
         throw new Error(
-          "Delegate this task from a parent conversation instead.",
+          `Subagents already nest ${depth} levels deep here, the most allowed. Delegate this task from a parent conversation instead.`,
         );
       const providerId = (args.provider ??
         thread.provider) as keyof typeof providers;
@@ -546,14 +579,7 @@ export async function callWorkspaceTool(
         store.disabledProviders.has(providerId)
       )
         throw new Error("Conversation or provider is no longer available");
-      if (
-        [...store.threads.values()].filter(
-          (child) => child.parentThreadId === threadId && child.running,
-        ).length >= 4
-      )
-        throw new Error(
-          "Wait for a subagent to finish before starting another.",
-        );
+      assertSubagentSlot(threadId);
       const model =
         typeof args.model === "string"
           ? args.model
@@ -612,6 +638,14 @@ export async function callWorkspaceTool(
       await runtimeFor(child.id).send(required(args, "text"));
       return text(summary(child));
     }
+    case "subagent_answer": {
+      const child = childOf(thread, required(args, "id"));
+      const dismiss = args.dismiss === true;
+      if (dismiss === (args.answers !== undefined))
+        throw new Error("Give either answers or dismiss, not both and not neither.");
+      answerQuestion(child.id, required(args, "questionId"), dismiss ? null : args.answers);
+      return text(summary(child));
+    }
     case "subagent_stop": {
       const child = childOf(thread, required(args, "id"));
       if (child.nativeAgentId)
@@ -632,14 +666,15 @@ export async function callWorkspaceTool(
             : 30_000,
         ),
       );
-      if (child.running && timeout)
+      if (child.running && timeout && !hasPendingQuestion(child.id))
         await new Promise<void>((resolve) => {
           const stop = bus.subscribe((event) => {
             if (
               (event.t === "thread.upsert" &&
                 event.thread.id === child.id &&
                 !event.thread.running) ||
-              (event.t === "thread.remove" && event.id === child.id)
+              (event.t === "thread.remove" && event.id === child.id) ||
+              (event.t === "question.request" && event.request.threadId === child.id)
             )
               finish();
           });

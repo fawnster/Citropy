@@ -234,3 +234,48 @@ test("OpenCode native questions reply, reject and ignore duplicate or unrelated 
   await until(() => pendingQuestions().length === 0);
   assert.equal(requests.some(request => request.path === "/question/external/reply"), false);
 });
+
+test("a parent sees a subagent's question and can answer it while the subagent is still running", async () => {
+  const parent = create();
+  const child = store.createThread({ projectId: project.id, provider: "opencode", parentThreadId: parent.id, title: "Child", permissionMode: "plan" });
+  store.patchThread(child.id, { running: true, status: "thinking" });
+  const asked = callWorkspaceTool(child.id, "ask_user", { questions: [{ question: "Which port?", options: [{ label: "4177" }, { label: "4178" }] }] });
+  await until(() => pendingQuestions().length === 1);
+
+  const listed = JSON.parse((await callWorkspaceTool(parent.id, "subagent_list", {}))[0].text);
+  assert.equal(listed[0].status, "awaiting");
+  assert.equal(listed[0].waitingOn[0].questions[0].question, "Which port?");
+
+  const started = Date.now();
+  const waited = JSON.parse((await callWorkspaceTool(parent.id, "subagent_wait", { id: child.id }))[0].text);
+  assert.ok(Date.now() - started < 5000, "subagent_wait must return once the child is blocked, not burn its timeout");
+  const questionId = waited.waitingOn[0].questionId;
+
+  await assert.rejects(
+    callWorkspaceTool(parent.id, "subagent_answer", { id: parent.id, questionId, answers: { question_1: ["4177"] } }),
+    /does not belong to this conversation/,
+  );
+
+  await callWorkspaceTool(parent.id, "subagent_answer", { id: child.id, questionId, answers: { question_1: ["4177"] } });
+  assert.deepEqual(JSON.parse((await asked)[0].text), { cancelled: false, answers: { question_1: ["4177"] } });
+  assert.deepEqual(pendingQuestions(), []);
+});
+
+test("a parent can dismiss a subagent's question instead of answering it", async () => {
+  const parent = create();
+  const child = store.createThread({ projectId: project.id, provider: "opencode", parentThreadId: parent.id, title: "Child", permissionMode: "plan" });
+  store.patchThread(child.id, { running: true, status: "thinking" });
+  const asked = callWorkspaceTool(child.id, "ask_user", { questions: [{ question: "Proceed?" }] });
+  await until(() => pendingQuestions().length === 1);
+  const questionId = pendingQuestions()[0].id;
+  await assert.rejects(
+    callWorkspaceTool(parent.id, "subagent_answer", { id: child.id, questionId }),
+    /either answers or dismiss/,
+  );
+  await assert.rejects(
+    callWorkspaceTool(parent.id, "subagent_answer", { id: child.id, questionId, answers: { question_1: ["Yes"] }, dismiss: true }),
+    /either answers or dismiss/,
+  );
+  await callWorkspaceTool(parent.id, "subagent_answer", { id: child.id, questionId, dismiss: true });
+  assert.equal(JSON.parse((await asked)[0].text).cancelled, true);
+});
