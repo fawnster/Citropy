@@ -409,9 +409,18 @@ const historyChanges: Partial<Record<ServerEvent["t"], HistoryCollection[]>> = {
   "part.patch": ["parts", "historyBytes"],
 };
 
-function trimHistories(state: AppState): void {
+function totalHistoryBytes(state: AppState): number {
+  let total = 0;
+  for (const bytes of Object.values(state.historyBytes)) total += bytes;
+  return total;
+}
+
+function trimHistories(state: AppState, previousBytes?: number): void {
   const ids = Object.keys(state.loaded);
-  let bytes = Object.values(state.historyBytes).reduce((sum, size) => sum + size, 0);
+  if (ids.length <= 4) return;
+  const bytesTotal = totalHistoryBytes(state);
+  if (previousBytes !== undefined && bytesTotal === previousBytes) return;
+  let bytes = bytesTotal;
   let count = ids.length;
   const evict: string[] = [];
   for (const id of ids) {
@@ -439,6 +448,7 @@ export function applyEvents(
   events: ServerEvent[],
 ): AppState {
   const state = { ...previous };
+  const previousBytes = totalHistoryBytes(previous);
   const copied = new Set<HistoryCollection>();
   for (const event of events) {
     if (unloadedDelta(state, event)) continue;
@@ -449,7 +459,7 @@ export function applyEvents(
     }
     applyEvent(state, event);
   }
-  trimHistories(state);
+  trimHistories(state, previousBytes);
   return state;
 }
 
@@ -472,12 +482,10 @@ function playAlert(level: "success" | "error" | "attention"): void {
   playUiSound(level === "attention" ? "attention" : level === "success" ? "done" : "error");
 }
 
-export function applyEvent(state: AppState, event: ServerEvent): void {
-  if (unloadedDelta(state, event)) return;
-  if (event.t === "computer.state") {
-    state.computer = event.computer;
-    return;
-  }
+function applyShellEvent(
+  state: AppState,
+  event: Extract<ServerEvent, { t: "shell.upsert" } | { t: "shell.remove" }>,
+): void {
   switch (event.t) {
     case "shell.upsert":
       state.shells = { ...state.shells, [event.shell.id]: event.shell };
@@ -488,15 +496,34 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
       state.shells = remaining;
       return;
     }
+  }
+}
+
+function applySettingsEvent(
+  state: AppState,
+  event: Extract<
+    ServerEvent,
+    { t: "project.defaults" } | { t: "assistance.settings" }
+  >,
+): void {
+  switch (event.t) {
     case "project.defaults":
       state.projectDefaults = event.settings;
       return;
     case "assistance.settings":
       state.assistance = event.settings;
       return;
-    case "request.error":
-      resolveResponse(event.requestId, undefined, event.error);
-      return;
+  }
+}
+
+function applyNotificationEvent(
+  state: AppState,
+  event: Extract<
+    ServerEvent,
+    { t: "notification.add" } | { t: "notifications.update" } | { t: "notifications.preferences" }
+  >,
+): void {
+  switch (event.t) {
     case "notification.add": {
       if (
         state.notifications.some((entry) => entry.id === event.notification.id)
@@ -535,6 +562,17 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
     case "notifications.preferences":
       state.notificationPreferences = event.preferences;
       return;
+  }
+}
+
+function applyPanelEvent(
+  state: AppState,
+  event: Extract<
+    ServerEvent,
+    { t: "panel.upsert" } | { t: "panel.remove" } | { t: "browser.state" } | { t: "tools.connection" }
+  >,
+): void {
+  switch (event.t) {
     case "panel.upsert": {
       const exists = state.panels.some((panel) => panel.id === event.panel.id);
       state.panels = exists
@@ -578,6 +616,17 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
         [event.connection.threadId]: event.connection,
       };
       return;
+  }
+}
+
+function applyProjectEvent(
+  state: AppState,
+  event: Extract<
+    ServerEvent,
+    { t: "project.chosen" } | { t: "project.upsert" } | { t: "project.remove" }
+  >,
+): void {
+  switch (event.t) {
     case "project.chosen": {
       state.choosingWorkspace = false;
       if (event.projectId) {
@@ -591,103 +640,6 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
           ...state.toasts,
           { id: `folder-${Date.now()}`, level: "error", text: event.error },
         ];
-      return;
-    }
-    case "providers.update":
-      state.providers = event.providers;
-      return;
-    case "github.result":
-      resolveResponse(
-        event.requestId,
-        event.result,
-        event.error ??
-          (event.result === undefined
-            ? "GitHub returned no result."
-            : undefined),
-      );
-      return;
-    case "git.manage":
-      resolveResponse(event.requestId, event.result ?? "", event.error);
-      return;
-    case "thread.search":
-      state.searchResult = event;
-      return;
-    case "hello": {
-      state.shells = Object.fromEntries((event.snapshot.shells ?? []).map(shell => [shell.id, shell]));
-      state.projectDefaults = event.snapshot.projectDefaults ?? {};
-      state.assistance = event.snapshot.assistance ?? { ...defaultAssistance };
-      state.computer = event.snapshot.computer ?? { enabled: false, status: "idle", control: false, displays: [], activity: [] };
-      state.notifications = event.snapshot.notifications ?? [];
-      state.notificationPreferences = event.snapshot
-        .notificationPreferences ?? {
-        toasts: true,
-        desktop: true,
-        sound: false,
-      };
-      state.panels = event.snapshot.panels ?? [];
-      state.browsers = Object.fromEntries(
-        (event.snapshot.browsers ?? []).map((browser) => [browser.id, browser]),
-      );
-      state.tools = event.snapshot.tools ?? [];
-      state.toolConnections = Object.fromEntries(
-        (event.snapshot.toolConnections ?? []).map((connection) => [
-          connection.threadId,
-          connection,
-        ]),
-      );
-      state.connected = true;
-      state.choosingWorkspace = false;
-      state.permissions = event.snapshot.permissions;
-      state.questions = event.snapshot.questions ?? [];
-      state.development = event.snapshot.development === true;
-      state.questionDrafts = Object.fromEntries(Object.entries(state.questionDrafts).filter(([id]) => state.questions.some(question => question.id === id)));
-      state.home = event.snapshot.home;
-      state.projects = event.snapshot.projects;
-      state.providers = event.snapshot.providers;
-      state.threads = Object.fromEntries(
-        event.snapshot.threads.map((thread) => [thread.id, thread]),
-      );
-      state.messages = {};
-      state.parts = {};
-      state.reveals = {};
-      state.order = {};
-      state.loaded = {};
-      state.historyBytes = {};
-      state.disclosures = {};
-      state.activePanels = Object.fromEntries(
-        Object.entries(state.activePanels).filter(([, id]) =>
-          state.panels.some((panel) => panel.id === id),
-        ),
-      );
-      state.git = Object.fromEntries(
-        Object.entries(state.git).filter(([id]) =>
-          state.projects.some((project) => project.id === id),
-        ),
-      );
-      sortThreads(state);
-      if (
-        !state.activeProjectId ||
-        !state.projects.some((p) => p.id === state.activeProjectId)
-      ) {
-        state.activeProjectId = state.projects[0]?.id ?? null;
-      }
-      if (state.activeThreadId && !state.threads[state.activeThreadId])
-        state.activeThreadId = null;
-      if (
-        typeof window !== "undefined" &&
-        window.citropyDesktop &&
-        !Object.keys(state.activePanels).length
-      ) {
-        const browser = state.panels.findLast(
-          (panel) => panel.kind === "browser",
-        );
-        if (browser) {
-          state.activeProjectId = browser.projectId;
-          state.activeThreadId = browser.threadId ?? state.activeThreadId;
-          state.activePanels = { [browser.projectId]: browser.id };
-          state.inspectorOpen = true;
-        }
-      }
       return;
     }
     case "project.upsert": {
@@ -711,6 +663,17 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
         state.activeProjectId = state.projects[0]?.id ?? null;
       return;
     }
+  }
+}
+
+function applyThreadEvent(
+  state: AppState,
+  event: Extract<
+    ServerEvent,
+    { t: "thread.upsert" } | { t: "thread.remove" } | { t: "thread.accepted" } | { t: "thread.messages" } | { t: "thread.search" }
+  >,
+): void {
+  switch (event.t) {
     case "thread.upsert": {
       const previous = state.threads[event.thread.id];
       if (previous && previous.updatedAt === event.thread.updatedAt && sameThreadMeta(previous, event.thread)) return;
@@ -737,6 +700,20 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
       normalize(state, event.threadId, event.messages);
       return;
     }
+    case "thread.search":
+      state.searchResult = event;
+      return;
+  }
+}
+
+function applyMessageEvent(
+  state: AppState,
+  event: Extract<
+    ServerEvent,
+    { t: "message.add" } | { t: "part.add" } | { t: "part.append" } | { t: "part.patch" }
+  >,
+): void {
+  switch (event.t) {
     case "message.add": {
       state.historyBytes[event.threadId] = (state.historyBytes[event.threadId] ?? 0) + contentBytes(event.message);
       const partIds: string[] = [];
@@ -789,6 +766,17 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
       state.parts[event.partId] = updated;
       return;
     }
+  }
+}
+
+function applyPromptEvent(
+  state: AppState,
+  event: Extract<
+    ServerEvent,
+    { t: "question.request" } | { t: "question.close" } | { t: "permission.request" } | { t: "permission.close" }
+  >,
+): void {
+  switch (event.t) {
     case "question.request": {
       playAlert("attention");
       state.questions = [...state.questions.filter(question => question.id !== event.request.id), event.request];
@@ -810,6 +798,17 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
       );
       return;
     }
+  }
+}
+
+function applyGitEvent(
+  state: AppState,
+  event: Extract<
+    ServerEvent,
+    { t: "git.status" } | { t: "git.diff" } | { t: "git.manage" }
+  >,
+): void {
+  switch (event.t) {
     case "git.status": {
       const active = state.threads[state.activeThreadId ?? ""];
       if (event.threadId && active?.id !== event.threadId) return;
@@ -828,6 +827,17 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
       resolveResponse(event.requestId, event.patch, event.error);
       return;
     }
+    case "git.manage":
+      resolveResponse(event.requestId, event.result ?? "", event.error);
+      return;
+  }
+}
+
+function applyFileEvent(
+  state: AppState,
+  event: Extract<ServerEvent, { t: "file.tree" } | { t: "file.content" }>,
+): void {
+  switch (event.t) {
     case "file.tree": {
       resolveResponse(event.requestId, event.entries);
       return;
@@ -836,6 +846,203 @@ export function applyEvent(state: AppState, event: ServerEvent): void {
       resolveResponse(event.requestId, event.content);
       return;
     }
+  }
+}
+
+function applyHelloEvent(
+  state: AppState,
+  event: Extract<ServerEvent, { t: "hello" }>,
+): void {
+  const { snapshot } = event;
+  restoreSnapshotEnvironment(state, snapshot);
+  restoreSnapshotNotifications(state, snapshot);
+  restoreSnapshotPanels(state, snapshot);
+  state.connected = true;
+  state.choosingWorkspace = false;
+  state.permissions = snapshot.permissions;
+  state.questions = snapshot.questions ?? [];
+  state.development = snapshot.development === true;
+  state.questionDrafts = Object.fromEntries(Object.entries(state.questionDrafts).filter(([id]) => state.questions.some(question => question.id === id)));
+  state.home = snapshot.home;
+  state.projects = snapshot.projects;
+  state.providers = snapshot.providers;
+  restoreSnapshotThreads(state, snapshot);
+  restoreSnapshotWorkspace(state, snapshot);
+}
+
+function restoreSnapshotEnvironment(
+  state: AppState,
+  snapshot: Extract<ServerEvent, { t: "hello" }>["snapshot"],
+): void {
+  state.shells = Object.fromEntries((snapshot.shells ?? []).map(shell => [shell.id, shell]));
+  state.projectDefaults = snapshot.projectDefaults ?? {};
+  state.assistance = snapshot.assistance ?? { ...defaultAssistance };
+  state.computer = snapshot.computer ?? { enabled: false, status: "idle", control: false, displays: [], activity: [] };
+}
+
+function restoreSnapshotNotifications(
+  state: AppState,
+  snapshot: Extract<ServerEvent, { t: "hello" }>["snapshot"],
+): void {
+  state.notifications = snapshot.notifications ?? [];
+  state.notificationPreferences = snapshot.notificationPreferences ?? {
+    toasts: true,
+    desktop: true,
+    sound: false,
+  };
+}
+
+function restoreSnapshotPanels(
+  state: AppState,
+  snapshot: Extract<ServerEvent, { t: "hello" }>["snapshot"],
+): void {
+  state.panels = snapshot.panels ?? [];
+  state.browsers = Object.fromEntries(
+    (snapshot.browsers ?? []).map((browser) => [browser.id, browser]),
+  );
+  state.tools = snapshot.tools ?? [];
+  state.toolConnections = Object.fromEntries(
+    (snapshot.toolConnections ?? []).map((connection) => [
+      connection.threadId,
+      connection,
+    ]),
+  );
+}
+
+function restoreSnapshotThreads(
+  state: AppState,
+  snapshot: Extract<ServerEvent, { t: "hello" }>["snapshot"],
+): void {
+  state.threads = Object.fromEntries(
+    snapshot.threads.map((thread) => [thread.id, thread]),
+  );
+  state.messages = {};
+  state.parts = {};
+  state.reveals = {};
+  state.order = {};
+  state.loaded = {};
+  state.historyBytes = {};
+  state.disclosures = {};
+}
+
+function restoreSnapshotWorkspace(
+  state: AppState,
+  snapshot: Extract<ServerEvent, { t: "hello" }>["snapshot"],
+): void {
+  state.activePanels = Object.fromEntries(
+    Object.entries(state.activePanels).filter(([, id]) =>
+      state.panels.some((panel) => panel.id === id),
+    ),
+  );
+  state.git = Object.fromEntries(
+    Object.entries(state.git).filter(([id]) =>
+      state.projects.some((project) => project.id === id),
+    ),
+  );
+  sortThreads(state);
+  if (
+    !state.activeProjectId ||
+    !state.projects.some((p) => p.id === state.activeProjectId)
+  ) {
+    state.activeProjectId = state.projects[0]?.id ?? null;
+  }
+  if (state.activeThreadId && !state.threads[state.activeThreadId])
+    state.activeThreadId = null;
+  if (
+    typeof window !== "undefined" &&
+    window.citropyDesktop &&
+    !Object.keys(state.activePanels).length
+  ) {
+    const browser = state.panels.findLast(
+      (panel) => panel.kind === "browser",
+    );
+    if (browser) {
+      state.activeProjectId = browser.projectId;
+      state.activeThreadId = browser.threadId ?? state.activeThreadId;
+      state.activePanels = { [browser.projectId]: browser.id };
+      state.inspectorOpen = true;
+    }
+  }
+}
+
+export function applyEvent(state: AppState, event: ServerEvent): void {
+  if (unloadedDelta(state, event)) return;
+  if (event.t === "computer.state") {
+    state.computer = event.computer;
+    return;
+  }
+  switch (event.t) {
+    case "shell.upsert":
+    case "shell.remove":
+      applyShellEvent(state, event);
+      return;
+    case "project.defaults":
+    case "assistance.settings":
+      applySettingsEvent(state, event);
+      return;
+    case "notification.add":
+    case "notifications.update":
+    case "notifications.preferences":
+      applyNotificationEvent(state, event);
+      return;
+    case "panel.upsert":
+    case "panel.remove":
+    case "browser.state":
+    case "tools.connection":
+      applyPanelEvent(state, event);
+      return;
+    case "project.chosen":
+    case "project.upsert":
+    case "project.remove":
+      applyProjectEvent(state, event);
+      return;
+    case "thread.upsert":
+    case "thread.remove":
+    case "thread.accepted":
+    case "thread.messages":
+    case "thread.search":
+      applyThreadEvent(state, event);
+      return;
+    case "message.add":
+    case "part.add":
+    case "part.append":
+    case "part.patch":
+      applyMessageEvent(state, event);
+      return;
+    case "question.request":
+    case "question.close":
+    case "permission.request":
+    case "permission.close":
+      applyPromptEvent(state, event);
+      return;
+    case "git.status":
+    case "git.diff":
+    case "git.manage":
+      applyGitEvent(state, event);
+      return;
+    case "file.tree":
+    case "file.content":
+      applyFileEvent(state, event);
+      return;
+    case "request.error":
+      resolveResponse(event.requestId, undefined, event.error);
+      return;
+    case "providers.update":
+      state.providers = event.providers;
+      return;
+    case "github.result":
+      resolveResponse(
+        event.requestId,
+        event.result,
+        event.error ??
+          (event.result === undefined
+            ? "GitHub returned no result."
+            : undefined),
+      );
+      return;
+    case "hello":
+      applyHelloEvent(state, event);
+      return;
     case "toast": {
       state.toasts = [
         ...state.toasts,
@@ -864,7 +1071,7 @@ export function selectThread(id: string | null): void {
       delete next.loaded[id];
       next.loaded[id] = true;
     }
-    trimHistories(next);
+    trimHistories(next, totalHistoryBytes(state));
     return next;
   });
   if (id) environmentStorage.setItem("citropy.thread", id);
@@ -874,7 +1081,7 @@ export function selectThread(id: string | null): void {
 export function selectProject(id: string): void {
   useApp.setState((state) => {
     const next = { ...state, activeProjectId: id, activeThreadId: null };
-    trimHistories(next);
+    trimHistories(next, totalHistoryBytes(state));
     return next;
   });
   environmentStorage.removeItem("citropy.thread");

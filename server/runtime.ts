@@ -428,7 +428,7 @@ export class ThreadRuntime {
     this.#resume = false;
     this.#buildPlan = false;
     stopChildren(this.#thread.id);
-    cancelThread(this.#thread.id);
+    cancelThread(this.#thread.id, false);
     cancelQuestions(this.#thread.id);
     const active = this.#thread.running || this.#thread.compacting;
     store.patchThread(this.#thread.id, { status: "stopped", running: false, compacting: false, activeTool: undefined });
@@ -473,7 +473,7 @@ export class ThreadRuntime {
     this.#finishParts();
     disconnectTools(this.#thread.id);
     if (!preserveStatus) store.patchThread(this.#thread.id, { status: "stopped", running: false, compacting: false, activeTool: undefined });
-    cancelThread(this.#thread.id);
+    cancelThread(this.#thread.id, false);
     cancelQuestions(this.#thread.id);
     this.#session?.dispose();
     this.#session = null;
@@ -589,291 +589,358 @@ export class ThreadRuntime {
     if (this.#thread.status === "queued" && (event.type === "block.start" || event.type === "tool.start")) store.patchThread(this.id, { status: "thinking" });
     switch (event.type) {
       case "shell.background":
-        this.#trackShell(event.callId, { command: event.command, cwd: event.cwd }, event.taskId);
+        this.#onShellBackground(event);
         return;
       case "shell.end":
-        if (event.output !== undefined) shellOutput(`${this.id}:${event.callId}`, event.output);
-        endShell(`${this.id}:${event.callId}`, event.stopped ? "stopped" : event.ok ? "finished" : "failed");
+        this.#onShellEnd(event);
         return;
       case "tool.output":
-        shellOutput(`${this.id}:${event.callId}`, event.output, event.append);
+        this.#onToolOutput(event);
         return;
-      case "compacted": {
-        const manual = this.#thread.compacting;
-        clearTimeout(this.#compactionTimer);
-        if (event.contextTokens !== undefined) this.#applyUsage({ contextTokens: event.contextTokens, contextEstimated: undefined });
-        store.patchThread(this.id, { compacting: false, compactedAt: Date.now(), ...(manual ? { running: false, status: "idle", activeTool: undefined } : {}) });
-        this.#add({ id: uid("prt"), kind: "notice", level: "info", text: "Context compacted. Your conversation history is still available here." });
-        if (manual) this.#messageId = null;
+      case "compacted":
+        this.#onCompacted(event);
         return;
-      }
       case "subagent":
-        store.updateSubagent(this.#thread.id, event);
+        this.#onSubagent(event);
         return;
-      case "session": {
-        this.#pendingModel = event.model ?? this.#thread.model;
-        store.patchThread(this.#thread.id, {
-          externalId: event.externalId || this.#thread.externalId,
-          model: this.#thread.model ?? event.model,
-        });
-        const contextMax = event.contextMax ?? this.#thread.contextWindow ?? selectedModel(providers[this.#thread.provider].models, this.#pendingModel)?.contextMax;
-        if (contextMax) this.#applyUsage({ contextMax });
-        if (event.model === undefined || event.model === (this.#thread.model ?? event.model)) {
-          const reported: Partial<Thread> = {};
-          if (typeof event.effort === "string" && event.effort !== this.#thread.effort) reported.effort = event.effort;
-          if (typeof event.fastMode === "boolean" && event.fastMode !== this.#thread.fastMode) reported.fastMode = event.fastMode;
-          if (Object.keys(reported).length) store.patchThread(this.#thread.id, reported);
-        }
+      case "session":
+        this.#onSession(event);
         return;
-      }
-      case "title": {
-        if (this.#thread.parentThreadId || this.#autoTitle === undefined || this.#thread.title !== this.#autoTitle) return;
-        this.#providerTitled = true;
-        store.patchThread(this.id, { title: event.title.slice(0, 80) });
+      case "title":
+        this.#onTitle(event);
         return;
-      }
-      case "status": {
-        if (this.#thread.status === "stopped") return;
-        store.patchThread(this.#thread.id, {
-          status: hasPendingQuestion(this.#thread.id) ? "awaiting" : event.status,
-          activeTool: hasPendingQuestion(this.#thread.id) ? undefined : event.tool,
-          ...(event.status === "thinking" ||
-          event.status === "working" ||
-          event.status === "awaiting"
-            ? { running: true }
-            : {}),
-        });
+      case "status":
+        this.#onStatus(event);
         return;
-      }
-      case "block.start": {
-        const part: Part =
-          event.block === "reasoning"
-            ? { id: uid("prt"), kind: "reasoning", text: "", complete: false }
-            : { id: uid("prt"), kind: "text", text: "", complete: false };
-        this.#blocks.set(event.blockId, this.#add(part));
+      case "block.start":
+        this.#onBlockStart(event);
         return;
-      }
-      case "block.delta": {
-        const ref = this.#blocks.get(event.blockId);
-        if (!ref) return;
-        store.appendText(this.#thread.id, ref.messageId, ref.partId, event.text);
-        this.#pulseUsage();
+      case "block.delta":
+        this.#onBlockDelta(event);
         return;
-      }
-      case "block.end": {
-        const ref = this.#blocks.get(event.blockId);
-        if (ref) store.patchPart(this.#thread.id, ref.messageId, ref.partId, { complete: true });
-        this.#blocks.delete(event.blockId);
+      case "block.end":
+        this.#onBlockEnd(event);
         return;
-      }
-      case "tool.start": {
-        if (PLAN_TOOLS.has(event.name)) return;
-        if (event.name === "Bash" || event.name === "Shell" || event.name === "Monitor") this.#trackShell(event.callId, event.input);
-        const described = describeTool(event.name, event.input, this.#cwd);
-        const part: ToolPart = {
-          id: uid("prt"),
-          kind: "tool",
-          callId: event.callId,
-          name: event.name,
-          shape: described.shape,
-          headline: described.headline,
-          detail: described.detail,
-          input: event.input,
-          status: "running",
-          imageFiles: imageFilesFor(event.input, this.#cwd),
-          startedAt: Date.now(),
-        };
-        this.#tools.set(event.callId, this.#add(part));
-        this.#running.add(event.callId);
+      case "tool.start":
+        this.#onToolStart(event);
         return;
-      }
-      case "tool.input": {
-        const ref = this.#tools.get(event.callId);
-        if (!ref) return;
-        const thread = store.threads.get(this.#thread.id);
-        const message = thread?.messages.find((m) => m.id === ref.messageId);
-        const part = message?.parts.find((p) => p.id === ref.partId) as ToolPart | undefined;
-        const name = event.name ?? part?.name;
-        if (name && ["Bash", "Shell", "Monitor"].includes(name)) this.#trackShell(event.callId, event.input);
-        const described = describeTool(name ?? "tool", event.input, this.#cwd);
-        const imageFiles = imageFilesFor(event.input, this.#cwd);
-        store.patchPart(this.#thread.id, ref.messageId, ref.partId, {
-          ...(event.name ? { name: event.name } : {}),
-          input: event.input,
-          shape: described.shape,
-          headline: described.headline,
-          detail: described.detail,
-          patch: previewPatch(name ?? "", event.input),
-          ...(imageFiles ? { imageFiles } : {}),
-        });
+      case "tool.input":
+        this.#onToolInput(event);
         return;
-      }
-      case "tool.end": {
-        if (event.output) shellOutput(`${this.id}:${event.callId}`, event.output);
-        endShell(`${this.id}:${event.callId}`, event.ok ? "finished" : "failed", true);
-        const ref = this.#tools.get(event.callId);
-        this.#running.delete(event.callId);
-        if (ref) {
-          const thread = store.threads.get(this.#thread.id);
-          const part = thread?.messages.find((message) => message.id === ref.messageId)?.parts.find((entry) => entry.id === ref.partId) as ToolPart | undefined;
-          store.patchPart(this.#thread.id, ref.messageId, ref.partId, {
-            status: event.ok ? "ok" : "error",
-            output: clip(event.output),
-            endedAt: Date.now(),
-            ...(event.patch && !part?.patch ? { patch: event.patch } : {}),
-          });
-          if (event.images?.length) {
-            void saveToolImages(this.#thread.id, event.images, () => store.threads.has(this.#thread.id)).then((images) => {
-              if (!images.length) return;
-              try {
-                store.patchPart(this.#thread.id, ref.messageId, ref.partId, { images });
-              } catch {}
-            }).catch(() => {});
-          }
-          this.#tools.delete(event.callId);
-        }
-        if (this.#running.size === 0 && this.#thread.status === "working") {
-          store.patchThread(this.#thread.id, { status: "thinking", activeTool: undefined });
-        }
-        this.#pulseUsage();
+      case "tool.end":
+        this.#onToolEnd(event);
         return;
-      }
-      case "todos": {
-        if (this.#todo) {
-          store.patchPart(this.#thread.id, this.#todo.messageId, this.#todo.partId, {
-            items: event.items,
-          });
-          return;
-        }
-        const part: TodoPart = { id: uid("prt"), kind: "todo", items: event.items };
-        this.#todo = this.#add(part);
+      case "todos":
+        this.#onTodos(event);
         return;
-      }
-      case "usage": {
-        this.#applyUsage(event.usage);
+      case "usage":
+        this.#onUsage(event);
         return;
-      }
       case "plan.accepted":
-        this.#buildPlan = true;
+        this.#onPlanAccepted(event);
         return;
-      case "turn.end": {
-        if (!this.#thread.running && !this.#stopping) return;
-        cancelQuestions(this.#thread.id);
-        this.#stopping?.ended();
-        clearTimeout(this.#compactionTimer);
-        const stopped = this.#thread.status === "stopped";
-        const completed =
-          this.#thread.running && this.#thread.status !== "stopped";
-        this.#applyUsage({ turns: this.#thread.usage.turns + 1 });
-        const messageId = this.#messageId ?? undefined;
-        this.#messageId = null;
-        this.#finishParts();
-        const build = this.#buildPlan && completed && !event.error;
-        this.#buildPlan = false;
-        store.patchThread(this.#thread.id, {
-          status: stopped ? "stopped" : event.error ? "error" : "idle",
-          running: false,
-          compacting: false,
-          activeTool: undefined,
-          error: stopped ? undefined : event.error,
-        });
-        if (completed && !this.#thread.parentThreadId)
-          store.notify({
-            kind: "chat",
-            level: event.error ? "error" : "success",
-            title: event.error
-              ? "Chat needs attention"
-              : "Response finished",
-            text: event.error ?? this.#thread.title,
-            target: {
-              view: "chat",
-              projectId: this.#thread.projectId,
-              threadId: this.#thread.id,
-            },
-          });
-        const settle = () => {
-          if (build)
-            store.patchThread(this.#thread.id, {
-              permissionMode: "manual" as const,
-              queue: [{ id: uid("que"), text: "Build the plan.", createdAt: Date.now() }, ...(this.#thread.queue ?? [])],
-            });
-          if (this.#thread.provider === "cursor" && !this.#providerTitled && this.#autoTitle !== undefined && this.#thread.title === this.#autoTitle)
-            void generateThreadTitle(this.id, true);
-          this.#resume = completed && !event.error;
-          this.#checkpointCompletion = finishCheckpoint(this.#thread, messageId).catch(() => {}).finally(() => {
-            this.#checkpointCompletion = null;
-            this.#pump();
-          });
-          this.#pump();
-        };
-        if (build) {
-          const session = this.#session;
-          void (async () => {
-            let live = false;
-            if (session?.configure) {
-              try { await session.configure({ permissionMode: "manual" }); live = true; }
-              catch { live = false; }
-            }
-            if (!live) {
-              if (this.#session === session) {
-                this.#sessionGeneration += 1;
-                this.#session = null;
-              }
-              session?.dispose();
-              disconnectTools(this.id);
-            }
-            settle();
-          })();
-        } else {
-          settle();
-        }
+      case "turn.end":
+        this.#onTurnEnd(event);
         return;
-      }
-      case "notice": {
-        if (event.level === "info") return;
-        this.#add({ id: uid("prt"), kind: "notice", level: event.level, text: event.text });
+      case "notice":
+        this.#onNotice(event);
         return;
-      }
-      case "exit": {
-        this.#stopping?.release();
-        clearTimeout(this.#compactionTimer);
-        this.#resume = false;
-        this.#buildPlan = false;
-        if (this.#thread.running && this.#thread.status !== "stopped" && !this.#thread.parentThreadId)
-          store.notify({
-            kind: "chat",
-            level: event.code ? "error" : "success",
-            title: event.code
-              ? "Provider stopped unexpectedly"
-              : "Response finished",
-            text: this.#thread.title,
-            target: {
-              view: "chat",
-              projectId: this.#thread.projectId,
-              threadId: this.#thread.id,
-            },
-          });
-        disconnectTools(this.#thread.id);
-        stopChildren(this.#thread.id);
-        cancelThread(this.#thread.id);
-        cancelQuestions(this.#thread.id);
-        const session = this.#session;
-        this.#session = null;
-        this.#sessionGeneration += 1;
-        session?.dispose();
-        endThreadShells(this.id, event.code ? "failed" : "stopped");
-        this.#finishParts();
-        this.#messageId = null;
-        const status = event.code === 0 ? "idle" : "error";
-        store.patchThread(this.#thread.id, {
-          status: this.#thread.status === "stopped" ? "stopped" : status,
-          running: false,
-          compacting: false,
-          activeTool: undefined,
-        });
+      case "exit":
+        this.#onExit(event);
         return;
-      }
     }
+  }
+
+  #onShellBackground(event: Extract<AgentEvent, { type: "shell.background" }>): void {
+    this.#trackShell(event.callId, { command: event.command, cwd: event.cwd }, event.taskId);
+  }
+
+  #onShellEnd(event: Extract<AgentEvent, { type: "shell.end" }>): void {
+    if (event.output !== undefined) shellOutput(`${this.id}:${event.callId}`, event.output);
+    endShell(`${this.id}:${event.callId}`, event.stopped ? "stopped" : event.ok ? "finished" : "failed");
+  }
+
+  #onToolOutput(event: Extract<AgentEvent, { type: "tool.output" }>): void {
+    shellOutput(`${this.id}:${event.callId}`, event.output, event.append);
+  }
+
+  #onCompacted(event: Extract<AgentEvent, { type: "compacted" }>): void {
+    const manual = this.#thread.compacting;
+    clearTimeout(this.#compactionTimer);
+    if (event.contextTokens !== undefined) this.#applyUsage({ contextTokens: event.contextTokens, contextEstimated: undefined });
+    store.patchThread(this.id, { compacting: false, compactedAt: Date.now(), ...(manual ? { running: false, status: "idle", activeTool: undefined } : {}) });
+    this.#add({ id: uid("prt"), kind: "notice", level: "info", text: "Context compacted. Your conversation history is still available here." });
+    if (manual) this.#messageId = null;
+  }
+
+  #onSubagent(event: Extract<AgentEvent, { type: "subagent" }>): void {
+    store.updateSubagent(this.#thread.id, event);
+  }
+
+  #onSession(event: Extract<AgentEvent, { type: "session" }>): void {
+    this.#pendingModel = event.model ?? this.#thread.model;
+    store.patchThread(this.#thread.id, {
+      externalId: event.externalId || this.#thread.externalId,
+      model: this.#thread.model ?? event.model,
+    });
+    const contextMax = event.contextMax ?? this.#thread.contextWindow ?? selectedModel(providers[this.#thread.provider].models, this.#pendingModel)?.contextMax;
+    if (contextMax) this.#applyUsage({ contextMax });
+    if (event.model === undefined || event.model === (this.#thread.model ?? event.model)) {
+      const reported: Partial<Thread> = {};
+      if (typeof event.effort === "string" && event.effort !== this.#thread.effort) reported.effort = event.effort;
+      if (typeof event.fastMode === "boolean" && event.fastMode !== this.#thread.fastMode) reported.fastMode = event.fastMode;
+      if (Object.keys(reported).length) store.patchThread(this.#thread.id, reported);
+    }
+  }
+
+  #onTitle(event: Extract<AgentEvent, { type: "title" }>): void {
+    if (this.#thread.parentThreadId || this.#autoTitle === undefined || this.#thread.title !== this.#autoTitle) return;
+    this.#providerTitled = true;
+    store.patchThread(this.id, { title: event.title.slice(0, 80) });
+  }
+
+  #onStatus(event: Extract<AgentEvent, { type: "status" }>): void {
+    if (this.#thread.status === "stopped") return;
+    store.patchThread(this.#thread.id, {
+      status: hasPendingQuestion(this.#thread.id) ? "awaiting" : event.status,
+      activeTool: hasPendingQuestion(this.#thread.id) ? undefined : event.tool,
+      ...(event.status === "thinking" ||
+      event.status === "working" ||
+      event.status === "awaiting"
+        ? { running: true }
+        : {}),
+    });
+  }
+
+  #onBlockStart(event: Extract<AgentEvent, { type: "block.start" }>): void {
+    const part: Part =
+      event.block === "reasoning"
+        ? { id: uid("prt"), kind: "reasoning", text: "", complete: false }
+        : { id: uid("prt"), kind: "text", text: "", complete: false };
+    this.#blocks.set(event.blockId, this.#add(part));
+  }
+
+  #onBlockDelta(event: Extract<AgentEvent, { type: "block.delta" }>): void {
+    const ref = this.#blocks.get(event.blockId);
+    if (!ref) return;
+    store.appendText(this.#thread.id, ref.messageId, ref.partId, event.text);
+    this.#pulseUsage();
+  }
+
+  #onBlockEnd(event: Extract<AgentEvent, { type: "block.end" }>): void {
+    const ref = this.#blocks.get(event.blockId);
+    if (ref) store.patchPart(this.#thread.id, ref.messageId, ref.partId, { complete: true });
+    this.#blocks.delete(event.blockId);
+  }
+
+  #onToolStart(event: Extract<AgentEvent, { type: "tool.start" }>): void {
+    if (PLAN_TOOLS.has(event.name)) return;
+    if (event.name === "Bash" || event.name === "Shell" || event.name === "Monitor") this.#trackShell(event.callId, event.input);
+    const described = describeTool(event.name, event.input, this.#cwd);
+    const part: ToolPart = {
+      id: uid("prt"),
+      kind: "tool",
+      callId: event.callId,
+      name: event.name,
+      shape: described.shape,
+      headline: described.headline,
+      detail: described.detail,
+      input: event.input,
+      status: "running",
+      imageFiles: imageFilesFor(event.input, this.#cwd),
+      startedAt: Date.now(),
+    };
+    this.#tools.set(event.callId, this.#add(part));
+    this.#running.add(event.callId);
+  }
+
+  #onToolInput(event: Extract<AgentEvent, { type: "tool.input" }>): void {
+    const ref = this.#tools.get(event.callId);
+    if (!ref) return;
+    const thread = store.threads.get(this.#thread.id);
+    const message = thread?.messages.find((m) => m.id === ref.messageId);
+    const part = message?.parts.find((p) => p.id === ref.partId) as ToolPart | undefined;
+    const name = event.name ?? part?.name;
+    if (name && ["Bash", "Shell", "Monitor"].includes(name)) this.#trackShell(event.callId, event.input);
+    const described = describeTool(name ?? "tool", event.input, this.#cwd);
+    const imageFiles = imageFilesFor(event.input, this.#cwd);
+    store.patchPart(this.#thread.id, ref.messageId, ref.partId, {
+      ...(event.name ? { name: event.name } : {}),
+      input: event.input,
+      shape: described.shape,
+      headline: described.headline,
+      detail: described.detail,
+      patch: previewPatch(name ?? "", event.input),
+      ...(imageFiles ? { imageFiles } : {}),
+    });
+  }
+
+  #onToolEnd(event: Extract<AgentEvent, { type: "tool.end" }>): void {
+    if (event.output) shellOutput(`${this.id}:${event.callId}`, event.output);
+    endShell(`${this.id}:${event.callId}`, event.ok ? "finished" : "failed", true);
+    const ref = this.#tools.get(event.callId);
+    this.#running.delete(event.callId);
+    if (ref) {
+      const thread = store.threads.get(this.#thread.id);
+      const part = thread?.messages.find((message) => message.id === ref.messageId)?.parts.find((entry) => entry.id === ref.partId) as ToolPart | undefined;
+      store.patchPart(this.#thread.id, ref.messageId, ref.partId, {
+        status: event.ok ? "ok" : "error",
+        output: clip(event.output),
+        endedAt: Date.now(),
+        ...(event.patch && !part?.patch ? { patch: event.patch } : {}),
+      });
+      if (event.images?.length) {
+        void saveToolImages(this.#thread.id, event.images, () => store.threads.has(this.#thread.id)).then((images) => {
+          if (!images.length) return;
+          try {
+            store.patchPart(this.#thread.id, ref.messageId, ref.partId, { images });
+          } catch {}
+        }).catch(() => {});
+      }
+      this.#tools.delete(event.callId);
+    }
+    if (this.#running.size === 0 && this.#thread.status === "working") {
+      store.patchThread(this.#thread.id, { status: "thinking", activeTool: undefined });
+    }
+    this.#pulseUsage();
+  }
+
+  #onTodos(event: Extract<AgentEvent, { type: "todos" }>): void {
+    if (this.#todo) {
+      store.patchPart(this.#thread.id, this.#todo.messageId, this.#todo.partId, {
+        items: event.items,
+      });
+      return;
+    }
+    const part: TodoPart = { id: uid("prt"), kind: "todo", items: event.items };
+    this.#todo = this.#add(part);
+  }
+
+  #onUsage(event: Extract<AgentEvent, { type: "usage" }>): void {
+    this.#applyUsage(event.usage);
+  }
+
+  #onPlanAccepted(event: Extract<AgentEvent, { type: "plan.accepted" }>): void {
+    this.#buildPlan = true;
+  }
+
+  #onTurnEnd(event: Extract<AgentEvent, { type: "turn.end" }>): void {
+    if (!this.#thread.running && !this.#stopping) return;
+    cancelQuestions(this.#thread.id);
+    this.#stopping?.ended();
+    clearTimeout(this.#compactionTimer);
+    const stopped = this.#thread.status === "stopped";
+    const completed =
+      this.#thread.running && this.#thread.status !== "stopped";
+    this.#applyUsage({ turns: this.#thread.usage.turns + 1 });
+    const messageId = this.#messageId ?? undefined;
+    this.#messageId = null;
+    this.#finishParts();
+    const build = this.#buildPlan && completed && !event.error;
+    this.#buildPlan = false;
+    store.patchThread(this.#thread.id, {
+      status: stopped ? "stopped" : event.error ? "error" : "idle",
+      running: false,
+      compacting: false,
+      activeTool: undefined,
+      error: stopped ? undefined : event.error,
+    });
+    if (completed && !this.#thread.parentThreadId)
+      store.notify({
+        kind: "chat",
+        level: event.error ? "error" : "success",
+        title: event.error
+          ? "Chat needs attention"
+          : "Response finished",
+        text: event.error ?? this.#thread.title,
+        target: {
+          view: "chat",
+          projectId: this.#thread.projectId,
+          threadId: this.#thread.id,
+        },
+      });
+    const settle = () => {
+      if (build)
+        store.patchThread(this.#thread.id, {
+          permissionMode: "manual" as const,
+          queue: [{ id: uid("que"), text: "Build the plan.", createdAt: Date.now() }, ...(this.#thread.queue ?? [])],
+        });
+      if (this.#thread.provider === "cursor" && !this.#providerTitled && this.#autoTitle !== undefined && this.#thread.title === this.#autoTitle)
+        void generateThreadTitle(this.id, true);
+      this.#resume = completed && !event.error;
+      this.#checkpointCompletion = finishCheckpoint(this.#thread, messageId).catch(() => {}).finally(() => {
+        this.#checkpointCompletion = null;
+        this.#pump();
+      });
+      this.#preparing = false;
+      this.#pump();
+    };
+    if (build) {
+      const session = this.#session;
+      this.#preparing = true;
+      void (async () => {
+        let live = false;
+        if (session?.configure) {
+          try { await session.configure({ permissionMode: "manual" }); live = true; }
+          catch { live = false; }
+        }
+        if (!live) {
+          if (this.#session === session) {
+            this.#sessionGeneration += 1;
+            this.#session = null;
+          }
+          session?.dispose();
+          disconnectTools(this.id);
+        }
+        settle();
+      })();
+    } else {
+      settle();
+    }
+  }
+
+  #onNotice(event: Extract<AgentEvent, { type: "notice" }>): void {
+    if (event.level === "info") return;
+    this.#add({ id: uid("prt"), kind: "notice", level: event.level, text: event.text });
+  }
+
+  #onExit(event: Extract<AgentEvent, { type: "exit" }>): void {
+    this.#stopping?.release();
+    clearTimeout(this.#compactionTimer);
+    this.#resume = false;
+    this.#buildPlan = false;
+    if (this.#thread.running && this.#thread.status !== "stopped" && !this.#thread.parentThreadId)
+      store.notify({
+        kind: "chat",
+        level: event.code ? "error" : "success",
+        title: event.code
+          ? "Provider stopped unexpectedly"
+          : "Response finished",
+        text: this.#thread.title,
+        target: {
+          view: "chat",
+          projectId: this.#thread.projectId,
+          threadId: this.#thread.id,
+        },
+      });
+    disconnectTools(this.#thread.id);
+    stopChildren(this.#thread.id);
+    cancelThread(this.#thread.id, false);
+    cancelQuestions(this.#thread.id);
+    const session = this.#session;
+    this.#session = null;
+    this.#sessionGeneration += 1;
+    session?.dispose();
+    endThreadShells(this.id, event.code ? "failed" : "stopped");
+    this.#finishParts();
+    this.#messageId = null;
+    const status = event.code === 0 ? "idle" : "error";
+    store.patchThread(this.#thread.id, {
+      status: this.#thread.status === "stopped" ? "stopped" : status,
+      running: false,
+      compacting: false,
+      activeTool: undefined,
+    });
   }
 }
 
@@ -911,7 +978,7 @@ export function disposeRuntime(threadId: string, preserveStatus = false): void {
     if (child.parentThreadId === threadId) disposeRuntime(child.id);
   }
   disconnectTools(threadId);
-  cancelThread(threadId);
+  cancelThread(threadId, false);
   if (store.threads.get(threadId)?.running) store.patchThread(threadId, { running: false, status: "stopped", activeTool: undefined });
   runtimes.get(threadId)?.dispose(preserveStatus);
   runtimes.delete(threadId);
@@ -923,7 +990,7 @@ function stopChildren(threadId: string): void {
     if (runtimes.has(child.id)) runtimes.get(child.id)!.stop();
     else {
       stopChildren(child.id);
-      cancelThread(child.id);
+      cancelThread(child.id, false);
       if (child.running) store.patchThread(child.id, { running: false, status: "stopped", activeTool: undefined });
     }
   }
