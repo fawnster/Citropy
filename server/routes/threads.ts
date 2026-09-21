@@ -52,7 +52,8 @@ function resolveConfig(thread: Thread, event: ConfigEvent): { changedProvider: b
 export const threadRoutes: Routes = {
   "thread.create": async (event, send) => {
     const provider = providerInfo().find((entry) => entry.id === event.provider);
-    if (!provider?.available) throw new Error("This provider is not available on this computer.");
+    if (!provider?.available || !provider.enabled)
+      throw new Error("This provider is not available on this computer.");
     const project = store.projects.get(event.projectId);
     if (!project) throw new Error("Workspace not found");
     const workspace = await chooseThreadWorkspace(project, event.workspace);

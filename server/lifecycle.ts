@@ -14,6 +14,12 @@ export function shuttingDown(): boolean {
 export async function shutdown(): Promise<void> {
   if (stopping) return;
   stopping = true;
-  for (const step of steps) await step();
+  for (const step of steps) {
+    try {
+      await step();
+    } catch (error) {
+      process.stderr.write(`Shutdown step failed: ${(error as Error).message}\n`);
+    }
+  }
   process.exit(0);
 }

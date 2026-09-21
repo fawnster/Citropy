@@ -438,6 +438,7 @@ export const gitEs: Record<string, string> = {
   "Try again": "Reintentar",
   "Try another filter or refresh for updates.": "Prueba otro filtro o actualiza para ver novedades.",
   "Type changed": "Tipo cambiado",
+  "Unstage": "Quitar de preparación",
   "Unstage ": "Quitar de preparación ",
   "Unstage all": "Quitar todo del área de preparación",
   "Unstaged changes": "Cambios sin preparar",

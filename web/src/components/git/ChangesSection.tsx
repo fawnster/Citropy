@@ -283,7 +283,7 @@ export function ChangesSection({
                     ) : (
                       <Plus size={14} />
                     )}
-                    {selection.staged ? "Unstage" : t("Stage file")}
+                    {selection.staged ? t("Unstage") : t("Stage file")}
                   </button>
                 </div>
               </header>

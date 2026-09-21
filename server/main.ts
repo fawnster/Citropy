@@ -267,15 +267,20 @@ const gitTimer = setInterval(() => {
 gitTimer.unref();
 
 onShutdown(async () => {
-  server.close();
+  const closed = new Promise<void>((resolve) => server.close(() => resolve()));
+  for (const client of wss.clients) client.terminate();
+  wss.close();
+  server.closeAllConnections();
   clearInterval(providerTimer);
   stopProviderUpdateChecks?.();
   clearInterval(gitTimer);
   disposeAll();
   terminals.detach();
   store.flush();
-  await stopComputer();
-  await Promise.all([browser.closeBrowsers(), waitForStoppedProcesses()]);
+  const results = await Promise.allSettled([closed, stopComputer(), browser.closeBrowsers(), waitForStoppedProcesses()]);
+  for (const result of results)
+    if (result.status === "rejected")
+      process.stderr.write(`Shutdown step failed: ${(result.reason as Error)?.message ?? String(result.reason)}\n`);
 });
 
 server.listen(port, host, async () => {
