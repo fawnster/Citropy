@@ -23,15 +23,24 @@ function inside(root: string, file: string): boolean {
   return path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path);
 }
 
+/** Return whether two stat results identify the same filesystem object. */
+function sameFile(left: { dev: number; ino: number }, right: { dev: number; ino: number }): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
 /** Open a regular file within a canonical root; the caller owns the returned descriptor. */
 function openFile(root: string, file: string) {
   let fd: number | undefined;
   try {
+    // Capture the identity before resolving the path. A replacement before realpath
+    // either escapes containment or changes the identity checked after open.
+    const expected = statSync(file);
+    if (!expected.isFile()) return undefined;
     const canonical = realpathSync(file);
-    if (!inside(root, canonical) || !statSync(canonical).isFile()) return undefined;
+    if (!inside(root, canonical)) return undefined;
     fd = openSync(canonical, "r");
     const info = fstatSync(fd);
-    if (!info.isFile()) { closeSync(fd); return undefined; }
+    if (!info.isFile() || !sameFile(expected, info)) { closeSync(fd); return undefined; }
     return { fd, info, path: canonical };
   } catch {
     if (fd !== undefined) closeSync(fd);

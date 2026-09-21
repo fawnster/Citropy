@@ -53,13 +53,17 @@ export async function read(root: string, path: string): Promise<string | null> {
   const abs = inside(root, path);
   if (!abs) return null;
   try {
+    // Capture the identity before resolving containment. If the path is swapped after
+    // validation, the opened descriptor must still match this exact filesystem object.
+    const expected = await stat(abs);
+    if (!expected.isFile()) return null;
+    const canonicalRoot = await realpath(root);
     const canonical = await realpath(abs);
-    if (!inside(await realpath(root), canonical)) return null;
-    // Reject directories and special files before opening (a FIFO could otherwise block).
-    if (!(await stat(canonical)).isFile()) return null;
+    if (!inside(canonicalRoot, canonical)) return null;
     const file = await open(canonical, "r");
     try {
-      if (!(await file.stat()).isFile()) return null;
+      const info = await file.stat();
+      if (!info.isFile() || info.dev !== expected.dev || info.ino !== expected.ino) return null;
       // One lookahead byte detects truncation without ever reading the entire file.
       // Loop because a successful read is allowed to return fewer bytes than requested.
       const buffer = Buffer.alloc(MAX_BYTES + 1);

@@ -39,3 +39,4 @@ jobs:
           tests/audit-remote-proxy.test.mjs tests/audit-test-ci.test.mjs
           tests/audit-diff.test.mjs tests/audit-terminal-daemon.test.mjs
           tests/audit-http.test.mjs tests/audit-diff-paths.test.mjs
+          tests/audit-containment-race.test.mjs
