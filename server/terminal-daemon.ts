@@ -34,6 +34,9 @@ const server = createServer(socket => {
       void (async () => {
         let request: Record<string, any>;
         try { request = JSON.parse(line); } catch { socket.destroy(); return; }
+        // JSON primitives (especially null) cannot be read as protocol envelopes.
+        // Reject before the error handler, which also needs a valid request object.
+        if (!request || typeof request !== "object" || Array.isArray(request)) { socket.destroy(); return; }
         try {
           if (!authenticated) {
             if (request.op !== "hello" || request.token !== token || request.version !== 1) { socket.destroy(); return; }

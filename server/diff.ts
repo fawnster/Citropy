@@ -8,6 +8,8 @@ export function parseUnifiedDiff(text: string, fallbackPath = ""): FilePatch[] {
   let hunk: PatchHunk | null = null;
   let oldNo = 0;
   let newNo = 0;
+  let oldRemaining = 0;
+  let newRemaining = 0;
 
   const push = () => {
     if (current) patches.push(current);
@@ -22,23 +24,28 @@ export function parseUnifiedDiff(text: string, fallbackPath = ""): FilePatch[] {
       current = { path: match?.[1] ?? fallbackPath, added: 0, removed: 0, hunks: [] };
       continue;
     }
-    if (line.startsWith("+++ ")) {
+    if (!hunk && line.startsWith("+++ ")) {
       const path = line.slice(4).replace(/^b\//, "").trim();
       if (!current) current = { path, added: 0, removed: 0, hunks: [] };
       else if (path && path !== "/dev/null") current.path = path;
       continue;
     }
-    if (line.startsWith("--- ")) {
+    if (!hunk && line.startsWith("--- ")) {
+      if (current?.hunks.length) push();
       if (!current) current = { path: fallbackPath, added: 0, removed: 0, hunks: [] };
       continue;
     }
     if (line.startsWith("@@")) {
+      const match = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/.exec(line);
+      if (!match) continue;
       if (!current) current = { path: fallbackPath, added: 0, removed: 0, hunks: [] };
-      const match = /@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)/.exec(line);
-      oldNo = Number(match?.[1] ?? 1);
-      newNo = Number(match?.[2] ?? 1);
-      hunk = { header: (match?.[3] ?? "").trim(), oldStart: oldNo, newStart: newNo, lines: [] };
+      oldNo = Number(match[1]);
+      newNo = Number(match[3]);
+      oldRemaining = Number(match[2] ?? 1);
+      newRemaining = Number(match[4] ?? 1);
+      hunk = { header: (match[5] ?? "").trim(), oldStart: oldNo, newStart: newNo, lines: [] };
       current.hunks.push(hunk);
+      if (!oldRemaining && !newRemaining) hunk = null;
       continue;
     }
     if (!current || !hunk) continue;
@@ -46,15 +53,21 @@ export function parseUnifiedDiff(text: string, fallbackPath = ""): FilePatch[] {
       hunk.lines.push({ type: "add", text: line.slice(1), newNo });
       newNo += 1;
       current.added += 1;
+      newRemaining -= 1;
     } else if (line.startsWith("-")) {
       hunk.lines.push({ type: "del", text: line.slice(1), oldNo });
       oldNo += 1;
       current.removed += 1;
+      oldRemaining -= 1;
     } else if (line.startsWith(" ")) {
       hunk.lines.push({ type: "ctx", text: line.slice(1), oldNo, newNo });
       oldNo += 1;
       newNo += 1;
+      oldRemaining -= 1;
+      newRemaining -= 1;
     }
+    // Header-looking source lines belong to the hunk until its declared ranges end.
+    if (oldRemaining <= 0 && newRemaining <= 0) hunk = null;
   }
   push();
   return patches.map(truncate);
