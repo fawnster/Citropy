@@ -101,6 +101,15 @@ test("the ACP provider drives a fake Cursor agent", { timeout: 120_000 }, async 
   const end = await waitFor(() => events.find((event) => event.type === "turn.end"), "the first turn to finish");
   assert.equal(end.error, undefined);
 
+  const sessionEventsBefore = events.filter((event) => event.type === "session").length;
+  await session.configure({ effort: "high" });
+  const reconfigured = await waitFor(
+    () => events.filter((event) => event.type === "session").length > sessionEventsBefore && events.filter((event) => event.type === "session").at(-1),
+    "the reconfigured session",
+  );
+  assert.equal(reconfigured.effort, "high");
+  assert.equal((await entries()).some((entry) => entry.method === "session/set_config_option" && entry.configId === "effort" && entry.value === "high"), true);
+
   const sessionEvent = events.find((event) => event.type === "session");
   assert.match(sessionEvent.externalId, /^fake-/);
   assert.equal(sessionEvent.contextMax, 200000);
@@ -121,7 +130,16 @@ test("the ACP provider drives a fake Cursor agent", { timeout: 120_000 }, async 
   const toolEnd = events.find((event) => event.type === "tool.end" && event.callId === "tool-1");
   assert.equal(toolEnd.ok, true);
   assert.match(toolEnd.output, /All checks passed/);
+  assert.equal(toolEnd.output.includes("exitCode"), false);
   assert.deepEqual(toolEnd.images, [{ mime: "image/png", data: "aGVsbG8=" }]);
+  const title = events.find((event) => event.type === "title");
+  assert.equal(title?.title, "Word Pong");
+  const editEnd = events.find((event) => event.type === "tool.end" && event.callId === "edit-1");
+  assert.ok(editEnd.patch);
+  assert.ok(editEnd.patch.hunks.length > 0);
+  const createdEnd = events.find((event) => event.type === "tool.end" && event.callId === "edit-2");
+  assert.ok(createdEnd.patch);
+  assert.ok(createdEnd.patch.hunks.length > 0);
   const todos = events.filter((event) => event.type === "todos").at(-1);
   assert.deepEqual(todos.items.map((item) => [item.text, item.status]), [["Run the checks", "in_progress"], ["Report the result", "completed"]]);
   const usage = events.find((event) => event.type === "usage");
@@ -152,7 +170,7 @@ test("the ACP provider drives a fake Cursor agent", { timeout: 120_000 }, async 
 
   process.env.FAKE_ACP_SIGNED_OUT = "1";
   t.after(() => { delete process.env.FAKE_ACP_SIGNED_OUT; });
-  const signedOut = /Cursor is not signed in\. Run `cursor-agent login` in a terminal/;
+  const signedOut = /Cursor is not signed in\. Run `agent login` in a terminal/;
   await assert.rejects(acpModels(cursorConfig), signedOut);
   const signedOutEvents = [];
   cursorProvider.start({ threadId: "acp-signed-out", cwd: directory, permissionMode: "manual", emit: (event) => signedOutEvents.push(event) });

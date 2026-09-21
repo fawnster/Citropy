@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import * as acp from "@agentclientprotocol/sdk";
 import { appendFileSync } from "node:fs";
+import { join } from "node:path";
 import { Readable, Writable } from "node:stream";
 
 const record = (entry) => {
@@ -120,6 +121,10 @@ const app = acp.agent({ name: "fake-cursor" })
     const links = context.params.prompt.filter((block) => block.type === "resource_link").length;
     record({ method: "session/prompt", text, images, links });
     cancelled = false;
+    await context.client.notify(acp.methods.client.session.update, {
+      sessionId,
+      update: { sessionUpdate: "session_info_update", title: "Word Pong" },
+    });
     if (text.includes("slow")) {
       while (!cancelled) await new Promise((resolve) => setTimeout(resolve, 20));
       return { stopReason: "cancelled" };
@@ -238,10 +243,38 @@ const app = acp.agent({ name: "fake-cursor" })
         sessionUpdate: "tool_call_update",
         toolCallId: "tool-1",
         status: "completed",
+        rawOutput: { exitCode: 0, stdout: "All checks passed\n", stderr: "" },
         content: [
-          { type: "content", content: { type: "text", text: "All checks passed" } },
           { type: "content", content: { type: "image", data: "aGVsbG8=", mimeType: "image/png" } },
         ],
+      },
+    });
+    const edited = join(process.cwd(), "edited.txt");
+    await context.client.notify(acp.methods.client.session.update, {
+      sessionId,
+      update: { sessionUpdate: "tool_call", toolCallId: "edit-1", title: "Edit file", kind: "edit", status: "pending", locations: [{ path: edited }], rawInput: { path: edited } },
+    });
+    await context.client.notify(acp.methods.client.session.update, {
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "edit-1",
+        status: "completed",
+        content: [{ type: "diff", path: edited, oldText: "line one\nline two\n", newText: "line one\nsecond line\n" }],
+      },
+    });
+    const created = join(process.cwd(), "created.txt");
+    await context.client.notify(acp.methods.client.session.update, {
+      sessionId,
+      update: { sessionUpdate: "tool_call", toolCallId: "edit-2", title: "Create file", kind: "edit", status: "pending", locations: [{ path: created }], rawInput: { path: created } },
+    });
+    await context.client.notify(acp.methods.client.session.update, {
+      sessionId,
+      update: {
+        sessionUpdate: "tool_call_update",
+        toolCallId: "edit-2",
+        status: "completed",
+        content: [{ type: "diff", path: created, oldText: "-- /dev/null", newText: `++ b/${created}\nhi` }],
       },
     });
     await notifications(context.client, "message-2", [{ kind: "agent_message_chunk", text: "Done." }]);
