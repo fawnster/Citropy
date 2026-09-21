@@ -12,6 +12,7 @@ import { RunningShells } from "./RunningShells.tsx";
 import { WorkspaceSelector } from "./WorkspaceSelector.tsx";
 import type { NotificationTarget } from "../../../shared/protocol.ts";
 
+/** Render workspace navigation using branch metadata scoped to the selected checkout. */
 export function Titlebar({
   view,
   sidebarOpen,
@@ -46,7 +47,10 @@ export function Titlebar({
   const project = projects.find((entry) => entry.id === activeProjectId);
   // The project-level Git cache can still describe a previously selected worktree.
   // The Git monitor refreshes this checkout-specific metadata for the sidebar too.
-  const branch = thread ? thread.workspaceBranch : project?.branch;
+  const onProjectCheckout = !thread?.workspacePath || thread.workspacePath === project?.path;
+  const branch = thread
+    ? thread.workspaceBranch ?? (onProjectCheckout ? project?.branch : undefined)
+    : project?.branch;
   const header = useRef<HTMLElement>(null);
   useEffect(() => {
     const element = header.current;

@@ -23,6 +23,7 @@ export function forgetGit(projectId: string): void {
   for (const key of cache.keys()) if (key === projectId || key.startsWith(`${projectId}:`)) cache.delete(key);
 }
 
+/** Coalesce checkout reads, synchronize saved branch labels, and emit valid targets' status. */
 export function refreshGit(projectId: string, force = false, threadId?: string): Promise<void> {
   const project = store.projects.get(projectId);
   if (!project || (threadId && !store.threads.has(threadId))) return Promise.resolve();

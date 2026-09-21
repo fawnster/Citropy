@@ -102,5 +102,30 @@ test("the sidebar and titlebar agree without borrowing another worktree's cached
     send({ t: "thread.upsert", thread: { ...isolated, workspaceBranch: "detached" } });
     await agrees(isolated.id, "detached");
   });
+  for (const path of [undefined, project.path]) {
+    await t.test(`missing branch metadata on the ${path ? "explicit" : "legacy"} project checkout uses its own project branch`, async () => {
+      await page.getByRole("button", { name: selected.title, exact: true }).click();
+      send({ t: "thread.upsert", thread: { ...selected, workspacePath: path, workspaceBranch: undefined } });
+      // Wait for the actual metadata event, not a matching label from the prior render.
+      await page.waitForFunction(async ({ path, branch }) => {
+        const { useApp } = await import("/web/src/lib/store.ts");
+        const thread = useApp.getState().threads.selected;
+        return thread?.workspaceBranch === undefined && thread?.workspacePath === path &&
+          document.querySelector(".workspace-breadcrumb .branch .truncate")?.textContent === branch;
+      }, { path, branch: selected.workspaceBranch });
+      send({ t: "thread.upsert", thread: selected });
+      await agrees(selected.id, selected.workspaceBranch);
+    });
+  }
+  await t.test("an explicit empty branch is not replaced with the project branch", async () => {
+    send({ t: "thread.upsert", thread: { ...selected, workspaceBranch: "" } });
+    await page.waitForFunction(async () => {
+      const { useApp } = await import("/web/src/lib/store.ts");
+      return useApp.getState().threads.selected?.workspaceBranch === "" &&
+        !document.querySelector(".workspace-breadcrumb .branch");
+    });
+    send({ t: "thread.upsert", thread: selected });
+    await agrees(selected.id, selected.workspaceBranch);
+  });
   assert.deepEqual(errors, []);
 });
