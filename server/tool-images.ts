@@ -1,9 +1,9 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { rmSync } from "node:fs";
+import { mkdir, open, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { constants, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { dirname, join, parse } from "node:path";
 import { dataRoot } from "./paths.ts";
-import { inside } from "./files.ts";
+import { directoryState, inside, sameDirectoryState } from "./files.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { ToolImage } from "../shared/protocol.ts";
 
@@ -43,6 +43,52 @@ export async function saveToolImages(
     return [];
   }
   return saved;
+}
+
+export async function saveToolImageFile(
+  threadId: string,
+  path: string,
+  isAlive: () => boolean,
+): Promise<ToolImage> {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (!isAlive()) throw new Error("Conversation closed.");
+    const directories = await directoryState(parse(path).root, dirname(path));
+    if (!directories) throw new Error("The image path changed. Try again.");
+    const expected = await stat(path);
+    if (!expected.isFile()) throw new Error("Choose a regular image file.");
+    if (expected.size > maxBytes) throw new Error("Images can be up to 8 MiB.");
+    if (await realpath(path) !== path) throw new Error("The image path changed. Try again.");
+    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    let body: Buffer;
+    try {
+      const info = await file.stat();
+      if (!info.isFile() || info.dev !== expected.dev || info.ino !== expected.ino)
+        throw new Error("The image file changed. Try again.");
+      const buffer = Buffer.alloc(maxBytes + 1);
+      let length = 0;
+      while (length < buffer.length) {
+        const { bytesRead } = await file.read(buffer, length, buffer.length - length, length);
+        if (!bytesRead) break;
+        length += bytesRead;
+      }
+      if (length > maxBytes) throw new Error("Images can be up to 8 MiB.");
+      body = buffer.subarray(0, length);
+    } finally {
+      await file.close();
+    }
+    if (!(await sameDirectoryState(directories))) continue;
+    const mime = body.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? "image/png"
+      : body[0] === 255 && body[1] === 216 && body[2] === 255 ? "image/jpeg"
+      : ["GIF87a", "GIF89a"].includes(body.toString("latin1", 0, 6)) ? "image/gif"
+      : body.toString("latin1", 0, 4) === "RIFF" && body.toString("latin1", 8, 12) === "WEBP" ? "image/webp"
+      : undefined;
+    if (!mime) throw new Error("Choose a PNG, JPEG, GIF, or WebP image.");
+    if (!isAlive()) throw new Error("Conversation closed.");
+    const [image] = await saveToolImages(threadId, [{ mime, data: body.toString("base64") }], isAlive);
+    if (!image) throw new Error("Conversation closed.");
+    return image;
+  }
+  throw new Error("The image path changed. Try again.");
 }
 
 export async function serveToolImage(

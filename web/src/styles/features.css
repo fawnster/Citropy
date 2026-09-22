@@ -640,6 +640,8 @@
 .attachment[data-image] { position: relative; padding: 0; width: 76px; height: 76px; flex: none; overflow: hidden; }
 .attachment[data-image] .attachment-open { width: 100%; height: 100%; }
 .attachment[data-image] .attachment-open > img { width: 100%; height: 100%; border-radius: 0; }
+.attachment[data-image] .attachment-open > .image-unavailable { width: 100%; height: 100%; padding: 4px; margin: 0; }
+.attachment[data-image] .image-unavailable > span { font-size: 10px; line-height: 1.2; text-align: center; }
 .attachment[data-image] .attachment-remove { position: absolute; top: 4px; right: 4px; width: 18px; height: 18px; min-width: 0; border-radius: 50%; background: #f4f4f4; color: #333; }
 .attachment[data-image] .attachment-remove:hover { background: #fff; color: #000; }
 .attachment-open {
@@ -700,13 +702,15 @@
 .image-viewer::backdrop { background: rgb(0 0 0 / 82%); backdrop-filter: none; }
 .image-viewer > form { height: 100%; display: flex; flex-direction: column; }
 .image-viewer .dialog-heading { justify-content: flex-end; align-items: center; flex: none; gap: 8px; padding: 0 0 16px; }
-.image-viewer .dialog-heading > div { margin-right: auto; }
+.image-viewer .dialog-heading > div { margin-right: auto; min-width: 0; }
 .image-viewer .dialog-heading h2 { color: #aaa; font-size: var(--text-sm); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .image-viewer .icon-btn { flex: none; width: 32px; height: 32px; margin: 0; border-radius: 50%; background: #292929; color: #eee; }
-.image-viewer .icon-btn:hover:not(:disabled) { background: #3b3b3b; color: #fff; }
-.image-viewer .icon-btn:disabled { opacity: 0.4; }
-.image-viewer .dialog-content { flex: 1; min-height: 0; padding: 8px max(16px, 4vw); display: flex; }
-.image-viewport { width: 100%; min-height: 0; overflow: auto; }
+.image-viewer .icon-btn:hover:not(:disabled, [aria-disabled="true"]) { background: #3b3b3b; color: #fff; }
+.image-viewer .icon-btn:is(:disabled, [aria-disabled="true"]) { opacity: 0.4; }
+.image-viewer .dialog-content { flex: 1; min-height: 0; padding: 8px max(16px, 4vw); display: flex; align-items: center; gap: 8px; }
+.image-viewer .image-navigation { width: 44px; height: 44px; }
+.image-position { flex: none; color: #ccc; font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.image-viewport { width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: auto; }
 .image-surface { display: grid; place-items: center; width: max-content; height: max-content; min-width: 100%; min-height: 100%; }
 .image-surface img { display: block; max-width: none; max-height: none; border-radius: 6px; object-fit: contain; }
 .image-viewer-error { padding: 32px; text-align: center; color: #ccc; }

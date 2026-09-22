@@ -5,6 +5,7 @@ import {
   cacheHitRate,
   estimateConversationTokens,
   mergeUsage,
+  newInputTokens,
   parseAcpUsage,
   tokensPerSecond,
   uncachedInput,
@@ -47,11 +48,14 @@ test("ACP usage parses prompt totals, window updates, and Cursor aliases", () =>
   });
 });
 
-test("cache hit rate treats Codex input as inclusive and Claude input as fresh", () => {
+test("cache hit rate counts cache writes as new input and normalizes Codex totals", () => {
   assert.equal(uncachedInput("claude", { input: 200, cacheRead: 1000, cacheWrite: 100 }), 200);
   assert.equal(uncachedInput("codex", { input: 1300, cacheRead: 1000, cacheWrite: 100 }), 200);
-  assert.equal(cacheHitRate("claude", { input: 200, cacheRead: 800, cacheWrite: 0 }), 0.8);
-  assert.equal(cacheHitRate("codex", { input: 1000, cacheRead: 800, cacheWrite: 0 }), 0.8);
+  assert.equal(newInputTokens("claude", { input: 200, cacheRead: 1000, cacheWrite: 100 }), 300);
+  assert.equal(newInputTokens("codex", { input: 1300, cacheRead: 1000, cacheWrite: 100 }), 300);
+  assert.equal(cacheHitRate("claude", { input: 200, cacheRead: 800, cacheWrite: 100 }), 8 / 11);
+  assert.equal(cacheHitRate("codex", { input: 1100, cacheRead: 800, cacheWrite: 100 }), 8 / 11);
+  assert.equal(cacheHitRate("cursor", { input: 200, cacheRead: 800, cacheWrite: 100 }), 8 / 11);
   assert.equal(cacheHitRate("cursor", { input: 0, cacheRead: 0, cacheWrite: 0 }), 0);
 });
 

@@ -6,10 +6,10 @@ import type { Provider } from "./types.ts";
 import type { ModelOption } from "../../shared/protocol.ts";
 import type { ProviderCommand } from "../../shared/features.ts";
 
-const commandCatalogs = new Map<string, { at: number; commands: ProviderCommand[] }>();
+const commandCatalogs = new Map<string, ProviderCommand[]>();
 
 export function cursorCommands(cwd: string): ProviderCommand[] {
-  return commandCatalogs.get(cwd)?.commands ?? [];
+  return commandCatalogs.get(cwd) ?? [];
 }
 
 export function cursorCommandsPublished(cwd: string): boolean {
@@ -25,7 +25,7 @@ export const cursorConfig: AcpConfig = {
   parameterizedModelPicker: true,
   modelListing: "cursor/list_available_models",
   onCommands: (cwd, commands) => {
-    commandCatalogs.set(cwd, { at: Date.now(), commands });
+    commandCatalogs.set(cwd, commands);
     if (commandCatalogs.size > 40) commandCatalogs.delete(commandCatalogs.keys().next().value!);
   },
 };

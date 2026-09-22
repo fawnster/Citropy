@@ -58,9 +58,10 @@ export function useStickToBottom<T extends HTMLElement, C extends HTMLElement>()
     };
 
     const onToggle = (event: Event) => {
-      if (!(event.target as Element).closest("button[aria-expanded]")) return;
-      readingExpanded.current = true;
-      stuck.current = false;
+      const button = (event.target as Element).closest("button[aria-expanded]");
+      if (!button) return;
+      readingExpanded.current = button.getAttribute("aria-expanded") !== "true";
+      stuck.current = !readingExpanded.current && node.scrollHeight - node.scrollTop - node.clientHeight < 2;
       node.scrollTo({ top: node.scrollTop, behavior: "instant" });
       lastTop.current = node.scrollTop;
     };
@@ -70,6 +71,7 @@ export function useStickToBottom<T extends HTMLElement, C extends HTMLElement>()
       lastTop.current = node.scrollTop;
       lastHeight.current = node.scrollHeight;
       const distance = node.scrollHeight - node.scrollTop - node.clientHeight;
+      if (!readingExpanded.current && distance < 2) stuck.current = true;
       setAtBottom(distance < 2);
       setNearBottom(distance < 96);
     });

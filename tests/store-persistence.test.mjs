@@ -9,9 +9,8 @@ const root = await mkdtemp(join(tmpdir(), "citropy-store-persistence-"));
 process.env.CITROPY_DATA_DIR = join(root, "data");
 const { store, persistenceStats } = await import("../server/store.ts");
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
 test("thread persistence is durable on flush and adaptive when scheduled", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
   t.after(async () => {
     store.flush();
     await rm(root, { recursive: true, force: true });
@@ -42,8 +41,41 @@ test("thread persistence is durable on flush and adaptive when scheduled", async
   const scheduledPath = join(root, "data", "threads", `${scheduled.id}.json`);
   const scheduledBefore = persistenceStats();
   assert.equal(existsSync(scheduledPath), false);
-  await sleep(900);
+  t.mock.timers.tick(399);
+  assert.equal(existsSync(scheduledPath), false);
+  t.mock.timers.tick(1);
   assert.equal(existsSync(scheduledPath), true);
   assert.equal(JSON.parse(readFileSync(scheduledPath, "utf8")).messages[0].parts[0].text, "timer persistence");
   assert.ok(persistenceStats().writes > scheduledBefore.writes);
+
+  await t.test("live updates avoid scanning old history and older parts remain editable", () => {
+    const entry = store.createThread({ projectId: project.id, provider: "opencode", title: "Long history", permissionMode: "manual" });
+    const messages = Array.from({ length: 1000 }, (_, index) => ({
+      id: `history-message-${index}`, role: "assistant", ts: index,
+      parts: [{ id: `history-part-${index}`, kind: "text", text: "History" }],
+    }));
+    const current = messages.at(-1);
+    current.parts = Array.from({ length: 1000 }, (_, index) => ({ id: `current-part-${index}`, kind: "text", text: "" }));
+    store.replaceMessages(entry.id, messages);
+    let inspectedIds = 0;
+    for (const value of [...messages, ...current.parts]) {
+      const id = value.id;
+      Object.defineProperty(value, "id", { enumerable: true, get() { inspectedIds++; return id; } });
+    }
+    for (let index = 0; index < 50; index++) store.appendText(entry.id, "history-message-999", "current-part-999", "delta ");
+    store.patchPart(entry.id, "history-message-999", "current-part-999", { complete: true });
+    assert.ok(inspectedIds <= 102, `${inspectedIds} IDs inspected for 51 live updates`);
+    assert.equal(current.parts.at(-1).text, "delta ".repeat(50));
+    assert.equal(current.parts.at(-1).complete, true);
+    store.patchPart(entry.id, "history-message-0", "history-part-0", { text: "Updated older message" });
+    assert.equal(messages[0].parts[0].text, "Updated older message");
+    store.patchPart(entry.id, "history-message-999", "current-part-0", { text: "Updated older part" });
+    assert.equal(current.parts[0].text, "Updated older part");
+    assert.throws(() => store.appendText(entry.id, "missing-message", "missing-part", "delta"), /unknown message/);
+    assert.throws(() => store.appendText(entry.id, "history-message-999", "missing-part", "delta"), /unknown part/);
+    store.flush();
+    const recovered = JSON.parse(readFileSync(join(root, "data", "threads", `${entry.id}.json`), "utf8"));
+    assert.equal(recovered.messages[0].parts[0].text, "Updated older message");
+    assert.equal(recovered.messages.at(-1).parts.at(-1).text, "delta ".repeat(50));
+  });
 });

@@ -91,6 +91,7 @@ export class Store {
     toasts: true,
     desktop: true,
     sound: false,
+    subagents: false,
   };
   #dirty = new Set<string>();
   #flushTimer: NodeJS.Timeout | null = null;
@@ -138,7 +139,7 @@ export class Store {
           if (model && ["claude", "codex", "opencode", "cursor"].includes(model.provider) && typeof model.model === "string" && model.model.trim())
             this.assistance[key] = { provider: model.provider, model: model.model };
         }
-        for (const key of ["toasts", "desktop", "sound"] as const) {
+        for (const key of ["toasts", "desktop", "sound", "subagents"] as const) {
           if (typeof settings.notifications?.[key] === "boolean")
             this.notificationPreferences[key] = settings.notifications[key];
         }
@@ -299,7 +300,7 @@ export class Store {
       !patch ||
       Object.entries(patch).some(
         ([key, value]) =>
-          !["toasts", "desktop", "sound"].includes(key) ||
+          !["toasts", "desktop", "sound", "subagents"].includes(key) ||
           typeof value !== "boolean",
       )
     )
@@ -469,7 +470,7 @@ export class Store {
     thread.updatedAt = Date.now();
     bus.emit({ t: "thread.upsert", thread: meta(thread) });
     this.#schedule(id);
-    if (finished) {
+    if (finished && this.notificationPreferences.subagents) {
       const notification = subagentFinishedNotification(thread);
       if (!this.notifications.some((entry) => entry.dedupeKey === notification.dedupeKey)) this.notify(notification);
     }
@@ -542,13 +543,13 @@ export class Store {
   #message(threadId: string, messageId: string): Message {
     const thread = this.threads.get(threadId);
     if (!thread) throw new Error(`unknown thread ${threadId}`);
-    const message = thread.messages.find((m) => m.id === messageId);
+    const message = thread.messages.findLast((m) => m.id === messageId);
     if (!message) throw new Error(`unknown message ${messageId}`);
     return message;
   }
 
   #part(threadId: string, messageId: string, partId: string): Part {
-    const part = this.#message(threadId, messageId).parts.find((p) => p.id === partId);
+    const part = this.#message(threadId, messageId).parts.findLast((p) => p.id === partId);
     if (!part) throw new Error(`unknown part ${partId}`);
     return part;
   }

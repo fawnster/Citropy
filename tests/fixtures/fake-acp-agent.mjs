@@ -68,7 +68,7 @@ const notifications = (client, messageId, chunks) => chunks.map((chunk) => clien
 
 const app = acp.agent({ name: "fake-cursor" })
   .onRequest(acp.methods.agent.initialize, (context) => {
-    record({ method: "initialize", parameterized: context.params.clientCapabilities?._meta?.parameterizedModelPicker === true });
+    record({ method: "initialize", parameterized: context.params.clientCapabilities?._meta?.parameterizedModelPicker === true, clientVersion: context.params.clientInfo?.version });
     return {
       protocolVersion: acp.PROTOCOL_VERSION,
       agentCapabilities: {
@@ -143,6 +143,10 @@ const app = acp.agent({ name: "fake-cursor" })
       sessionId,
       update: { sessionUpdate: "session_info_update", title: "Word Pong" },
     });
+    await context.client.notify(acp.methods.client.session.update, {
+      sessionId,
+      update: { sessionUpdate: "config_option_update", configOptions: optionsFor(currentModel, true) },
+    });
     if (text.includes("slow")) {
       while (!cancelled) await new Promise((resolve) => setTimeout(resolve, 20));
       return { stopReason: "cancelled" };
@@ -191,6 +195,34 @@ const app = acp.agent({ name: "fake-cursor" })
     });
     await context.client.notify(acp.methods.client.session.update, {
       sessionId,
+      update: { sessionUpdate: "tool_call", toolCallId: "image-1", title: "Generate image", kind: "other", status: "pending", rawInput: { description: "A green circle" } },
+    });
+    await context.client.notify("cursor/generate_image", {
+      toolCallId: "image-1",
+      description: "A green circle",
+      filePath: "generated.png",
+      referenceImagePaths: ["reference.png"],
+    });
+    await context.client.notify(acp.methods.client.session.update, {
+      sessionId,
+      update: { sessionUpdate: "tool_call_update", toolCallId: "image-1", status: "completed" },
+    });
+    await context.client.notify("cursor/generate_image", {
+      toolCallId: "standalone-image",
+      description: "A standalone image",
+      filePath: "standalone.png",
+    });
+    await context.client.notify("cursor/task", {
+      toolCallId: "task-1",
+      description: "Inspect authentication",
+      prompt: "Find the authentication entry points.",
+      subagentType: "explore",
+      model: "fake-fast",
+      agentId: "agent-1",
+      durationMs: 125,
+    });
+    await context.client.notify(acp.methods.client.session.update, {
+      sessionId,
       update: { sessionUpdate: "tool_call", toolCallId: "plan-tool", title: "Create Plan", kind: "other", status: "pending", rawInput: { _toolName: "createPlan" } },
     });
     await context.client.notify(acp.methods.client.session.update, {
@@ -222,7 +254,14 @@ const app = acp.agent({ name: "fake-cursor" })
       toolCallId: "tool-1",
       name: "Checks",
       plan: "# Checks\n\nRun the checks.",
-      todos: [{ content: "Report the result", status: "completed" }],
+      todos: [],
+      phases: [{
+        name: "Verification",
+        todos: [
+          { content: "Run the checks", status: "in_progress" },
+          { content: "Report the result", status: "pending" },
+        ],
+      }],
     });
     record({ method: "cursor/create_plan", outcome: plan.outcome });
     await context.client.notify("cursor/update_todos", {
@@ -230,6 +269,16 @@ const app = acp.agent({ name: "fake-cursor" })
       merge: true,
       todos: [{ content: "Report the result", status: "completed" }],
     });
+    if (text.includes("nopermission")) {
+      const emptyPlan = await context.client.request("cursor/create_plan", {
+        toolCallId: "empty-plan",
+        name: "Empty plan",
+        plan: "# Empty plan",
+        todos: [],
+        phases: [],
+      });
+      record({ method: "cursor/create_plan-empty", outcome: emptyPlan.outcome });
+    }
     if (!text.includes("nopermission")) {
       const permission = await context.client.request(acp.methods.client.session.requestPermission, {
         sessionId,
@@ -243,7 +292,7 @@ const app = acp.agent({ name: "fake-cursor" })
     }
     await context.client.notify(acp.methods.client.session.update, {
       sessionId,
-      update: { sessionUpdate: "tool_call_update", toolCallId: "tool-1", status: "in_progress" },
+      update: { sessionUpdate: "tool_call_update", toolCallId: "tool-1", status: "in_progress", rawOutput: { exitCode: 0, stdout: "All checks passed\n", stderr: "" } },
     });
     await context.client.notify(acp.methods.client.session.update, {
       sessionId,
@@ -261,7 +310,6 @@ const app = acp.agent({ name: "fake-cursor" })
         sessionUpdate: "tool_call_update",
         toolCallId: "tool-1",
         status: "completed",
-        rawOutput: { exitCode: 0, stdout: "All checks passed\n", stderr: "" },
         content: [
           { type: "content", content: { type: "image", data: "aGVsbG8=", mimeType: "image/png" } },
         ],

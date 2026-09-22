@@ -10,29 +10,45 @@ export function useTextReveal(
   ready: boolean,
 ): boolean {
   const streaming = useApp((state) => state.textStreaming);
-  const animation = useApp((state) => state.typingAnimation);
+  const typingAnimation = useApp((state) => state.typingAnimation);
   const speed = useApp((state) => state.typingSpeed);
   const reducedMotion = useReducedMotion();
   const started = useRef(false);
+  const entrance = useRef<{ id: string; animation: Animation } | null>(null);
   const [revealing, setRevealing] = useState(false);
 
   useLayoutEffect(() => {
+    const previous = entrance.current;
+    if (previous && (previous.id !== id || reducedMotion)) {
+      previous.animation.cancel();
+      entrance.current = null;
+    } else if (previous?.animation.playState === "idle") {
+      previous.animation.play();
+    }
+    return () => entrance.current?.animation.cancel();
+  }, [id, reducedMotion]);
+
+  useLayoutEffect(() => {
     const element = root.current;
-    if (!id || (pending && !streaming) || !ready || !element) return;
+    if (!id || !element || (!streaming && (pending || !ready))) return;
     if (useApp.getState().parts[id]?.kind === "reasoning") {
       markTextPresented(id);
       return;
     }
     const fresh = started.current || useApp.getState().reveals[id];
     markTextPresented(id);
-    if (streaming || !animation || reducedMotion || !fresh) {
+    if (streaming || !typingAnimation || reducedMotion || !fresh) {
       started.current = false;
       setRevealing(false);
       if (fresh && !reducedMotion) {
-        const entrance = element.animate([{ opacity: 0 }, { opacity: 1 }], {
-          duration: 180, easing: "ease-out",
+        entrance.current?.animation.cancel();
+        const animation = element.animate([
+          { opacity: 0, transform: "translateY(-6px)" },
+          { opacity: 1, transform: "translateY(0)" },
+        ], {
+          duration: 220, easing: "cubic-bezier(0.2, 0, 0, 1)",
         });
-        return () => entrance.cancel();
+        entrance.current = { id, animation };
       }
       return;
     }
@@ -101,7 +117,7 @@ export function useTextReveal(
       cancelAnimationFrame(frame);
       restore();
     };
-  }, [root, id, html, pending, ready, streaming, animation, speed, reducedMotion]);
+  }, [root, id, html, pending, ready, streaming, typingAnimation, speed, reducedMotion]);
 
   return revealing;
 }

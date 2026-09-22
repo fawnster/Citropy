@@ -51,7 +51,8 @@ function clip(text: string): string {
 
 const IMAGE_FILE = /\.(png|jpe?g|gif|webp|avif|svg|bmp|ico)$/i;
 
-function imageFilesFor(raw: unknown, cwd: string): ImageFile[] | undefined {
+function imageFilesFor(name: string, raw: unknown, cwd: string): ImageFile[] | undefined {
+  if (["workspace_image", "citropy_workspace_image", "mcp__citropy__workspace_image"].includes(name)) return undefined;
   const input = (raw ?? {}) as Record<string, unknown>;
   for (const key of ["file_path", "filePath", "path", "notebook_path"]) {
     const value = input[key];
@@ -113,13 +114,18 @@ export class ThreadRuntime {
   }
 
   get busy(): boolean {
-    return this.#preparing || Boolean(this.#enqueuing) || Boolean(this.#stopping) || Boolean(this.#checkpointCompletion) || this.#thread.running || this.#thread.status === "awaiting" || shellList().some(shell => shell.threadId === this.id && !shell.panelId && (shell.status === "running" || shell.status === "stopping"));
+    if (this.#preparing || this.#enqueuing || this.#stopping || this.#checkpointCompletion) return true;
+    if (this.#thread.running || this.#thread.status === "awaiting") return true;
+    return shellList().some(shell =>
+      shell.threadId === this.id && !shell.panelId &&
+      (shell.status === "running" || shell.status === "stopping"),
+    );
   }
 
   async configure(config: SessionConfig): Promise<boolean> {
     const session = this.#session;
     if (!session?.configure) return false;
-    if (this.busy || this.#thread.running || this.#stopping || this.#preparing) return false;
+    if (this.busy) return false;
     try {
       await session.configure(config);
       return true;
@@ -304,8 +310,21 @@ export class ThreadRuntime {
     prompt = context.prompt;
     if (this.#thread.transferContext) prompt = `${await transferPrompt(this.#thread.transferContext)}\n\nCurrent request:\n${prompt}`;
     else if (this.#thread.rebuildContext && !this.#thread.externalId) prompt = historyPrompt(this.#thread.messages, prompt);
-    const names = new Set([...text.matchAll(/(?:^|\s)[@$]([\w.:-]+)(?![\w./:-])/g)].map((match) => match[1]));
-    const skills = names.size ? (await listSkills(this.#thread.projectId, this.id)).filter((skill) => skill.enabled && skill.provider === this.#thread.provider && names.has(skill.name)).sort((a, b) => Number(b.scope === "project") - Number(a.scope === "project")).filter((skill, index, entries) => entries.findIndex((entry) => entry.name === skill.name) === index) : [];
+    const requestedSkills = new Set([...text.matchAll(/(?:^|\s)[@$]([\w.:-]+)(?![\w./:-])/g)].map((match) => match[1]));
+    const skills: Prepared["skills"] = [];
+    if (requestedSkills.size) {
+      const available = await listSkills(this.#thread.projectId, this.id);
+      const matching = available.filter(skill =>
+        skill.enabled && skill.provider === this.#thread.provider && requestedSkills.has(skill.name),
+      );
+      matching.sort((a, b) => Number(b.scope === "project") - Number(a.scope === "project"));
+      const selectedNames = new Set<string>();
+      for (const skill of matching) {
+        if (selectedNames.has(skill.name)) continue;
+        selectedNames.add(skill.name);
+        skills.push(skill);
+      }
+    }
     this.#checkSession(generation);
     if (store.disabledProviders.has(this.#thread.provider)) throw new Error("This provider is disabled. Enable it in Settings > Providers.");
     assertApplicationReady();
@@ -436,15 +455,19 @@ export class ThreadRuntime {
   }
 
   #waitForStop(session: AgentSession): void {
-    let ended!: () => void;
-    const end = new Promise<void>(resolve => { ended = resolve; });
-    let release!: () => void;
-    const promise = new Promise<void>(resolve => { release = resolve; });
-    const stopping = { promise, ended, release: () => {
-      clearTimeout(timer);
-      if (this.#stopping === stopping) this.#stopping = null;
-      release();
-    } };
+    let markTurnEnded!: () => void;
+    const turnEnded = new Promise<void>(resolve => { markTurnEnded = resolve; });
+    let releaseWait!: () => void;
+    const released = new Promise<void>(resolve => { releaseWait = resolve; });
+    const stopping = {
+      promise: released,
+      ended: markTurnEnded,
+      release: () => {
+        clearTimeout(timer);
+        if (this.#stopping === stopping) this.#stopping = null;
+        releaseWait();
+      },
+    };
     const restart = () => {
       if (this.#session === session) {
         this.#sessionGeneration += 1;
@@ -459,7 +482,7 @@ export class ThreadRuntime {
     const timer = setTimeout(restart, 5000);
     this.#stopping = stopping;
     try {
-      void Promise.all([end, session.interrupt()]).then(stopping.release, restart);
+      void Promise.all([turnEnded, session.interrupt()]).then(stopping.release, restart);
     } catch { restart(); }
   }
 
@@ -584,9 +607,10 @@ export class ThreadRuntime {
 
   #consume(event: AgentEvent): void {
     if (this.#disposed) return;
-    if (this.#thread.transferContext && this.#thread.externalId && (event.type === "block.start" || event.type === "tool.start" || (event.type === "turn.end" && !event.error)))
+    const startsWork = event.type === "block.start" || event.type === "tool.start";
+    if (this.#thread.transferContext && this.#thread.externalId && (startsWork || (event.type === "turn.end" && !event.error)))
       store.patchThread(this.id, { transferContext: undefined });
-    if (this.#thread.status === "queued" && (event.type === "block.start" || event.type === "tool.start")) store.patchThread(this.id, { status: "thinking" });
+    if (this.#thread.status === "queued" && startsWork) store.patchThread(this.id, { status: "thinking" });
     switch (event.type) {
       case "shell.background":
         this.#onShellBackground(event);
@@ -701,14 +725,12 @@ export class ThreadRuntime {
 
   #onStatus(event: Extract<AgentEvent, { type: "status" }>): void {
     if (this.#thread.status === "stopped") return;
+    const awaitingAnswer = hasPendingQuestion(this.#thread.id);
+    const running = event.status === "thinking" || event.status === "working" || event.status === "awaiting";
     store.patchThread(this.#thread.id, {
-      status: hasPendingQuestion(this.#thread.id) ? "awaiting" : event.status,
-      activeTool: hasPendingQuestion(this.#thread.id) ? undefined : event.tool,
-      ...(event.status === "thinking" ||
-      event.status === "working" ||
-      event.status === "awaiting"
-        ? { running: true }
-        : {}),
+      status: awaitingAnswer ? "awaiting" : event.status,
+      activeTool: awaitingAnswer ? undefined : event.tool,
+      ...(running ? { running: true } : {}),
     });
   }
 
@@ -747,7 +769,7 @@ export class ThreadRuntime {
       detail: described.detail,
       input: event.input,
       status: "running",
-      imageFiles: imageFilesFor(event.input, this.#cwd),
+      imageFiles: imageFilesFor(event.name, event.input, this.#cwd),
       startedAt: Date.now(),
     };
     this.#tools.set(event.callId, this.#add(part));
@@ -755,22 +777,26 @@ export class ThreadRuntime {
   }
 
   #onToolInput(event: Extract<AgentEvent, { type: "tool.input" }>): void {
-    const ref = this.#tools.get(event.callId);
-    if (!ref) return;
     const thread = store.threads.get(this.#thread.id);
-    const message = thread?.messages.find((m) => m.id === ref.messageId);
-    const part = message?.parts.find((p) => p.id === ref.partId) as ToolPart | undefined;
+    const active = this.#tools.get(event.callId);
+    const message = active
+      ? thread?.messages.findLast((entry) => entry.id === active.messageId)
+      : thread?.messages.findLast((entry) => entry.parts.some((part) => part.kind === "tool" && part.callId === event.callId));
+    const part = (active
+      ? message?.parts.findLast((entry) => entry.id === active.partId)
+      : message?.parts.findLast((entry) => entry.kind === "tool" && entry.callId === event.callId)) as ToolPart | undefined;
+    if (!message || !part) return;
     const name = event.name ?? part?.name;
-    if (name && ["Bash", "Shell", "Monitor"].includes(name)) this.#trackShell(event.callId, event.input);
+    if (active && name && ["Bash", "Shell", "Monitor"].includes(name)) this.#trackShell(event.callId, event.input);
     const described = describeTool(name ?? "tool", event.input, this.#cwd);
-    const imageFiles = imageFilesFor(event.input, this.#cwd);
-    store.patchPart(this.#thread.id, ref.messageId, ref.partId, {
+    const imageFiles = imageFilesFor(name ?? "", event.input, this.#cwd);
+    store.patchPart(this.#thread.id, message.id, part.id, {
       ...(event.name ? { name: event.name } : {}),
       input: event.input,
       shape: described.shape,
       headline: described.headline,
       detail: described.detail,
-      patch: previewPatch(name ?? "", event.input),
+      ...(active ? { patch: previewPatch(name ?? "", event.input) } : {}),
       ...(imageFiles ? { imageFiles } : {}),
     });
   }
@@ -782,7 +808,7 @@ export class ThreadRuntime {
     this.#running.delete(event.callId);
     if (ref) {
       const thread = store.threads.get(this.#thread.id);
-      const part = thread?.messages.find((message) => message.id === ref.messageId)?.parts.find((entry) => entry.id === ref.partId) as ToolPart | undefined;
+      const part = thread?.messages.findLast((message) => message.id === ref.messageId)?.parts.findLast((entry) => entry.id === ref.partId) as ToolPart | undefined;
       store.patchPart(this.#thread.id, ref.messageId, ref.partId, {
         status: event.ok ? "ok" : "error",
         output: clip(event.output),
@@ -830,8 +856,7 @@ export class ThreadRuntime {
     this.#stopping?.ended();
     clearTimeout(this.#compactionTimer);
     const stopped = this.#thread.status === "stopped";
-    const completed =
-      this.#thread.running && this.#thread.status !== "stopped";
+    const completed = this.#thread.running && !stopped;
     this.#applyUsage({ turns: this.#thread.usage.turns + 1 });
     const messageId = this.#messageId ?? undefined;
     this.#messageId = null;

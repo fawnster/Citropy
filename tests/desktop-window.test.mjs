@@ -160,5 +160,17 @@ test(
       ),
       [1100, 750],
     );
+    await desktop.evaluate(({ app, BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].webContents.emit("render-process-gone", {}, { reason: "crashed", exitCode: 7 });
+      app.emit("child-process-gone", {}, { type: "GPU", reason: "killed", exitCode: 9, name: "private page title" });
+    });
+    await desktop.close();
+    desktop = undefined;
+    const diagnostics = fs.readFileSync(join(directory, "desktop.log"), "utf8").trim().split("\n").map(line => JSON.parse(line));
+    assert.equal(diagnostics[0].event, "app.started");
+    assert.ok(diagnostics.some(entry => entry.event === "renderer.exited" && entry.reason === "crashed" && entry.code === 7));
+    assert.ok(diagnostics.some(entry => entry.event === "child.exited" && entry.type === "GPU" && entry.code === 9 && !entry.name));
+    assert.ok(diagnostics.some(entry => entry.event === "app.quitting"));
+    assert.equal(diagnostics.at(-1).event, "app.exited");
   },
 );

@@ -52,6 +52,26 @@ test("all tool shapes share a group without crossing message content", () => {
   });
 });
 
+test("image tools stay at their action position and final galleries remain separate", () => {
+  const read = tool("read-image", "read", "reference.png", { images: [{ id: "read-result", mime: "image/png" }] });
+  const generated = tool("generated-image", "generic", "preview.png", { imageFiles: [{ path: "/example/preview.png", label: "Preview" }] });
+  const content = [tool("before", "read", "settings.json"), read, tool("after", "command", "render preview"), generated,
+    { id: "answer", kind: "text", text: "The preview is ready.", complete: true },
+    { id: "gallery", kind: "images", files: generated.imageFiles }];
+  const state = {
+    threads: { chat: { ...thread, running: false, status: "idle" } }, order: { chat: ["response"] }, disclosures: {},
+    messages: { response: { id: "response", role: "assistant", partIds: content.map(part => part.id) } },
+    parts: Object.fromEntries(content.map(part => [part.id, part])),
+  };
+  assert.deepEqual(buildRows(content).map(row => row.kind === "part" ? row.id : row.ids), [["before"], "read-image", ["after"], "generated-image", "answer", "gallery"]);
+  const folded = timelineRows(state, "chat");
+  assert.deepEqual(folded.map(row => row.row.kind === "activity" ? "activity" : row.row.id), ["activity", "answer", "gallery"]);
+  assert.deepEqual(folded[0].row.ids, ["before", "read-image", "after", "generated-image"]);
+  const open = timelineRows({ ...state, disclosures: { before: { activity: true } } }, "chat");
+  assert.deepEqual(open.filter(row => row.row.kind === "part").map(row => row.row.id), ["read-image", "generated-image", "answer", "gallery"]);
+  assert.equal(open.some(row => row.row.kind === "images"), false);
+});
+
 test("completed responses fold thoughts, tools and commentary while preserving the answer", () => {
   const content = [
     { id: "progress", kind: "text", text: "I will check the audio files.", complete: true },
@@ -257,6 +277,205 @@ test("compact activity layout", { timeout: 60000 }, async (t) => {
     return { page, emit: event => connection.send(JSON.stringify(event)) };
   }
 
+  await t.test("image previews belong to their tool actions, including late results and folded live work", async (t) => {
+    const { page, emit } = await fixture(t, { sidebar: "0" });
+    const requests = [];
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="360"><rect width="600" height="360" fill="#c5dfbe"/><circle cx="300" cy="180" r="100" fill="#2c6547"/><path d="M260 220V140L350 180Z" fill="#eff8ed"/></svg>';
+    for (const route of ["**/api/tool-images?**", "**/api/assets?**"]) await page.route(route, request => {
+      const url = new URL(request.request().url());
+      requests.push(url);
+      const missing = url.searchParams.get("path") === "/missing.png";
+      return request.fulfill({ status: missing ? 404 : 200, contentType: "image/svg+xml", body: missing ? "" : svg });
+    });
+    const read = tool("read-image", "read", "reference.png", { images: [{ id: "read-result", mime: "image/png" }], imageFiles: [{ path: "/duplicate.png", label: "Duplicate reference" }] });
+    const generated = tool("generated-image", "generic", "preview.png", { name: "GenerateImage", output: "Created preview.png" });
+    const content = [tool("settings", "read", "settings.json"), read, generated];
+    emit({ t: "thread.messages", threadId: "chat", messages: [{ id: "images-response", role: "assistant", ts: 1, parts: content }] });
+    emit({ t: "part.patch", threadId: "chat", messageId: "images-response", partId: generated.id, patch: { imageFiles: [{ path: "/preview.png", label: "Generated preview" }] } });
+    const live = page.locator('.activity-preview .image-strip[data-tool-id="generated-image"]');
+    await live.locator("img").waitFor();
+    assert.equal(await page.locator(".image-strip").count(), 1);
+    const liveBounds = await live.boundingBox();
+    const liveAction = await page.locator(".activity-preview").boundingBox();
+    assert.ok(liveBounds.y >= liveAction.y && liveBounds.y + liveBounds.height <= liveAction.y + liveAction.height);
+    await page.screenshot({ path: "/tmp/citropy-inline-image-live.png", animations: "disabled" });
+    await page.getByRole("button", { name: "Work details", exact: true }).click();
+    const readCard = page.locator("#tool-read-image");
+    const generatedCard = page.locator("#tool-generated-image");
+    await generatedCard.locator("img").waitFor();
+    await live.waitFor({ state: "detached" });
+    assert.equal(await page.locator(".image-strip").count(), 2);
+    assert.equal(await readCard.locator(".image-strip img").count(), 1);
+    assert.equal(requests.some(url => url.searchParams.get("path") === "/duplicate.png"), false);
+    assert.equal(await readCard.locator("img").getAttribute("loading"), "lazy");
+    for (const width of [1440, 420]) {
+      await page.setViewportSize({ width, height: 900 });
+      for (const card of [readCard, generatedCard]) {
+        const { head, preview } = await card.evaluate(element => ({
+          head: element.querySelector(".tool-head").getBoundingClientRect().toJSON(),
+          preview: element.querySelector(".image-strip").getBoundingClientRect().toJSON(),
+        }));
+        assert.ok(preview.x >= head.x + head.width - 1 && Math.abs(preview.y + preview.height / 2 - head.y - head.height / 2) <= 2, JSON.stringify({ width, head, preview }));
+      }
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      await page.screenshot({ path: `/tmp/citropy-inline-images-${width}.png`, animations: "disabled" });
+    }
+    await generatedCard.locator(".tool-head").click();
+    await generatedCard.locator(".tool-output").waitFor();
+    assert.equal(await generatedCard.locator(".image-strip").count(), 1);
+    assert.equal(await generatedCard.locator(".image-strip").getAttribute("data-compact"), null);
+    await page.screenshot({ path: "/tmp/citropy-inline-image-expanded-420.png", animations: "disabled" });
+    await generatedCard.getByRole("button", { name: "Preview Generated preview", exact: true }).click();
+    const viewer = page.getByRole("dialog", { name: "Generated preview", exact: true });
+    await viewer.getByRole("button", { name: "Zoom in", exact: true }).waitFor();
+    assert.match(await viewer.getByRole("link", { name: "Download image", exact: true }).getAttribute("href"), /path=%2Fpreview\.png.*&download=1$/);
+    await page.keyboard.press("Escape");
+    await viewer.waitFor({ state: "detached" });
+    emit({ t: "part.add", threadId: "chat", messageId: "images-response", part: tool("missing-image", "read", "missing.png", { imageFiles: [{ path: "/missing.png", label: "Missing image" }] }) });
+    await page.locator("#tool-missing-image").waitFor();
+    await page.locator("#tool-missing-image .image-strip").getByRole("img", { name: "Image unavailable", exact: true }).waitFor();
+    emit({ t: "part.add", threadId: "chat", messageId: "images-response", part: tool("image-shell", "command", "render preview", { images: [{ id: "shell-result", mime: "image/png" }], output: "Preview rendered." }) });
+    emit({ t: "shell.upsert", shell: { id: "chat:image-shell", projectId: "workspace", threadId: "chat", command: "render preview", cwd: "/example", status: "completed", background: false, output: "Preview rendered.", startedAt: 1 } });
+    await page.locator("#tool-image-shell").waitFor();
+    await page.getByRole("button", { name: "Work details", exact: true }).click();
+    await page.evaluate(async () => (await import("/web/src/lib/store.ts")).useApp.setState({ searchShellId: "chat:image-shell" }));
+    await page.locator("#tool-image-shell .tool-output").getByText("Preview rendered.", { exact: true }).waitFor();
+    await page.waitForFunction(() => document.querySelector("#tool-image-shell .tool-head") === document.activeElement);
+    emit({ t: "part.add", threadId: "chat", messageId: "images-response", part: tool("final-check", "command", "check output") });
+    emit({ t: "part.add", threadId: "chat", messageId: "images-response", part: { id: "images-answer", kind: "text", text: "The preview is ready.", complete: true } });
+    emit({ t: "thread.upsert", thread: { ...thread, running: false, status: "idle" } });
+    await page.getByRole("button", { name: "Work details", exact: true }).click();
+    await generatedCard.waitFor({ state: "detached" });
+    const completedPreview = page.locator('.activity-preview .image-strip[data-tool-id="image-shell"]');
+    await completedPreview.getByRole("button", { name: "Preview render preview", exact: true }).waitFor();
+    assert.equal(await page.locator(".image-strip").count(), 1);
+    assert.equal(await page.locator(".activity-preview").textContent(), "Ran command");
+    assert.equal(await page.getByRole("button", { name: "Work details", exact: true }).getAttribute("aria-expanded"), "false");
+    await completedPreview.getByRole("button").click();
+    await page.getByRole("dialog", { name: "render preview", exact: true }).waitFor();
+    await page.keyboard.press("Escape");
+    await page.getByRole("dialog").waitFor({ state: "detached" });
+    for (const width of [420, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.screenshot({ path: `/tmp/citropy-inline-image-completed-${width}.png`, animations: "disabled" });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    }
+    emit({ t: "part.add", threadId: "chat", messageId: "images-response", part: { id: "final-gallery", kind: "images", files: [{ path: "/final.png", label: "Final preview" }] } });
+    await completedPreview.waitFor({ state: "detached" });
+    await page.locator(".image-gallery").getByRole("button", { name: "Preview Final preview", exact: true }).waitFor();
+    assert.equal(await page.locator(".image-strip").count(), 0);
+    assert.equal(await page.locator('[data-part-id="images-answer"]').isVisible(), true);
+    const history = Array.from({ length: 100 }, (_, index) => tool(`history-image-${index}`, "read", `frame-${index}.png`, { images: [{ id: `frame-${index}`, mime: "image/png" }] }));
+    emit({ t: "thread.messages", threadId: "chat", messages: [{ id: "image-history", role: "assistant", ts: 1, parts: [...history, { id: "history-answer", kind: "text", text: "Frames checked.", complete: true }] }] });
+    await page.locator('.activity-preview .image-strip[data-tool-id="history-image-99"]').waitFor();
+    assert.equal(await page.locator(".image-strip").count(), 1);
+    assert.equal(await page.locator(".tool").count(), 0);
+    await page.getByRole("button", { name: "Work details", exact: true }).click();
+    await page.locator(".tool").first().waitFor();
+    await page.locator(".activity-preview").waitFor({ state: "detached" });
+    assert.ok(await page.locator(".timeline-row").count() < 40);
+    assert.equal(await page.locator(".image-strip").count(), await page.locator(".tool").count());
+  });
+
+  await t.test("image and file actions share plain disclosure styling and keep previews independently accessible", async (t) => {
+    const { page, emit } = await fixture(t, { sidebar: "0", uiScale: "100" });
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.route("**/api/assets?**", route => route.fulfill({ contentType: "image/svg+xml", body: '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160"><rect width="240" height="160" fill="#91b59d"/></svg>' }));
+    const image = tool("plain-image", "read", "cat.jpg", {
+      endedAt: 800,
+      detail: "A reference image from the working folder",
+      imageFiles: [{ path: "/cat.jpg", label: "Cat photo" }, { path: "/other.jpg", label: "Other photo" }, { path: "/third.jpg", label: "Third photo" }],
+    });
+    const content = [
+      tool("plain-file", "read", "notes.txt", { output: "One image found." }),
+      tool("failed-file", "read", "missing.txt", { status: "error", output: "File not found." }),
+      tool("running-file", "read", "next.txt", { status: "running" }),
+      { id: "before-image", kind: "text", text: "Reading the image now.", complete: true },
+      image,
+      { id: "plain-answer", kind: "text", text: "The folder contains one cat photo.", complete: true },
+    ];
+    emit({ t: "thread.messages", threadId: "chat", messages: [{ id: "plain-response", role: "assistant", ts: 1, parts: content }] });
+    emit({ t: "thread.upsert", thread: { ...thread, running: false, status: "idle" } });
+    await page.getByRole("button", { name: "Work details", exact: true }).click();
+    const imageTool = page.locator("#tool-plain-image");
+    await imageTool.locator("img").first().waitFor();
+    const group = page.locator(".group-head");
+    await group.getByRole("img", { name: "running", exact: true }).waitFor();
+    await group.getByRole("img", { name: "1 failed tool", exact: true }).waitFor();
+    for (const theme of ["dark", "light"]) {
+      await page.evaluate(async theme => (await import("/web/src/lib/store.ts")).setTheme(theme), theme);
+      for (const width of [1440, 420]) {
+        await page.setViewportSize({ width, height: 900 });
+        await page.mouse.move(0, 0);
+        const style = await imageTool.evaluate(element => {
+          const reference = document.querySelector(".group-head");
+          const bounds = selector => element.querySelector(selector).getBoundingClientRect();
+          return {
+            background: getComputedStyle(element).backgroundColor,
+            referenceBackground: getComputedStyle(reference).backgroundColor,
+            iconBackground: getComputedStyle(element.querySelector(".tool-icon")).backgroundColor,
+            iconWidth: bounds(".tool-icon").width,
+            referenceIconWidth: reference.querySelector(".group-icon").getBoundingClientRect().width,
+            chevronX: bounds(".tool-chevron").x,
+            referenceChevronX: reference.querySelector(".group-chevron").getBoundingClientRect().x,
+            labelSize: getComputedStyle(element.querySelector(".tool-name")).fontSize,
+            referenceLabelSize: getComputedStyle(reference.querySelector(".group-label")).fontSize,
+            filenameWidth: bounds(".tool-headline").width,
+            filenameClientWidth: element.querySelector(".tool-headline").clientWidth,
+            filenameScrollWidth: element.querySelector(".tool-headline").scrollWidth,
+            toolWidth: element.getBoundingClientRect().width,
+            toolScrollWidth: element.scrollWidth,
+          };
+        });
+        assert.equal(style.background, style.referenceBackground, JSON.stringify({ theme, width, style }));
+        assert.equal(style.iconBackground, "rgba(0, 0, 0, 0)");
+        assert.equal(style.iconWidth, style.referenceIconWidth);
+        assert.equal(style.chevronX, style.referenceChevronX);
+        assert.equal(style.labelSize, style.referenceLabelSize);
+        assert.ok(style.filenameWidth > 50, JSON.stringify({ theme, width, style }));
+        assert.ok(style.filenameScrollWidth <= style.filenameClientWidth, JSON.stringify({ theme, width, style }));
+        assert.ok(style.toolScrollWidth <= Math.ceil(style.toolWidth), JSON.stringify({ theme, width, style }));
+        assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+        await page.screenshot({ path: `/tmp/citropy-plain-tools-${theme}-${width}.png`, animations: "disabled" });
+      }
+    }
+    const preview = imageTool.getByRole("button", { name: "Preview Cat photo", exact: true });
+    await preview.focus();
+    await page.keyboard.press("Enter");
+    const viewer = page.getByRole("dialog", { name: "Cat photo", exact: true });
+    await viewer.waitFor();
+    assert.equal(await imageTool.locator(".tool-head").getAttribute("aria-expanded"), "false");
+    await viewer.getByRole("button", { name: "Next image", exact: true }).click();
+    await page.getByRole("dialog", { name: "Other photo", exact: true }).waitFor();
+    await page.keyboard.press("Escape");
+    await page.getByRole("dialog").waitFor({ state: "detached" });
+    assert.equal(await preview.evaluate(element => element === document.activeElement), true);
+    await group.click();
+    await page.locator("#tool-plain-file").waitFor();
+    assert.equal(await page.locator("#tool-plain-file").evaluate(element => getComputedStyle(element).backgroundColor), "rgba(0, 0, 0, 0)");
+    await imageTool.locator(".tool-head").click();
+    await imageTool.locator(".image-strip:not([data-compact])").waitFor();
+    assert.equal(await imageTool.locator(".tool-empty").count(), 0);
+    assert.equal(await imageTool.locator(".image-strip").count(), 1);
+    assert.equal(await imageTool.locator(".tool-time").isVisible(), true);
+    assert.equal(await imageTool.locator(".tool-headline").getAttribute("title"), "cat.jpg");
+    for (const name of ["Read", "mcp__citropy__inspect_reference_image_with_a_long_action_name"]) {
+      emit({ t: "part.patch", threadId: "chat", messageId: "plain-response", partId: image.id, patch: { name } });
+      await page.waitForFunction(name => document.querySelector("#tool-plain-image .tool-name")?.textContent === name, name === "Read" ? name : "inspect reference image with a long action name");
+      const bounds = await imageTool.locator(".tool-head").evaluate(element => ({
+        width: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        filename: element.querySelector(".tool-headline").getBoundingClientRect().width,
+        label: element.querySelector(".tool-name").getBoundingClientRect().width,
+        status: element.querySelector(".tool-meta").lastElementChild.getBoundingClientRect().width,
+      }));
+      assert.ok(bounds.scrollWidth <= bounds.width, JSON.stringify(bounds));
+      assert.ok(bounds.filename > 50 && bounds.label > 0, JSON.stringify(bounds));
+      assert.equal(bounds.status, 12, JSON.stringify(bounds));
+    }
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  });
+
   await t.test("steered work keeps readable progress and keyboard-accessible thought groups", async (t) => {
     const { page, emit } = await fixture(t, { sidebar: "0" });
     const startedAt = thread.runStartedAt;
@@ -271,6 +490,13 @@ test("compact activity layout", { timeout: 60000 }, async (t) => {
       { id: "render-follow-up", role: "user", ts: startedAt + 200, parts: [{ id: "follow-up-text", kind: "text", text: "Is it ready?" }] },
     ] });
     await page.getByRole("note", { name: "Latest update", exact: true }).getByText("The final render is running. I will check the audio when it finishes.", { exact: true }).waitFor();
+    const position = await page.evaluate(() => ({
+      update: document.querySelector(".activity-update").getBoundingClientRect().bottom,
+      tool: document.querySelector(".activity-preview").getBoundingClientRect().bottom,
+      working: document.querySelector(".activity-head").getBoundingClientRect().top,
+    }));
+    assert.ok(position.working >= position.update, JSON.stringify(position));
+    assert.ok(position.working >= position.tool, JSON.stringify(position));
     assert.equal(await page.locator(".working").count(), 1);
     assert.equal(await page.locator(".turn-agent .turn-heading").count(), 1);
     assert.equal(await page.locator('[data-part-id="render-update"]').count(), 0);
@@ -297,6 +523,16 @@ test("compact activity layout", { timeout: 60000 }, async (t) => {
     assert.equal(await thoughts.evaluate(node => node === document.activeElement), true);
     await page.setViewportSize({ width: 660, height: 900 });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    await page.getByRole("button", { name: "Work details", exact: true }).click();
+    await page.getByRole("note", { name: "Latest update", exact: true }).waitFor();
+    for (const width of [660, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.waitForFunction(() => {
+        const panel = document.querySelector(".activity-update-collapse");
+        return panel && Math.abs(panel.offsetHeight - panel.firstElementChild.scrollHeight) < 2;
+      });
+      await page.screenshot({ path: `/tmp/citropy-live-work-${width}.png`, animations: "disabled" });
+    }
   });
 
   await t.test("thoughts render Markdown during streaming and when reopened from work details", async (t) => {

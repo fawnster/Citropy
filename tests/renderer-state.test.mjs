@@ -188,3 +188,24 @@ test("Markdown images resolve workspace paths and leave remote sources alone", a
   const bare = await renderMarkdown("![chart](charts/out.png)", "dark");
   assert.match(bare, /<img src="charts\/out\.png" alt="chart"/);
 });
+
+test("Markdown image references stay scoped to the current thread and previews preserve linked images", async () => {
+  const { renderMarkdown } = await import("../web/src/lib/markdown.ts");
+  const assets = { projectId: "project", threadId: "thr_current" };
+  const id = "12345678-1234-4234-8234-123456789abc";
+  const html = await renderMarkdown(`![Saved](citropy-image:${id})`, "dark", undefined, assets);
+  assert.match(html, new RegExp(`/api/tool-images\\?threadId=thr_current&amp;id=${id}`));
+  assert.match(html, /<button class="markdown-image" type="button" aria-label="Preview Saved">/);
+  assert.match(html, /class="markdown-image-error" hidden>Image unavailable/);
+  const spanish = await renderMarkdown(`![Saved](citropy-image:${id})`, "dark", undefined, assets, { language: "es" });
+  assert.match(spanish, /aria-label="Vista previa Saved"/);
+  assert.doesNotMatch(spanish, />Image unavailable</);
+  const injected = await renderMarkdown(`![Other](citropy-image:${id}?threadId=thr_other)`, "dark", undefined, assets);
+  assert.doesNotMatch(injected, /src="\/api\/tool-images/);
+  const linked = await renderMarkdown("[![Chart](chart.png)](https://example.test/details)", "dark", undefined, assets);
+  assert.match(linked, /href="https:\/\/example.test\/details"/);
+  assert.match(linked, /<span class="markdown-image">/);
+  assert.doesNotMatch(linked, /<button/);
+  const notice = await renderMarkdown(`![Saved](citropy-image:${id}) [Docs](https://example.test)`, "dark", undefined, assets, { images: false });
+  assert.doesNotMatch(notice, /<img|<button|\/api\/favicon/);
+});

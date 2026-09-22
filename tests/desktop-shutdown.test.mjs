@@ -31,10 +31,15 @@ test("the server exits cleanly when the parent sends the shutdown message over I
     await rm(directory, { recursive: true, force: true });
   });
   child.stderr.resume();
-  await Promise.race([
-    once(child, "message"),
-    new Promise((_, reject) => setTimeout(() => reject(new Error("The server never became ready.")), 30_000)),
-  ]);
+  let readyTimer;
+  try {
+    await Promise.race([
+      once(child, "message"),
+      new Promise((_, reject) => { readyTimer = setTimeout(() => reject(new Error("The server never became ready.")), 30_000); }),
+    ]);
+  } finally {
+    clearTimeout(readyTimer);
+  }
   assert.equal(child.connected, true);
   child.send({ t: "shutdown" });
   const [code, signal] = await once(child, "exit");
@@ -45,7 +50,12 @@ test("the server exits cleanly when the parent sends the shutdown message over I
 test("stopping the packaged backend resolves without a last-resort signal", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "citropy-shutdown-backend-"));
   t.after(async () => { await rm(directory, { recursive: true, force: true }); });
-  const backend = packagedBackend({ ...process.env, CITROPY_PORT: String(await freePort()), CITROPY_DATA_DIR: join(directory, "data"), CITROPY_HOST: "127.0.0.1" });
+  const diagnostics = [];
+  const backend = packagedBackend({ ...process.env, CITROPY_PORT: String(await freePort()), CITROPY_DATA_DIR: join(directory, "data"), CITROPY_HOST: "127.0.0.1" }, (event, details) => diagnostics.push({ event, ...details }));
   await backend.start();
   await backend.stop();
+  assert.deepEqual(diagnostics.map(entry => entry.event), ["backend.started", "backend.ready", "backend.stop-requested", "backend.exited"]);
+  assert.equal(diagnostics.at(-1).code, 0);
+  assert.equal(diagnostics.at(-1).signal, null);
+  assert.ok(diagnostics.every(entry => entry.childPid === diagnostics[0].childPid));
 });

@@ -344,62 +344,110 @@
   inset: auto;
   margin: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   color: var(--text);
-  width: 272px;
-  padding: 16px;
-  border: 0;
+  width: 304px;
+  padding: 0;
+  border: 1px solid var(--line);
   border-radius: var(--r-lg);
   background: var(--overlay);
   box-shadow: var(--shadow-md);
   font-size: var(--text-sm);
 }
-.context-totals {
-  margin: 0 0 12px;
+
+.context-section {
+  padding: 14px 16px;
 }
+
+.context-section + .context-section,
+.context-totals,
+.context-compacting,
+.context-connection,
+.context-actions {
+  border-top: 1px solid var(--line);
+}
+
+.context-totals {
+  margin: 0;
+  padding: 0 16px;
+}
+
 .context-totals > summary {
   display: flex;
   align-items: center;
   gap: 7px;
-  min-height: 30px;
+  min-height: 44px;
   color: var(--text-2);
   cursor: pointer;
   list-style: none;
 }
+
 .context-totals > summary::-webkit-details-marker { display: none; }
 .context-totals > summary > span { flex: 1; }
 .context-totals > summary > strong { font-weight: 500; font-variant-numeric: tabular-nums; }
 .context-totals > summary > svg { flex: none; color: var(--text-3); transition: transform var(--dur-fast); }
 .context-totals[open] > summary > svg { transform: rotate(180deg); }
-.context-details .context-totals > p { margin: 4px 0 12px; line-height: 1.5; font-size: var(--text-xs); }
+.context-details .context-totals > p { margin: -2px 0 11px; line-height: 1.45; font-size: var(--text-xs); }
+
+.context-totals[open] {
+  padding-bottom: 14px;
+}
 
 .context-heading {
   display: flex;
+  align-items: baseline;
   justify-content: space-between;
   gap: 12px;
+  line-height: 1.35;
 }
 
-.context-heading span,
-.context-details p,
+.context-heading strong {
+  font-weight: 600;
+}
+
+.context-percentage,
 .context-details dt {
   color: var(--text-3);
 }
 
-.context-details p {
-  margin: 6px 0 14px;
+.context-percentage,
+.context-stat-value,
+.context-summary,
+.context-details dd {
+  font-variant-numeric: tabular-nums;
 }
 
-.context-cache,
-.context-speed {
-  margin: 0 0 14px;
+.context-percentage {
+  min-width: 0;
+  text-align: right;
 }
 
+.context-summary {
+  margin: 6px 0 10px;
+  color: var(--text-2);
+}
+
+.context-meter,
 .context-cache-bar {
   display: flex;
-  height: 6px;
-  margin: 8px 0 6px;
+  height: 7px;
   overflow: hidden;
   border-radius: var(--r-full);
   background: var(--line);
+}
+
+.context-meter > span {
+  min-width: 0;
+  border-radius: inherit;
+  background: var(--file-icon);
+}
+
+.context-meter[data-hot="true"] > span {
+  background: var(--bad);
+}
+
+.context-cache-bar {
+  margin: 10px 0 7px;
 }
 
 .context-cache-bar > span {
@@ -408,7 +456,7 @@
 
 .context-cache-bar > [data-part="hit"] { background: var(--ok); }
 .context-cache-bar > [data-part="fresh"] { background: var(--file-icon); }
-.context-cache-bar > [data-part="write"] { background: var(--heat); }
+.context-cache-bar > [data-part="write"] { background: var(--file-icon); }
 
 .context-cache-note,
 .context-estimate {
@@ -419,7 +467,15 @@
 }
 
 .context-estimate {
-  margin: -6px 0 14px;
+  margin-top: 7px;
+}
+
+.context-speed {
+  padding-block: 12px;
+}
+
+.context-stat-value {
+  color: var(--text-2);
 }
 
 .context-details dl {
@@ -431,40 +487,46 @@
 .context-details dl > div {
   display: flex;
   justify-content: space-between;
+  gap: 12px;
 }
 
 .context-details dd {
   margin: 0;
-  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
 }
+
 .context-actions,
 .context-compacting {
-  margin-top: 14px;
+  margin: 0;
 }
+
+.context-actions {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+}
+
 .context-actions .btn {
   width: 100%;
   justify-content: center;
 }
-.context-details > .btn {
-  width: 100%;
-  justify-content: center;
-  margin-top: 8px;
-}
+
 .context-actions svg,
 .context-compacting svg {
   color: var(--file-icon);
 }
+
 .context-compacting {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 32px;
+  min-height: 44px;
+  padding: 0 16px;
   color: var(--text-2);
 }
 
 .context-connection {
-  padding-top: 10px;
-  margin-top: 12px;
+  padding: 10px 16px;
   color: var(--text-3);
 }
 
@@ -493,9 +555,9 @@
     margin-left: auto;
   }
 
-  .context-details {
-    width: 250px;
-  }
+  .context-section { padding-inline: 14px; }
+  .context-totals { padding-inline: 14px; }
+  .context-actions { padding: 10px; }
 }
 
 .menu-search {

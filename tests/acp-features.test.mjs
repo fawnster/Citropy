@@ -57,7 +57,8 @@ test("the ACP provider drives a fake Cursor agent", { timeout: 120_000 }, async 
       ["fake-smart", "Fake Smart", "medium", ["none", "low", "medium", "high", "xhigh"], [300000, 1000000], 300000, false],
     ],
   );
-  assert.equal((await entries()).some((entry) => entry.method === "initialize" && entry.parameterized === true), true);
+  const appVersion = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8")).version;
+  assert.equal((await entries()).some((entry) => entry.method === "initialize" && entry.parameterized === true && entry.clientVersion === appVersion), true);
   assert.equal((await entries()).some((entry) => entry.method === "session/new"), false);
 
   const project = store.openProject(directory);
@@ -70,6 +71,7 @@ test("the ACP provider drives a fake Cursor agent", { timeout: 120_000 }, async 
     cwd: directory,
     permissionMode: "manual",
     contextMax: 200000,
+    usage: { input: 100, output: 20, cacheRead: 300, cacheWrite: 40, costUsd: 1 },
     mcp: { url: "http://127.0.0.1:9/mcp", headers: { Authorization: "Bearer test-token" } },
     emit: (event) => events.push(event),
   });
@@ -100,6 +102,7 @@ test("the ACP provider drives a fake Cursor agent", { timeout: 120_000 }, async 
   answer(permission.id, "allow");
   const end = await waitFor(() => events.find((event) => event.type === "turn.end"), "the first turn to finish");
   assert.equal(end.error, undefined);
+  assert.ok(events.filter((event) => event.type === "session").length >= 2, "config option updates refresh the reported session");
 
   const sessionEventsBefore = events.filter((event) => event.type === "session").length;
   await session.configure({ effort: "high" });
@@ -132,6 +135,20 @@ test("the ACP provider drives a fake Cursor agent", { timeout: 120_000 }, async 
   assert.match(toolEnd.output, /All checks passed/);
   assert.equal(toolEnd.output.includes("exitCode"), false);
   assert.deepEqual(toolEnd.images, [{ mime: "image/png", data: "aGVsbG8=" }]);
+  const imageInput = events.find((event) => event.type === "tool.input" && event.callId === "image-1");
+  assert.equal(imageInput.name, "GenerateImage");
+  assert.deepEqual(imageInput.input, { description: "A green circle", filePath: "generated.png", referenceImagePaths: ["reference.png"] });
+  const standaloneImage = events.find((event) => event.type === "tool.end" && event.callId === "standalone-image:generated-image");
+  assert.equal(standaloneImage.ok, true);
+  assert.equal(standaloneImage.output, "standalone.png");
+  assert.deepEqual(events.find((event) => event.type === "subagent" && event.id === "agent-1"), {
+    type: "subagent",
+    id: "agent-1",
+    title: "Inspect authentication",
+    prompt: "Find the authentication entry points.",
+    model: "fake-fast",
+    status: "idle",
+  });
   const title = events.find((event) => event.type === "title");
   assert.equal(title?.title, "Word Pong");
   const editEnd = events.find((event) => event.type === "tool.end" && event.callId === "edit-1");
@@ -145,15 +162,15 @@ test("the ACP provider drives a fake Cursor agent", { timeout: 120_000 }, async 
   const usage = events.find((event) => event.type === "usage");
   assert.equal(usage.usage.contextTokens, 12000);
   assert.equal(usage.usage.contextMax, 200000);
-  assert.equal(usage.usage.costUsd, 0.02);
-  assert.equal(usage.usage.cacheRead, 4000);
-  assert.equal(usage.usage.cacheWrite, 150);
-  assert.equal(usage.usage.output, 300);
+  assert.equal(usage.usage.costUsd, 1.02);
+  assert.equal(usage.usage.cacheRead, 4300);
+  assert.equal(usage.usage.cacheWrite, 190);
+  assert.equal(usage.usage.output, 320);
   const promptUsage = events.findLast((event) => event.type === "usage");
-  assert.equal(promptUsage.usage.input, 2500);
-  assert.equal(promptUsage.usage.output, 800);
-  assert.equal(promptUsage.usage.cacheRead, 9000);
-  assert.equal(promptUsage.usage.cacheWrite, 400);
+  assert.equal(promptUsage.usage.input, 2600);
+  assert.equal(promptUsage.usage.output, 820);
+  assert.equal(promptUsage.usage.cacheRead, 9300);
+  assert.equal(promptUsage.usage.cacheWrite, 440);
   assert.equal(promptUsage.usage.contextTokens, undefined);
   assert.deepEqual(cursorCommands(directory).map((command) => [command.name, command.argumentHint]), [["simplify", "[path]"]]);
   const { listCommands } = await import("../server/commands.ts");

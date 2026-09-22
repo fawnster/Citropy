@@ -69,7 +69,8 @@ test("provider shells expose background lifetime and targeted stop protocols", a
     await assert.rejects(cancelled, /closed/);
   });
 
-  await t.test("Codex streams output, retains background terminals after turn end and stops polling when empty", async () => {
+  await t.test("Codex streams output, retains background terminals after turn end and stops polling when empty", async test => {
+    test.mock.timers.enable({ apis: ["setTimeout"] });
     const events = [];
     const session = codexProvider.start({ ...options, emit: event => events.push(event) });
     sessions.push(session);
@@ -95,7 +96,11 @@ test("provider shells expose background lifetime and targeted stop protocols", a
     child.receive({ id: discovery.id, error: { message: "Temporarily unavailable" } });
     await tick();
     const polls = child.messages.filter(message => message.method === "thread/backgroundTerminals/list").length;
-    await new Promise(resolve => setTimeout(resolve, 2150));
+    test.mock.timers.tick(1999);
+    await tick();
+    assert.equal(child.messages.filter(message => message.method === "thread/backgroundTerminals/list").length, polls);
+    test.mock.timers.tick(1);
+    await tick();
     assert.equal(child.messages.filter(message => message.method === "thread/backgroundTerminals/list").length, polls + 1);
     assert.equal(events.some(event => event.type === "exit" || event.type === "turn.end"), false);
     await reply("thread/backgroundTerminals/list", { data: [{ itemId: "bash", processId: "123", command: "npm run dev", cwd: "/example" }], nextCursor: null });
@@ -111,7 +116,8 @@ test("provider shells expose background lifetime and targeted stop protocols", a
     assert.deepEqual(request.params, { threadId: "native-thread", processId: "123" });
     await stopped;
     const count = child.messages.length;
-    await new Promise(resolve => setTimeout(resolve, 2150));
+    test.mock.timers.tick(6000);
+    await tick();
     assert.equal(child.messages.length, count);
     child.receive({ method: "item/completed", params: { item: { id: "late-failure", type: "commandExecution", status: "failed", exitCode: 1, aggregatedOutput: "Server failed" } } });
     assert.deepEqual(events.at(-1), { type: "shell.end", callId: "late-failure", ok: false });

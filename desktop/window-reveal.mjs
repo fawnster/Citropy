@@ -6,15 +6,31 @@ export function revealDesktopWindow(window, { maximized = false } = {}) {
   window.focus();
 }
 
-export function createSecondInstanceFocus(getWindow) {
+export function prepareInitialWindowReveal(
+  window,
+  { maximized = false, platform = process.platform } = {},
+) {
+  let initial = true;
+  const reveal = () => {
+    if (!initial) return revealDesktopWindow(window);
+    initial = false;
+    window.removeListener("ready-to-show", reveal);
+    revealDesktopWindow(window, { maximized });
+  };
+  if (platform === "linux") reveal();
+  else window.once("ready-to-show", reveal);
+  return reveal;
+}
+
+export function createSecondInstanceFocus(getFocus) {
   let pending = false;
   const focus = () => {
-    const window = getWindow();
-    if (!window || window.isDestroyed()) {
+    const reveal = getFocus();
+    if (!reveal) {
       pending = true;
       return;
     }
-    revealDesktopWindow(window);
+    reveal();
   };
   return {
     focus,

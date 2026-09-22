@@ -4,7 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import { join } from "node:path";
 
-test("a finishing subagent notifies its parent conversation once per run", async () => {
+test("subagent completion alerts are opt-in and notify once per run", async () => {
   process.env.CITROPY_DATA_DIR = fs.mkdtempSync(join(os.tmpdir(), "citropy-subagent-notify-"));
   const { store } = await import("../server/store.ts");
   const { bus } = await import("../server/bus.ts");
@@ -14,6 +14,22 @@ test("a finishing subagent notifies its parent conversation once per run", async
   const say = (id, text) => store.addMessage(id, { id: `msg-${id}-${store.threads.get(id).messages.length}`, ts: Date.now(), role: "assistant", parts: [{ id: "prt", kind: "text", text }] });
   const start = (id) => store.patchThread(id, { status: "working", running: true, runStartedAt: Date.now() });
   const parent = create();
+
+  assert.equal(store.notificationPreferences.subagents, false);
+  const quietChild = create({ parentThreadId: parent.id });
+  start(quietChild.id);
+  say(quietChild.id, "Results stay available without an alert.");
+  store.patchThread(quietChild.id, { status: "idle", running: false });
+  assert.equal(events.length, 0);
+  assert.equal(store.threads.get(quietChild.id).messages.at(-1).parts[0].text, "Results stay available without an alert.");
+  start(quietChild.id);
+  store.patchThread(quietChild.id, { status: "error", running: false, error: "Failed without an alert." });
+  assert.equal(events.length, 0);
+  store.updateSubagent(parent.id, { id: "quiet-native", title: "Native", status: "working" });
+  store.updateSubagent(parent.id, { id: "quiet-native", status: "idle", result: "Native result." });
+  assert.equal(events.length, 0);
+  assert.equal([...store.threads.values()].find((entry) => entry.nativeAgentId === "quiet-native").messages.at(-1).parts[0].text, "Native result.");
+  store.configureNotifications({ subagents: true });
 
   const child = create({ parentThreadId: parent.id });
   start(child.id);
@@ -116,4 +132,33 @@ test("two runs started back to back both notify", async () => {
   }
   assert.equal(events.length - before, 3);
   assert.equal(new Set(events.slice(before).map((entry) => entry.dedupeKey)).size, 3);
+});
+
+test("turning subagent alerts off takes effect for a running child and persists", async () => {
+  const { store, events, create } = await setup();
+  const { Store } = await import("../server/store.ts");
+  const parent = create();
+  const child = create({ parentThreadId: parent.id });
+  store.configureNotifications({ subagents: true });
+  assert.equal(new Store().notificationPreferences.subagents, true);
+  store.patchThread(child.id, { status: "working", running: true });
+  store.configureNotifications({ subagents: false });
+  store.patchThread(child.id, { status: "idle", running: false });
+  assert.equal(events.length, 0);
+  assert.equal(new Store().notificationPreferences.subagents, false);
+  assert.throws(() => store.configureNotifications({ subagents: "yes" }), /Invalid notification preferences/);
+});
+
+test("existing notification settings default subagent alerts to off", async () => {
+  const { Store } = await import("../server/store.ts");
+  const path = join(process.env.CITROPY_DATA_DIR, "settings.json");
+  const settings = JSON.parse(fs.readFileSync(path, "utf8"));
+  delete settings.notifications.subagents;
+  settings.notifications.desktop = false;
+  settings.notifications.sound = true;
+  fs.writeFileSync(path, JSON.stringify(settings));
+  const restored = new Store();
+  assert.equal(restored.notificationPreferences.subagents, false);
+  assert.equal(restored.notificationPreferences.desktop, false);
+  assert.equal(restored.notificationPreferences.sound, true);
 });

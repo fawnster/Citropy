@@ -4,16 +4,15 @@ import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
-const nodeFlags = ['--experimental-strip-types', '--test', '--test-concurrency=1', '--test-reporter=tap']
+const nodeFlags = ['--experimental-strip-types', '--test', '--test-reporter=tap']
 const locationPatterns = [
   /^\s*location: '(.+?):\d+:\d+'\s*$/gm,
   /^\s*test at (.+?):\d+:\d+\s*$/gm,
 ]
 
-/** Run explicit test files serially, preserving TAP output and the child exit status. */
-function runTests(files) {
+function runTests(files, concurrency = 2) {
   return new Promise((resolveRun, reject) => {
-    const child = spawn(process.execPath, [...nodeFlags, ...files], {
+    const child = spawn(process.execPath, [...nodeFlags, `--test-concurrency=${concurrency}`, ...files], {
       cwd: root,
       stdio: ['inherit', 'pipe', 'inherit'],
     })
@@ -62,7 +61,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   if (failed.length === 0) process.exit(1)
 
   console.log(`\nRetrying ${failed.length} test file(s) after a first failure: ${failed.join(' ')}\n`)
-  const retry = await runTests(failed)
+  const retry = await runTests(failed, 1)
   if (retry.code !== 0) {
     console.log('\nRetry failed. Both runs failed for the files above.')
     process.exit(1)

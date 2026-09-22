@@ -122,10 +122,11 @@ export function browserAction(
 
 export async function browserSnapshot(
   id: string,
+  screenshot = false,
 ): Promise<{ text: string; image?: string }> {
   if (!sessions.has(id)) throw new Error("Browser tab not found");
   await queues.get(id)?.catch(() => {});
-  return desktopRequest("browser.snapshot", { id });
+  return desktopRequest("browser.snapshot", { id, screenshot });
 }
 
 export async function closeBrowser(id: string): Promise<void> {

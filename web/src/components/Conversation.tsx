@@ -1,68 +1,20 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { AnimatePresence, motion } from "motion/react";
 import { ChevronDown } from "./icons.ts";
 import { MessageBlock } from "./MessageBlock.tsx";
 import { MessageNavigator } from "./MessageNavigator.tsx";
 import { Working } from "./Working.tsx";
-import { scaled, useApp, type AppState } from "../lib/store.ts";
+import { scaled, useApp } from "../lib/store.ts";
 import { loadThread, readThreadNotifications, refreshGit } from "../lib/actions.ts";
 import { useStickToBottom } from "../lib/use-stick.ts";
+import { useReducedMotion } from "../lib/use-reduced-motion.ts";
 import {
   timelineRows,
-  sameTimelineRows,
-  type TimelineRow,
+  createTimelineSelector,
 } from "../lib/timeline.ts";
 import { useI18n } from "../lib/i18n.ts";
-import { normalizeTodos } from "../../../shared/todos.ts";
-
-function partFingerprint(part: AppState["parts"][string] | undefined): string {
-  if (!part) return "-";
-  switch (part.kind) {
-    case "text":
-    case "reasoning":
-      return `${part.kind === "text" ? "x" : "r"}${part.text.trim() ? 1 : 0}${part.complete === false ? 0 : 1}`;
-    case "todo":
-      return `d${normalizeTodos(part.items).length ? 1 : 0}`;
-    case "question":
-      return `q${part.status}`;
-    case "tool":
-      return `k${part.name}:${part.callId}:${part.images?.length ?? 0}:${part.imageFiles?.length ?? 0}`;
-    case "images":
-      return "i";
-    case "notice":
-      return `n${part.level}`;
-    default:
-      return part.kind;
-  }
-}
-
-function timelineFingerprint(state: AppState, threadId: string): string {
-  const order = state.order[threadId] ?? [];
-  const thread = state.threads[threadId];
-  const sections = [
-    order.join(","),
-    thread?.status ?? "",
-    thread?.running ? "1" : "0",
-    thread?.compacting ? "1" : "0",
-    thread?.runStartedAt === undefined ? "" : String(thread.runStartedAt),
-  ];
-  for (const messageId of order) {
-    const message = state.messages[messageId];
-    if (!message) {
-      sections.push(`@${messageId}`);
-      continue;
-    }
-    sections.push(`>${message.role}:${message.ts}`);
-    for (const partId of message.partIds)
-      sections.push(`${partId}=${partFingerprint(state.parts[partId])}`);
-  }
-  for (const messageId of order) {
-    for (const partId of state.messages[messageId]?.partIds ?? [])
-      if (state.disclosures[partId]?.activity) sections.push(`^${partId}`);
-  }
-  return sections.join("|");
-}
 
 export function Conversation() {
   const t = useI18n();
@@ -70,18 +22,7 @@ export function Conversation() {
   const searchShellId = useApp((state) => state.searchShellId);
   const threadId = useApp((state) => state.activeThreadId);
   const ids = useApp((state) => (threadId ? state.order[threadId] : undefined));
-  const selectRows = useMemo(() => {
-    let rows: TimelineRow[] = [];
-    let fingerprint: string | undefined;
-    return (state: ReturnType<typeof useApp.getState>) => {
-      const key = threadId ? timelineFingerprint(state, threadId) : "";
-      if (key === fingerprint) return rows;
-      fingerprint = key;
-      const next = threadId ? timelineRows(state, threadId) : [];
-      if (!sameTimelineRows(rows, next)) rows = next;
-      return rows;
-    };
-  }, [threadId]);
+  const selectRows = useMemo(() => createTimelineSelector(threadId), [threadId]);
   const rows = useApp(selectRows);
   const continuesReply = useApp((state) => state.messages[rows.at(-1)?.messageId ?? ""]?.role === "assistant");
   const lastMessage = useApp((state) => state.messages[ids?.at(-1) ?? ""]);
@@ -117,6 +58,33 @@ export function Conversation() {
     scrollToBottom,
     stopFollowing,
   } = useStickToBottom<HTMLDivElement, HTMLDivElement>();
+  const reducedMotion = useReducedMotion();
+  const activityAnimations = useRef<Animation[]>([]);
+  const transitionActivity = useCallback((id: string, update: () => void) => {
+    for (const animation of activityAnimations.current) animation.cancel();
+    activityAnimations.current = [];
+    const activity = rows.find(row => row.row?.kind === "activity" && row.row.id === id)?.row;
+    const previousKeys = new Set(rows.map(row => row.key));
+    flushSync(update);
+    if (reducedMotion || activity?.kind !== "activity" || activity.open) return;
+    const nextRows = selectRows(useApp.getState());
+    for (const element of viewport.current?.querySelectorAll<HTMLElement>(".timeline-row") ?? []) {
+      const row = nextRows[Number(element.dataset.index)];
+      if (!row || previousKeys.has(row.key) || !activity.messageIds.includes(row.messageId)) continue;
+      const animation = element.animate([{ opacity: 0.35 }, { opacity: 1 }], {
+        duration: 160,
+        easing: "cubic-bezier(0.2, 0, 0, 1)",
+      });
+      animation.onfinish = () => {
+        activityAnimations.current = activityAnimations.current.filter(active => active !== animation);
+      };
+      activityAnimations.current.push(animation);
+    }
+  }, [viewport, rows, selectRows, reducedMotion]);
+  useLayoutEffect(() => () => {
+    for (const animation of activityAnimations.current) animation.cancel();
+    activityAnimations.current = [];
+  }, [threadId, reducedMotion]);
   const virtualized = rows.length > 40;
   const getItemKey = useCallback((index: number) => rows[index]!.key, [rows]);
   const timeline = useVirtualizer<HTMLDivElement, HTMLDivElement>({
@@ -218,14 +186,15 @@ export function Conversation() {
     } : state.disclosures;
     const expandedRows = expanding ? timelineRows({ ...state, disclosures }, threadId) : rows;
     const index = expandedRows.findIndex(({ row, messageId: owner }) => partId
-      ? row?.kind === "group" && row.ids.includes(partId)
+      ? row?.kind === "group" && row.ids.includes(partId) || row?.kind === "part" && row.id === partId
       : owner === messageId);
     const group = expandedRows[index]?.row;
-    if (partId && group?.kind === "group" &&
-      (!disclosures[group.ids[0]!]?.group || !disclosures[partId]?.tool)) {
+    if (partId && (!disclosures[partId]?.tool || group?.kind === "group" && !disclosures[group.ids[0]!]?.group)) {
       disclosures = { ...disclosures };
-      const id = group.ids[0]!;
-      disclosures[id] = { ...disclosures[id], group: true };
+      if (group?.kind === "group") {
+        const id = group.ids[0]!;
+        disclosures[id] = { ...disclosures[id], group: true };
+      }
       disclosures[partId] = { ...disclosures[partId], tool: true };
     }
     if (disclosures !== state.disclosures) useApp.setState({ disclosures });
@@ -296,6 +265,7 @@ export function Conversation() {
                   key={item.key}
                   className="timeline-row"
                   data-index={item.index}
+                  data-message-id={row.messageId}
                   ref={timeline.measureElement}
                   style={{ transform: `translateY(${item.start}px)` }}
                 >
@@ -304,6 +274,7 @@ export function Conversation() {
                     row={row.row}
                     first={row.first}
                     separator={row.separator}
+                    transitionActivity={transitionActivity}
                     last={row.last && !(busy && continuesReply && item.index === rows.length - 1)}
                     streaming={
                       Boolean(running) && row.messageId === messages.at(-1)

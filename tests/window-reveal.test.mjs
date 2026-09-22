@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import {
   createSecondInstanceFocus,
+  prepareInitialWindowReveal,
   revealDesktopWindow,
 } from "../desktop/window-reveal.mjs";
 
 function fakeWindow(flags = {}) {
   const calls = [];
+  const listeners = new Map();
   const window = {
     calls,
     destroyed: false,
@@ -35,6 +37,17 @@ function fakeWindow(flags = {}) {
     focus() {
       calls.push("focus");
     },
+    once(event, listener) {
+      listeners.set(event, listener);
+    },
+    removeListener(event, listener) {
+      if (listeners.get(event) === listener) listeners.delete(event);
+    },
+    emit(event) {
+      const listener = listeners.get(event);
+      listeners.delete(event);
+      listener?.();
+    },
   };
   return window;
 }
@@ -46,11 +59,11 @@ test("a maximized window is shown before it is maximized so Wayland can map it",
 });
 
 test("a second launch before the window exists is applied once it does", () => {
-  let window;
-  const second = createSecondInstanceFocus(() => window);
+  let focus;
+  const second = createSecondInstanceFocus(() => focus);
   second.focus();
-  assert.equal(window, undefined);
-  window = fakeWindow({ minimized: true });
+  const window = fakeWindow({ minimized: true });
+  focus = () => revealDesktopWindow(window);
   second.flush();
   assert.deepEqual(window.calls, ["restore", "show", "focus"]);
 });
@@ -76,9 +89,45 @@ test("a destroyed window is left alone", () => {
 
 test("a second launch after the window exists focuses it immediately", () => {
   const window = fakeWindow({ minimized: true });
-  const second = createSecondInstanceFocus(() => window);
+  const second = createSecondInstanceFocus(
+    () => () => revealDesktopWindow(window),
+  );
   second.focus();
   assert.deepEqual(window.calls, ["restore", "show", "focus"]);
   second.flush();
   assert.deepEqual(window.calls, ["restore", "show", "focus"]);
+});
+
+test("Linux reveals a saved maximized window only once", () => {
+  const window = fakeWindow();
+  const focus = prepareInitialWindowReveal(window, {
+    maximized: true,
+    platform: "linux",
+  });
+  assert.deepEqual(window.calls, ["show", "maximize", "focus"]);
+  window.maximized = false;
+  focus();
+  assert.deepEqual(window.calls, ["show", "maximize", "focus", "show", "focus"]);
+});
+
+test("other platforms wait until the window is ready before revealing it", () => {
+  const window = fakeWindow();
+  prepareInitialWindowReveal(window, { maximized: true, platform: "win32" });
+  assert.deepEqual(window.calls, []);
+  window.emit("ready-to-show");
+  assert.deepEqual(window.calls, ["show", "maximize", "focus"]);
+});
+
+test("focusing before readiness cancels the delayed initial reveal", () => {
+  const window = fakeWindow();
+  const focus = prepareInitialWindowReveal(window, {
+    maximized: true,
+    platform: "darwin",
+  });
+  focus();
+  assert.deepEqual(window.calls, ["show", "maximize", "focus"]);
+  window.maximized = false;
+  window.calls.length = 0;
+  window.emit("ready-to-show");
+  assert.deepEqual(window.calls, []);
 });

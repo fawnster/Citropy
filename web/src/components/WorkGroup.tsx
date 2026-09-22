@@ -29,22 +29,22 @@ export const WorkGroup = memo(function WorkGroup({ ids }: { ids: string[] }) {
   return (
     <div className="group" data-open={open}>
       <button className="group-head" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-        <ChevronRight size={12} className="group-chevron" />
+        <ChevronRight size={12} className="group-chevron" aria-hidden="true" />
         <span className="group-icons">
           {shapes.map((shape) => {
             const Icon = shapeIcon[shape];
             return (
               <span className="group-icon" key={shape} data-shape={shape}>
-                <Icon size={12} />
+                <Icon size={12} aria-hidden="true" />
               </span>
             );
           })}
         </span>
         <span className="group-label truncate">{sentence}</span>
-        {stats.running && <span className="tool-spin" />}
+        {stats.running && <span className="tool-spin" role="img" aria-label={t("running")} />}
         {stats.failed > 0 && (
-          <span className="group-failed">
-            <AlertTriangle size={11} />
+          <span className="group-failed" role="img" aria-label={t(stats.failed === 1 ? "{count} failed tool" : "{count} failed tools", { count: stats.failed })}>
+            <AlertTriangle size={11} aria-hidden="true" />
             {stats.failed}
           </span>
         )}

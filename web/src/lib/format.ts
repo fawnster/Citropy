@@ -67,8 +67,9 @@ export function tokens(value: number): string {
 
 export function tokenRate(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "0";
-  if (value < 9.95) return value.toFixed(1);
-  return String(Math.round(value));
+  return new Intl.NumberFormat(currentLocale(), {
+    maximumFractionDigits: 1,
+  }).format(value);
 }
 
 export function cost(value: number): string {
@@ -81,9 +82,10 @@ export function cost(value: number): string {
 export function duration(ms: number): string {
   if (ms < 950) return `${Math.max(ms, 1).toFixed(0)}ms`;
   const seconds = ms / 1000;
-  if (seconds < 60) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
-  const minutes = Math.floor(seconds / 60);
-  const rest = Math.round(seconds % 60);
+  if (seconds < 59.5) return `${seconds.toFixed(seconds < 10 ? 1 : 0)}s`;
+  const rounded = Math.round(seconds);
+  const minutes = Math.floor(rounded / 60);
+  const rest = rounded % 60;
   return `${minutes}m ${rest}s`;
 }
 

@@ -38,7 +38,7 @@ function sameFile(left: { dev: number; ino: number }, right: { dev: number; ino:
 }
 
 /** Capture every canonical directory component so ABA path replacement is detectable. */
-async function directoryState(root: string, target: string): Promise<DirectoryState[] | null> {
+export async function directoryState(root: string, target: string): Promise<DirectoryState[] | null> {
   const rel = relative(root, target);
   if (isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`)) return null;
   const paths = [root];
@@ -63,7 +63,7 @@ async function directoryState(root: string, target: string): Promise<DirectorySt
 }
 
 /** Verify no checked directory component changed while an enumeration was in flight. */
-async function sameDirectoryState(states: DirectoryState[]): Promise<boolean> {
+export async function sameDirectoryState(states: DirectoryState[]): Promise<boolean> {
   for (const expected of states) {
     const info = await stat(expected.path, { bigint: true });
     if (!info.isDirectory() || info.dev !== expected.dev || info.ino !== expected.ino ||

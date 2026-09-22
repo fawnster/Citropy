@@ -1,4 +1,6 @@
 export const settingsEs: Record<string, string> = {
+  "Subagent completions": "Finalización de subagentes",
+  "Notify you when a subagent finishes or fails. Results remain available in the conversation.": "Avisa cuando un subagente termina o falla. Los resultados siguen disponibles en la conversación.",
   "Citropy development": "Citropy desarrollo",
   "Version {version}": "Versión {version}",
   "Restart the app and reopen your browser tabs.": "Reinicia la aplicación y vuelve a abrir las pestañas del navegador.",

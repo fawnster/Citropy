@@ -46,6 +46,7 @@ export function describeTool(name: string, rawInput: unknown, root = ""): ToolDe
   const dir = folder(path, root);
 
   const computer = name.replace(/^(?:mcp__citropy__|citropy_)/, "");
+  if (computer === "workspace_image") return { shape: "read", headline: `Share ${short || "image"}`, detail: dir };
   if (computer.startsWith("computer_")) {
     const headlines: Record<string, string> = {
       computer_help: "Read computer-use instructions",

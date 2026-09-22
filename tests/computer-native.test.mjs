@@ -20,8 +20,10 @@ test("native computer capture, input and cancellation on an isolated desktop", {
   const pending = new Map();
   t.after(async () => {
     target?.stdin.end();
-    if (target && target.exitCode === null) await Promise.race([once(target, "exit"), new Promise(resolve => setTimeout(resolve, 3000))]);
-    if (target?.exitCode === null) target.kill("SIGKILL");
+    if (target && target.exitCode === null && target.signalCode === null) {
+      const timer = setTimeout(() => target.kill("SIGKILL"), 3000);
+      try { await once(target, "exit"); } finally { clearTimeout(timer); }
+    }
     await browser?.close();
     display.kill();
     for (const item of pending.values()) clearTimeout(item.timer);
@@ -103,7 +105,18 @@ test("native computer capture, input and cancellation on an isolated desktop", {
   };
   await request("computer.action", { action: "click", ...await point("input") });
   await request("computer.action", { action: "type", text: "Hello café ✓" });
-  await page.waitForFunction(() => document.querySelector("input").value === "Hello café ✓");
+  try {
+    await page.waitForFunction(() => document.querySelector("input").value === "Hello café ✓");
+  } catch (error) {
+    t.diagnostic(JSON.stringify(await page.evaluate(() => ({
+      value: document.querySelector("input").value,
+      focus: document.activeElement?.tagName,
+      focused: document.hasFocus(),
+      keys: window.keys,
+      pointer: window.drag,
+    }))));
+    throw error;
+  }
   await request("computer.action", { action: "press", key: "Control+A" });
   await request("computer.action", { action: "type", text: "Replacement" });
   await page.waitForFunction(() => document.querySelector("input").value === "Replacement");

@@ -16,7 +16,10 @@ async function suite(t, source) {
   await mkdir(join(root, 'scripts'));
   await mkdir(join(root, 'tests'));
   await copyFile(new URL('../scripts/test-ci.mjs', import.meta.url), join(root, 'scripts', 'test-ci.mjs'));
-  if (source !== null) await writeFile(join(root, 'tests', 'example.test.mjs'), source);
+  const files = typeof source === 'string' ? { 'example.test.mjs': source } : source;
+  for (const [name, content] of Object.entries(files ?? {})) {
+    await writeFile(join(root, 'tests', name), content);
+  }
   // NODE_TEST_CONTEXT would make nested Node runners behave as test children.
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
@@ -32,6 +35,50 @@ async function suite(t, source) {
 test('the CI runner returns success for a clean first pass', async t => {
   const result = await suite(t, "import test from 'node:test'; test('passing', () => {});\n");
   assert.equal(result.code, 0, result.stdout + result.stderr);
+});
+
+test('the CI runner overlaps independent files on its first pass', async t => {
+  const source = (name, peer) => `
+    import assert from 'node:assert/strict';
+    import test from 'node:test';
+    import { existsSync, writeFileSync } from 'node:fs';
+    import { setTimeout } from 'node:timers/promises';
+    test('overlaps ${name}', async () => {
+      writeFileSync('${name}.ready', 'yes');
+      const deadline = Date.now() + 5000;
+      while (!existsSync('${peer}.ready') && Date.now() < deadline) await setTimeout(10);
+      assert.ok(existsSync('${peer}.ready'), 'Independent files did not run together');
+    });
+  `;
+  const result = await suite(t, {
+    'first.test.mjs': source('first', 'second'),
+    'second.test.mjs': source('second', 'first'),
+  });
+  assert.equal(result.code, 0, result.stdout + result.stderr);
+});
+
+test('diagnostic retries run failed files serially', async t => {
+  const source = name => `
+    import test from 'node:test';
+    import { existsSync, writeFileSync, mkdirSync, rmdirSync } from 'node:fs';
+    import { setTimeout } from 'node:timers/promises';
+    test('retries ${name}', async () => {
+      if (!existsSync('${name}.attempted')) {
+        writeFileSync('${name}.attempted', 'yes');
+        throw new Error('first run fails');
+      }
+      mkdirSync('retry-active');
+      try { await setTimeout(100); } finally { rmdirSync('retry-active'); }
+    });
+  `;
+  const result = await suite(t, {
+    'first.test.mjs': source('first'),
+    'second.test.mjs': source('second'),
+  });
+  assert.notEqual(result.code, 0, result.stdout);
+  assert.match(result.stdout, /Retrying 2 test file\(s\)/);
+  assert.match(result.stdout, /Retries passed/);
+  assert.match(result.stdout, /CI remains failed/);
 });
 
 test('a successful retry never hides the initial CI failure', async t => {

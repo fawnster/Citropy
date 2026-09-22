@@ -24,6 +24,11 @@ export function buildRows(parts: Array<Part | undefined>): Row[] {
     if (part.kind === "todo" && normalizeTodos(part.items).length === 0) continue;
     if (part.kind === "tool" || part.kind === "reasoning") {
       if (part.kind === "tool" && hasQuestion && isQuestionTool(part.name)) continue;
+      if (part.kind === "tool" && (part.images?.length || part.imageFiles?.length)) {
+        flush();
+        rows.push({ kind: "part", id: part.id });
+        continue;
+      }
       const kind = part.kind === "tool" ? "group" : "thoughts";
       if (kind !== batchKind) flush();
       batchKind = kind;

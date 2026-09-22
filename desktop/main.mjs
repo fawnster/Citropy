@@ -5,8 +5,9 @@ import { spawn, spawnSync } from "node:child_process";
 import { release } from "node:os";
 import { createAppUpdater } from "./updates.mjs";
 import { spawnAppImageRelaunch } from "./appimage-relaunch.mjs";
-import { createSecondInstanceFocus, revealDesktopWindow } from "./window-reveal.mjs";
+import { createSecondInstanceFocus, prepareInitialWindowReveal } from "./window-reveal.mjs";
 import { packagedBackend } from "./backend.mjs";
+import { desktopDiagnostics } from "./diagnostics.mjs";
 import { initializeProfiles, browserProfile, handleProfiles } from "./browser-profiles.mjs";
 import { computerRequest, connectComputerEvents, stopComputer } from "./computer.mjs";
 import {
@@ -39,14 +40,26 @@ app.setPath(
   migrateDesktopData(app.getPath("appData"), process.env.CITROPY_DESKTOP_DATA || (development ? join(app.getPath("appData"), appName) : undefined)),
 );
 if (!app.requestSingleInstanceLock()) app.exit(0);
+const diagnose = desktopDiagnostics(app.getPath("userData"));
+diagnose("app.started", { version, electron: process.versions.electron, platform: process.platform, packaged: app.isPackaged });
+process.on("uncaughtExceptionMonitor", (_, origin) => diagnose("app.uncaught-exception", { reason: origin }));
+app.on("child-process-gone", (_, details) => {
+  diagnose("child.exited", { type: details.type, reason: details.reason, code: details.exitCode });
+});
+app.on("quit", (_, code) => diagnose("app.exited", { code }));
 let forcedExit = false;
 process.on("SIGTERM", () => {
   forcedExit = true;
+  diagnose("app.quit-requested", { reason: "SIGTERM" });
   app.quit();
-  const timer = setTimeout(() => app.exit(1), 15000);
+  const timer = setTimeout(() => {
+    diagnose("app.forced-exit", { reason: "shutdown-timeout", code: 1 });
+    app.exit(1);
+  }, 15000);
   timer.unref();
 });
-const secondInstance = createSecondInstanceFocus(() => window);
+let focusDesktopWindow;
+const secondInstance = createSecondInstanceFocus(() => focusDesktopWindow);
 app.on("second-instance", () => secondInstance.focus());
 if (process.platform === "linux") app.setDesktopName(development ? "citropy-dev.desktop" : "citropy.desktop");
 if (app.isPackaged) {
@@ -57,7 +70,7 @@ if (app.isPackaged) {
   process.env.CITROPY_UI_URL = process.env.CITROPY_URL;
   process.env.CITROPY_DESKTOP_TOKEN = randomBytes(32).toString("hex");
 }
-const backend = app.isPackaged ? packagedBackend(process.env) : undefined;
+const backend = app.isPackaged ? packagedBackend(process.env, diagnose) : undefined;
 let updates;
 let environments;
 let folderChoice;
@@ -89,6 +102,7 @@ app.on("before-quit", (event) => {
   if (quitting) return;
   event.preventDefault();
   quitting = true;
+  diagnose("app.quitting");
   folderChoice?.abort();
   void stopComputer().then(() => environments?.dispose()).then(() => backend?.stop()).catch(() => {}).finally(() => {
     updates?.dispose();
@@ -705,20 +719,23 @@ async function request(method, params) {
         (node) =>
           `${node.role?.value ?? ""} ${JSON.stringify(node.name?.value ?? "")}${node.value ? ` value=${JSON.stringify(node.value.value)}` : ""}`,
       );
-    const { cssVisualViewport } = await cdp(tab, "Page.getLayoutMetrics");
-    const image = await cdp(tab, "Page.captureScreenshot", {
-      format: "jpeg",
-      quality: 80,
-      fromSurface: true,
-      captureBeyondViewport: true,
-      clip: {
-        x: cssVisualViewport.pageX,
-        y: cssVisualViewport.pageY,
-        width: tab.state.width / cssVisualViewport.scale,
-        height: tab.state.height / cssVisualViewport.scale,
-        scale: cssVisualViewport.scale,
-      },
-    }).then((result) => result.data).catch(() => undefined);
+    let image;
+    if (params.screenshot === true) {
+      const { cssVisualViewport } = await cdp(tab, "Page.getLayoutMetrics");
+      image = await cdp(tab, "Page.captureScreenshot", {
+        format: "jpeg",
+        quality: 80,
+        fromSurface: true,
+        captureBeyondViewport: true,
+        clip: {
+          x: cssVisualViewport.pageX,
+          y: cssVisualViewport.pageY,
+          width: tab.state.width / cssVisualViewport.scale,
+          height: tab.state.height / cssVisualViewport.scale,
+          scale: cssVisualViewport.scale,
+        },
+      }).then((result) => result.data).catch(() => undefined);
+    }
     return {
       text: `${tab.view.webContents.getTitle()}\n${tab.view.webContents.getURL()}\nViewport: ${tab.state.width} × ${tab.state.height}${tab.state.mobile ? " (mobile)" : " (desktop)"}. Screenshot coordinates use these dimensions.\n\n${lines.join("\n").slice(0, 28000)}`,
       image,
@@ -766,8 +783,31 @@ app
         sandbox: true,
       },
     });
-    window.once("ready-to-show", () => revealDesktopWindow(window, { maximized: saved.maximized }));
-    if (process.platform === "linux") revealDesktopWindow(window, { maximized: saved.maximized });
+    window.on("close", () => {
+      const bounds = window.getNormalBounds();
+      try {
+        mkdirSync(app.getPath("userData"), { recursive: true });
+        writeFileSync(
+          windowFile,
+          JSON.stringify({
+            width: bounds.width,
+            height: bounds.height,
+            maximized: window.isMaximized(),
+          }),
+          { mode: 0o600 },
+        );
+      } catch {}
+    });
+    window.on("closed", () => {
+      diagnose("app.quit-requested", { reason: "window-closed" });
+      app.quit();
+    });
+    window.webContents.on("render-process-gone", (_, details) => {
+      diagnose("renderer.exited", { reason: details.reason, code: details.exitCode });
+    });
+    focusDesktopWindow = prepareInitialWindowReveal(window, {
+      maximized: saved.maximized,
+    });
     secondInstance.flush();
     const started = backend?.start() ?? Promise.resolve();
     void started.catch(() => {});
@@ -868,6 +908,7 @@ app
         );
         closeSync(log);
         child.unref();
+        diagnose("app.quit-requested", { reason: "script-update" });
         app.quit();
       },
     };
@@ -885,6 +926,7 @@ app
                 parentPid: process.pid,
                 logFile: join(app.getPath("userData"), "update.log"),
               });
+              diagnose("app.quit-requested", { reason: "appimage-update" });
               app.quit();
             }
           : undefined,
@@ -900,6 +942,7 @@ app
           throw error;
         }
         applyingUpdate = true;
+        diagnose("app.update-preparing");
         for (const profile of new Set([session.defaultSession, ...[...tabs.values()].map(tab => tab.view.webContents.session)])) {
           await profile.cookies.flushStore();
           profile.flushStorageData();
@@ -964,6 +1007,7 @@ app
           });
           app.releaseSingleInstanceLock();
         } else app.relaunch();
+        diagnose("app.quit-requested", { reason: "restart" });
         app.quit();
       } else throw new Error("Unknown window action");
     });
@@ -990,21 +1034,6 @@ app
       "leave-full-screen",
     ])
       window.on(event, publishWindow);
-    window.on("close", () => {
-      const bounds = window.getNormalBounds();
-      try {
-        mkdirSync(app.getPath("userData"), { recursive: true });
-        writeFileSync(
-          windowFile,
-          JSON.stringify({
-            width: bounds.width,
-            height: bounds.height,
-            maximized: window.isMaximized(),
-          }),
-          { mode: 0o600 },
-        );
-      } catch {}
-    });
     window.webContents.on("will-navigate", (event, url) => {
       if (new URL(url).origin !== ui.origin) event.preventDefault();
     });
@@ -1093,7 +1122,6 @@ app
         publish(tab);
       },
     );
-    window.on("closed", () => app.quit());
     connectDesktop = () => {
     const wsUrl = new URL("/socket", base);
     wsUrl.protocol = "ws:";
@@ -1118,16 +1146,23 @@ app
       }
     });
     connection.on("error", () => {
-      if (socket === connection && !quitting && !applyingUpdate) app.quit();
+      if (socket === connection && !quitting && !applyingUpdate) {
+        diagnose("app.quit-requested", { reason: "backend-connection-error" });
+        app.quit();
+      }
     });
-    connection.on("close", () => {
-      if (socket === connection && !quitting && !applyingUpdate) app.quit();
+    connection.on("close", (code) => {
+      if (socket === connection && !quitting && !applyingUpdate) {
+        diagnose("app.quit-requested", { reason: "backend-disconnected", code });
+        app.quit();
+      }
     });
     };
     connectDesktop();
     await window.loadURL(ui.href);
   })
   .catch(async (error) => {
+    diagnose("app.start-failed");
     process.stderr.write(`${error.message}\n`);
     if (quitting) return;
     if (app.isPackaged && !forcedExit) dialog.showErrorBox("Citropy could not open", error.message);

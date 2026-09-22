@@ -510,6 +510,33 @@ test("workspace features persist and use conversation boundaries", async (t) => 
       );
     },
   );
+  await t.test("requested skills prefer enabled project copies and stay within their provider", async () => {
+    const workspace = join(directory, "runtime-skill-workspace");
+    const personal = join(directory, ".claude", "skills");
+    const local = join(workspace, ".claude", "skills");
+    for (const [root, name, filename] of [
+      [personal, "runtime-review", "SKILL.md"],
+      [personal, "runtime-personal", "SKILL.md"],
+      [local, "runtime-review", "SKILL.md"],
+      [local, "runtime-project", "SKILL.md"],
+      [local, "runtime-disabled", "SKILL.md.citropy-disabled"],
+      [local, "runtime-unmentioned", "SKILL.md"],
+      [join(workspace, ".codex", "skills"), "runtime-other", "SKILL.md"],
+    ]) {
+      const folder = join(root, name);
+      fs.mkdirSync(folder, { recursive: true });
+      fs.writeFileSync(join(folder, filename), `---\nname: ${name}\ndescription: Runtime skill fixture.\n---\nUse this fixture.`);
+    }
+    const owner = store.openProject(workspace);
+    const entry = store.createThread({ projectId: owner.id, provider: "claude", title: "Skill selection", permissionMode: "manual" });
+    await runtimeFor(entry.id).send("Use $runtime-personal @runtime-review @runtime-project @runtime-disabled @runtime-other @runtime-review");
+    assert.deepEqual(session.sent[0][2].map(skill => ({ name: skill.name, path: skill.path })), [
+      { name: "runtime-project", path: join(local, "runtime-project", "SKILL.md") },
+      { name: "runtime-review", path: join(local, "runtime-review", "SKILL.md") },
+      { name: "runtime-personal", path: join(personal, "runtime-personal", "SKILL.md") },
+    ]);
+    session.options.emit({ type: "turn.end" });
+  });
   await t.test(
     "usage snapshots deduplicate message updates and clamp native allowance",
     () => {

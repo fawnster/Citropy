@@ -4,7 +4,6 @@ import { PartView } from "./PartView.tsx";
 import { WorkGroup } from "./WorkGroup.tsx";
 import { WorkDetails } from "./WorkDetails.tsx";
 import { Reasoning } from "./parts/Reasoning.tsx";
-import { ImageStrip } from "./parts/ImageStrip.tsx";
 import { MessageActions } from "./MessageActions.tsx";
 import type { TimelineRow } from "../lib/timeline.ts";
 import { useApp } from "../lib/store.ts";
@@ -23,6 +22,7 @@ interface Props extends Omit<TimelineRow, "key" | "messageId"> {
   messageId?: string;
   streaming: boolean;
   children?: ReactNode;
+  transitionActivity?: (id: string, update: () => void) => void;
 }
 
 export const MessageBlock = memo(function MessageBlock({
@@ -33,6 +33,7 @@ export const MessageBlock = memo(function MessageBlock({
   last,
   separator,
   children,
+  transitionActivity,
 }: Props) {
   const t = useI18n();
   const shell = useApp((state) => messageId ? state.messages[messageId] : undefined);
@@ -141,13 +142,11 @@ export const MessageBlock = memo(function MessageBlock({
         {row && (
           <div className={activity ? "agent-activity" : "message-bubble agent-card"}>
             {row.kind === "activity" ? (
-              <WorkDetails id={row.id} ids={row.ids} open={row.open} active={row.active} previewId={row.previewId} />
+              <WorkDetails id={row.id} ids={row.ids} messageIds={row.messageIds} open={row.open} active={row.active} previewId={row.previewId} transitionActivity={transitionActivity} />
             ) : row.kind === "group" ? (
               <WorkGroup key={row.ids[0]} ids={row.ids} />
             ) : row.kind === "thoughts" ? (
               <Reasoning ids={row.ids} live={streaming} />
-            ) : row.kind === "images" ? (
-              <ImageStrip ids={row.ids} />
             ) : (
               <PartView key={row.id} partId={row.id} live={streaming} />
             )}

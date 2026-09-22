@@ -8,11 +8,13 @@ import { DiffView } from "../DiffView.tsx";
 import { ansiToHtml, stripAnsi } from "../../lib/ansi.ts";
 import { duration } from "../../lib/format.ts";
 import type { ToolPart } from "../../../../shared/protocol.ts";
+import { ImageStrip } from "./ImageStrip.tsx";
 
 export function ToolCard({ part }: { part: ToolPart }) {
   const t = useI18n();
   const [open, setOpen] = useDisclosure(part.id, "tool");
   const Icon = shapeIcon[part.shape];
+  const label = toolLabel(part.name, part.status, t);
   const elapsed = part.endedAt ? part.endedAt - part.startedAt : null;
   const output = part.output ?? "";
   const hasImages = Boolean(part.images?.length || part.imageFiles?.length);
@@ -29,16 +31,16 @@ export function ToolCard({ part }: { part: ToolPart }) {
   const url = part.shape === "web" ? part.headline : null;
 
   return (
-    <div id={`tool-${part.id}`} className="tool" data-shape={part.shape} data-status={part.status} data-open={open}>
+    <div id={`tool-${part.id}`} className="tool" data-shape={part.shape} data-status={part.status} data-open={open} data-images={hasImages || undefined}>
       <button className="tool-head" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-        <ChevronRight size={12} className="tool-chevron" />
+        <ChevronRight size={12} className="tool-chevron" aria-hidden="true" />
         <span className="tool-icon">
-          <Icon size={13} />
+          <Icon size={12} aria-hidden="true" />
         </span>
-        <span className="tool-name">{toolLabel(part.name, part.status, t)}</span>
-        <span className="tool-headline mono truncate">{part.headline}</span>
+        <span className="tool-name" title={label}>{label}</span>
+        <span className="tool-headline mono truncate" title={part.headline}>{part.headline}</span>
         <span className="tool-meta">
-          {part.detail && <span className="tool-detail truncate">{part.detail}</span>}
+          {part.detail && <span className="tool-detail truncate" title={part.detail}>{part.detail}</span>}
           {part.patch && (
             <span className="tool-stat">
               {part.patch.added > 0 && <span className="diff-plus">+{part.patch.added}</span>}
@@ -50,7 +52,7 @@ export function ToolCard({ part }: { part: ToolPart }) {
         </span>
       </button>
 
-      {!open && peek && <div className="tool-peek mono truncate">{peek}</div>}
+      {!open && peek && !hasImages && <div className="tool-peek mono truncate">{peek}</div>}
 
       <Collapsible open={open} className="tool-body">
         <div className="tool-body-inner">
@@ -73,6 +75,7 @@ export function ToolCard({ part }: { part: ToolPart }) {
           )}
         </div>
       </Collapsible>
+      {hasImages && <ImageStrip part={part} compact={!open} />}
     </div>
   );
 }

@@ -43,8 +43,9 @@ test("the ACP provider replays session updates that arrive while a resume is loa
   const session = cursorProvider.start({
     threadId: "acp-resume",
     cwd: directory,
-    permissionMode: "manual",
+    permissionMode: "bypass",
     externalId: "resume-thread",
+    usage: { input: 100, output: 20, cacheRead: 300, cacheWrite: 40, costUsd: 1 },
     emit: (event) => events.push(event),
   });
   t.after(() => session.dispose());
@@ -58,4 +59,12 @@ test("the ACP provider replays session updates that arrive while a resume is loa
   assert.deepEqual(todos.items.map((item) => item.text), ["Restored step"]);
   const title = events.find((event) => event.type === "title");
   assert.equal(title?.title, "Resumed thread");
+  session.send("hello nopermission");
+  const usage = await waitFor(() => events.findLast((event) => event.type === "usage" && event.usage.input !== undefined), "the resumed usage totals");
+  assert.deepEqual(
+    Object.fromEntries(["input", "output", "cacheRead", "cacheWrite"].map((key) => [key, usage.usage[key]])),
+    { input: 2500, output: 800, cacheRead: 9000, cacheWrite: 400 },
+  );
+  await waitFor(() => events.find((event) => event.type === "turn.end"), "the resumed turn to finish");
+  assert.deepEqual(events.findLast((event) => event.type === "todos").items, []);
 });

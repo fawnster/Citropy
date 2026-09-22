@@ -34,6 +34,7 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     const errors = [];
     const requests = [];
     let connection;
+    let notificationPreferences = { toasts: true, desktop: true, sound: false };
     const created = new Map();
     const states = Object.fromEntries(projects.map(project => [project.id, {
       repository: true, hasCommits: true, mergeInProgress: false,
@@ -65,6 +66,10 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
       socket.onMessage(raw => {
         const event = JSON.parse(raw);
         requests.push(event);
+        if (event.t === "notifications.configure") {
+          notificationPreferences = { ...notificationPreferences, ...event.preferences };
+          socket.send(JSON.stringify({ t: "notifications.preferences", preferences: notificationPreferences }));
+        }
         if (event.t === "thread.config") {
           const current = created.get(event.id) ?? thread;
           const provider = catalogs.find(entry => entry.id === (event.provider ?? current.provider));
@@ -93,12 +98,37 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
           socket.send(JSON.stringify({ t: "github.result", requestId: event.requestId, result }));
         }
       });
-      socket.send(JSON.stringify({ t: "hello", snapshot: { projects, threads: chat ? [thread] : [], providers: catalogs, permissions: [], home: "/example" } }));
+      socket.send(JSON.stringify({ t: "hello", snapshot: { projects, threads: chat ? [thread] : [], providers: catalogs, permissions: [], home: "/example", notificationPreferences } }));
     });
     await page.goto(server.resolvedUrls.local[0]);
     await page.getByRole("button", { name: "Choose workspace, First workspace", exact: true }).waitFor();
     return { page, requests, states, emit: event => connection.send(JSON.stringify(event)) };
   }
+
+  await t.test("subagent completion alerts default off and can be changed in settings", async test => {
+    const { page, requests } = await fixture(test);
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.locator('button[data-settings-section="notifications"]').click();
+    const toggle = page.getByRole("switch", { name: /^Subagent completions/ });
+    await toggle.waitFor();
+    assert.equal(await toggle.isChecked(), false);
+    await toggle.click();
+    await page.waitForFunction(async () => (await import("/web/src/lib/store.ts")).useApp.getState().notificationPreferences.subagents);
+    assert.equal(await toggle.isChecked(), true);
+    assert.deepEqual(requests.find(event => event.t === "notifications.configure"), { t: "notifications.configure", preferences: { subagents: true } });
+    await toggle.click();
+    await page.waitForFunction(async () => !(await import("/web/src/lib/store.ts")).useApp.getState().notificationPreferences.subagents);
+    assert.equal(await toggle.isChecked(), false);
+    assert.deepEqual(requests.filter(event => event.t === "notifications.configure").at(-1), { t: "notifications.configure", preferences: { subagents: false } });
+    for (const width of [1440, 600]) {
+      await page.setViewportSize({ width, height: 1000 });
+      if (width <= 720) await page.locator('button[data-settings-section="notifications"]').click();
+      await toggle.scrollIntoViewIfNeeded();
+      const bounds = await toggle.boundingBox();
+      assert.ok(bounds.x >= 0 && bounds.x + bounds.width <= width, `Subagent setting overflows at ${width}px`);
+      await page.screenshot({ path: `/tmp/citropy-subagent-settings-${width}.png`, animations: "disabled" });
+    }
+  });
 
   await t.test("workspace actions and pinned, active, and finished categories are distinct", async test => {
     const { page, emit } = await fixture(test);
@@ -712,6 +742,8 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
       await panel.waitFor();
       await page.waitForFunction(() => getComputedStyle(document.querySelector(".context-details")).opacity === "1");
       assert.equal(await panel.evaluate(node => node.matches(":popover-open")), true);
+      assert.equal(await panel.getByRole("meter", { name: "Context", exact: true }).getAttribute("aria-valuenow"), "41");
+      assert.equal(await panel.locator(".context-summary").getAttribute("title"), "82,000 of 200,000 tokens");
       await page.screenshot({ path: `/tmp/citropy-context-hover-${width}.png`, animations: "disabled" });
       const box = await panel.boundingBox();
       const ring = await meter.boundingBox();
@@ -723,6 +755,10 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
       assert.ok(box.x >= 0 && box.x + box.width <= width);
       await meter.click();
       await page.mouse.move(width / 2, 200);
+      await panel.waitFor({ state: "detached" });
+      await meter.evaluate(node => node.click());
+      await panel.waitFor();
+      await page.locator(".conversation-viewport").dispatchEvent("pointerdown", { pointerType: "touch" });
       await panel.waitFor({ state: "detached" });
       await page.getByLabel("Message", { exact: true }).focus();
       for (let index = 0; index < 15; index++) {
@@ -747,8 +783,11 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     await page.getByText("82k of 200k tokens", { exact: true }).waitFor();
     await page.getByText("Total processed", { exact: true }).waitFor();
     await page.getByText("Cache hits", { exact: true }).waitFor();
-    await page.getByText("26% reused", { exact: true }).waitFor();
-    await page.getByText("100k reused · 280k new", { exact: true }).waitFor();
+    await page.getByText("26.2% reused", { exact: true }).waitFor();
+    await page.getByText("100k reused · 282k new", { exact: true }).waitFor();
+    const currentPanel = page.getByRole("group", { name: "Context usage", exact: true });
+    assert.equal(await currentPanel.getByRole("meter", { name: "Cache hit rate", exact: true }).getAttribute("aria-valuetext"), "26.2% reused");
+    assert.equal(await currentPanel.locator(".context-cache-note").getAttribute("title"), "100,000 reused · 282,000 new");
     emit({ t: "thread.upsert", thread: { ...thread, externalId: undefined, usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0, contextTokens: 0, contextMax: 0, turns: 0 }, contextWindow: 1000000 } });
     await page.getByRole("button", { name: "0% context used", exact: true }).waitFor();
     assert.equal(await page.locator(".context-ring text").textContent(), "0");
@@ -775,7 +814,10 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
       assert.equal(await panel.locator("summary strong").textContent(), "1.6k");
       await panel.locator("summary").click();
       assert.equal(await panel.locator("dl > div").filter({ has: page.getByText("Uncached input", { exact: true }) }).locator("dd").textContent(), "200");
-      assert.equal(await panel.locator("dl > div").filter({ has: page.getByText("Cache read", { exact: true }) }).locator("dd").textContent(), "1k");
+      assert.equal(await panel.locator("dl > div").filter({ has: page.getByText("Cache read", { exact: true }) }).locator("dd").textContent(), "1,000");
+      assert.equal(await panel.locator("dl > div").filter({ has: page.getByText("Cache write", { exact: true }) }).locator("dd").textContent(), "100");
+      assert.equal(await panel.getByText("76.9% reused", { exact: true }).isVisible(), true);
+      assert.equal(await panel.getByText("1k reused · 300 new", { exact: true }).isVisible(), true);
       await page.keyboard.press("Escape");
       await panel.waitFor({ state: "detached" });
     }
@@ -787,10 +829,10 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
     emit({ t: "thread.upsert", thread: { ...thread, usage: { ...thread.usage, tokensPerSecond: 42.4 } } });
     await page.getByRole("button", { name: "41% context used", exact: true }).hover();
     await panel.getByText("Cache hits", { exact: true }).waitFor();
-    await panel.getByText("26% reused", { exact: true }).waitFor();
-    await panel.getByText("100k reused · 280k new", { exact: true }).waitFor();
+    await panel.getByText("26.2% reused", { exact: true }).waitFor();
+    await panel.getByText("100k reused · 282k new", { exact: true }).waitFor();
     await panel.getByText("Tokens per second", { exact: true }).waitFor();
-    await panel.getByText("42 tok/s", { exact: true }).waitFor();
+    await panel.getByText("42.4 tok/s", { exact: true }).waitFor();
     emit({
       t: "thread.upsert",
       thread: {
@@ -800,7 +842,7 @@ test("workspace navigation and conversation setup stay consistent", { timeout: 9
         usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0, contextTokens: 40, contextMax: 200000, turns: 1, contextEstimated: true },
       },
     });
-    await page.getByRole("button", { name: "0% context used", exact: true }).hover();
+    await page.getByRole("button", { name: "<0.1% context used", exact: true }).hover();
     await panel.getByText("40 of 200k tokens", { exact: true }).waitFor();
     await panel.getByText("Estimated from conversation", { exact: true }).waitFor();
   });

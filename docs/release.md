@@ -16,6 +16,19 @@ Live-update status, server restart, and provider-event diagnostics appear only i
 
 `npm run desktop:install` installs a normal source-checkout launcher. Build the interface first with `npm run build`. `npm run desktop:install -- --dev` installs a separate **Citropy Dev** launcher with live updates. Neither command installs the AppImage.
 
+## Testing changes
+
+Start with the test files covering the changed behavior, then run type checking:
+
+```sh
+node --experimental-strip-types --test --test-concurrency=2 tests/renderer-state.test.mjs tests/activity-layout.test.mjs
+npm run typecheck
+```
+
+Use the relevant files under `tests/` in place of these examples. Keep performance regressions deterministic by checking unnecessary work or resource cleanup rather than asserting wall-clock timings. Unit tests can advance mocked timers; browser and process integration tests still need to wait for the actual result.
+
+Before handing off changes across shared components or server state, run `npm run test:ci` and `npm run build`. CI runs two test files at a time. Failed files rerun serially for diagnosis, but a passing retry never turns the original failure into a pass. Inspect the first failure before changing a timeout or rerunning the suite.
+
 ## Local release check
 
 ```sh

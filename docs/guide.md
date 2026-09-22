@@ -130,7 +130,11 @@ Run `npm run typecheck`, `npm test`, and `npm run build` to verify changes. The 
 
 `shared/` defines the events, model options, and workspace types used by both sides. `server/providers/` translates each provider's protocol into conversation events; `server/runtime.ts` owns a conversation's provider session and cleans up unfinished tools when it ends. `server/providers/process.ts` handles process termination and lets server shutdown wait for it.
 
-`web/src/lib/store.ts` applies batches of server events to normalized UI state. Components subscribe to the records they display. `web/src/lib/requests.ts` owns request deadlines and disconnect cleanup, while `socket.ts` owns connection recovery and event batching. Settings, Git, and GitHub load when opened.
+`web/src/lib/app-state.ts` defines and initializes the single UI store. `store.ts` applies batches of server events and coordinates workspace state; its existing exports remain the component-facing API. `history-cache.ts` owns message normalization, streaming updates, and cache eviction. `preferences.ts` owns preference changes, persistence, and display effects; `notification-state.ts` handles notification visibility and alerts. Components subscribe to the records they display.
+
+`web/src/lib/timeline.ts` selects conversation rows and separates final answers from work details. `requests.ts` owns request deadlines and disconnect cleanup, while `socket.ts` owns connection recovery and event batching. Settings, Git, and GitHub load when opened. `Settings.tsx` owns section navigation; General, Appearance, Notifications, and Application have separate section components. Application settings retain desktop update and restart state while switching sections.
+
+`server/mcp.ts` owns authenticated HTTP/JSON-RPC transport. `mcp-catalog.ts` defines tool schemas and discovery; `mcp-workspace.ts` keeps argument validation, ownership checks, permission checks, and tool execution together. Tool handlers do not bypass that execution boundary.
 
 File previews own their requests and ignore replies after closing or switching files. Browser and terminal panels release layout observers when hidden; terminals retain their output across tab switches. Markdown caches completed output with an entry and size limit. `server/git-monitor.ts` coalesces overlapping Git scans and refreshes the affected workspace when a response finishes.
 
@@ -139,4 +143,3 @@ File previews own their requests and ignore replies after closing or switching f
 Lifecycle tests cover reconnects, repeated tab switching, deleted conversation data, late file replies, provider startup failures, and processes that ignore graceful termination. These checks detect regressions in those paths; longer sessions and future provider versions still need profiling.
 
 `server/computer.ts` owns computer sessions, permissions, screenshot coordinates, action serialization, and inactivity cleanup. `desktop/computer.mjs` manages the helper process and emergency shortcut; `desktop/computer-linux.py` implements portal and X11 capture and input. `ComputerPane` owns preview polling and `ComputerSettings` owns the feature setup. No computer helper runs while the feature is idle.
-

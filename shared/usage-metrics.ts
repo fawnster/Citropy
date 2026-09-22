@@ -86,12 +86,18 @@ export function uncachedInput(
     : usage.input;
 }
 
+export function newInputTokens(
+  provider: ProviderId,
+  usage: Pick<Usage, "input" | "cacheRead" | "cacheWrite">,
+): number {
+  return uncachedInput(provider, usage) + usage.cacheWrite;
+}
+
 export function cacheHitRate(
   provider: ProviderId,
   usage: Pick<Usage, "input" | "cacheRead" | "cacheWrite">,
 ): number {
-  const fresh = uncachedInput(provider, usage);
-  const total = fresh + usage.cacheRead;
+  const total = newInputTokens(provider, usage) + usage.cacheRead;
   return total > 0 ? usage.cacheRead / total : 0;
 }
 

@@ -1,15 +1,25 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useReducedMotion } from "../lib/use-reduced-motion.ts";
-import { memo, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, Minimize2 } from "lucide-react";
+import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ListTree, Minimize2 } from "lucide-react";
 import { cost, tokenRate, tokens } from "../lib/format.ts";
 import { scaled, useApp, viewportWidth } from "../lib/store.ts";
-import { useI18n } from "../lib/i18n.ts";
+import { currentLocale, useI18n } from "../lib/i18n.ts";
 import { selectedModel } from "../../../shared/model-options.ts";
-import { estimateConversationTokens, estimateTokensFromChars, reportedContext } from "../../../shared/usage-metrics.ts";
+import { estimateConversationTokens, estimateTokensFromChars, newInputTokens, reportedContext, uncachedInput } from "../../../shared/usage-metrics.ts";
 import { ContextInspector } from "./ContextInspector.tsx";
 
-const PANEL_WIDTH = 272;
+const PANEL_WIDTH = 304;
+
+function percentage(value: number): string {
+  const percent = Math.max(0, Math.min(value * 100, 100));
+  if (percent > 0 && percent < 0.1) return "<0.1";
+  return new Intl.NumberFormat(currentLocale(), { maximumFractionDigits: 1 }).format(percent);
+}
+
+function exactTokens(value: number): string {
+  return Math.round(value).toLocaleString(currentLocale());
+}
 
 export const ContextUsage = memo(function ContextUsage({ onCompact, draft = "" }: { onCompact?: () => void; draft?: string }) {
   const t = useI18n();
@@ -28,12 +38,13 @@ export const ContextUsage = memo(function ContextUsage({ onCompact, draft = "" }
   const canCompact = provider?.capabilities?.compact !== false;
   const usage = thread?.usage;
   const totals = [...(thread?.transfers ?? []), ...(thread ? [thread] : [])].reduce((sum, session) => ({
-    input: sum.input + (session.provider === "codex" ? Math.max(0, session.usage.input - session.usage.cacheRead - session.usage.cacheWrite) : session.usage.input),
+    input: sum.input + uncachedInput(session.provider, session.usage),
+    newInput: sum.newInput + newInputTokens(session.provider, session.usage),
     output: sum.output + session.usage.output,
     cacheRead: sum.cacheRead + session.usage.cacheRead,
     cacheWrite: sum.cacheWrite + session.usage.cacheWrite,
     costUsd: sum.costUsd + session.usage.costUsd,
-  }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 });
+  }), { input: 0, newInput: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 });
   const model = selectedModel(provider?.models ?? [], thread?.model);
   const contextMax = (usage?.contextMax || thread?.contextWindow || model?.contextMax) ?? 0;
   const reported = Boolean(usage && reportedContext(usage.contextTokens, contextMax));
@@ -81,17 +92,20 @@ export const ContextUsage = memo(function ContextUsage({ onCompact, draft = "" }
   const known = Boolean(contextMax > 0 && (shown || fresh));
   const estimatedNote = Boolean((usage?.contextEstimated || (!reported && totalEstimated > 0)) && shown);
   const estimatedClamped = Boolean(!reported && contextMax > 0 && totalEstimated >= contextMax);
-  const cacheShare = totals.input + totals.cacheRead;
+  const cacheShare = totals.newInput + totals.cacheRead;
   const cacheRate = cacheShare > 0 ? totals.cacheRead / cacheShare : 0;
   const hasCache = Boolean(totals.cacheRead || totals.cacheWrite);
   const speed = usage?.tokensPerSecond ?? 0;
-  const totalProcessed = totals.input + totals.cacheRead + totals.cacheWrite + totals.output;
+  const totalProcessed = totals.newInput + totals.cacheRead + totals.output;
   const fill =
     known
       ? Math.max(0, Math.min(contextTokens / contextMax, 1))
       : 0;
+  const contextPercent = percentage(fill);
+  const cachePercent = percentage(cacheRate);
+  const ringPercent = fill > 0 && fill < 0.01 ? "<1" : Math.round(fill * 100);
   const label = known
-    ? t("{percent}% context used", { percent: Math.round(fill * 100) })
+    ? t("{percent}% context used", { percent: contextPercent })
     : t("Context usage");
 
   useLayoutEffect(() => {
@@ -121,6 +135,17 @@ export const ContextUsage = memo(function ContextUsage({ onCompact, draft = "" }
     };
   }, [open, uiScale]);
 
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!(event.target instanceof Node)) return;
+      if (ring.current?.contains(event.target) || details.current?.contains(event.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [open]);
+
   return (
     <div
       className="context-usage"
@@ -145,9 +170,9 @@ export const ContextUsage = memo(function ContextUsage({ onCompact, draft = "" }
         className="context-ring"
         type="button"
         aria-label={label}
-        aria-describedby={open ? id : undefined}
+        aria-controls={id}
         aria-expanded={open}
-        onPointerDown={(event) => event.preventDefault()}
+        onClick={() => setOpen(true)}
         data-hot={fill > 0.8}
         data-connected={connected}
       >
@@ -185,7 +210,7 @@ export const ContextUsage = memo(function ContextUsage({ onCompact, draft = "" }
             fontSize="9"
             fontWeight="500"
           >
-            {known || fresh ? Math.round(fill * 100) : ""}
+            {known || fresh ? ringPercent : ""}
           </text>
         </svg>
       </button>
@@ -198,79 +223,109 @@ export const ContextUsage = memo(function ContextUsage({ onCompact, draft = "" }
           aria-label={t("Context usage")}
           id={id}
         >
-          <div className="context-heading">
-            <strong>{t("Context")}</strong>
-            <span>
+          <section className="context-section context-window" aria-labelledby={`${id}-context`}>
+            <div className="context-heading">
+              <strong id={`${id}-context`}>{t("Context")}</strong>
+              <span className="context-percentage">
+                {known
+                  ? t("{percent}% used", { percent: contextPercent })
+                  : t(shown ? "Window size unavailable" : "Not reported yet")}
+              </span>
+            </div>
+            <p
+              className="context-summary"
+              title={known
+                ? t("{used} of {total} tokens", { used: exactTokens(contextTokens), total: exactTokens(contextMax) })
+                : shown
+                  ? t("{used} tokens used", { used: exactTokens(contextTokens) })
+                  : undefined}
+            >
               {known
-                ? t("{percent}% context used", { percent: Math.round(fill * 100) })
-                : t(shown ? "Window size unavailable" : "Not reported yet")}
-            </span>
-          </div>
-          <p>
-            {known && usage
-              ? t("{used} of {total} tokens", {
-                  used: tokens(contextTokens),
-                  total: tokens(contextMax),
-                })
-              : shown
-                ? t("{used} tokens used", { used: tokens(contextTokens) })
-                : contextMax > 0
-                  ? t("Window size: {total} tokens", { total: tokens(contextMax) })
-                  : t("Usage appears when the provider reports it.")}
-          </p>
-          {estimatedNote && <p className="context-estimate">{t(estimatedClamped ? "Estimated from conversation · Cursor compacts automatically" : "Estimated from conversation")}</p>}
+                ? t("{used} of {total} tokens", {
+                    used: tokens(contextTokens),
+                    total: tokens(contextMax),
+                  })
+                : shown
+                  ? t("{used} tokens used", { used: tokens(contextTokens) })
+                  : contextMax > 0
+                    ? t("Window size: {total} tokens", { total: tokens(contextMax) })
+                    : t("Usage appears when the provider reports it.")}
+            </p>
+            {known && (
+              <div
+                className="context-meter"
+                role="meter"
+                aria-labelledby={`${id}-context`}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={fill * 100}
+                aria-valuetext={t("{used} of {total} tokens", { used: exactTokens(contextTokens), total: exactTokens(contextMax) })}
+                data-hot={fill > 0.8}
+              >
+                <span style={{ width: `${fill * 100}%` }} />
+              </div>
+            )}
+            {estimatedNote && <p className="context-estimate">{t(estimatedClamped ? "Estimated from conversation · Cursor compacts automatically" : "Estimated from conversation")}</p>}
+          </section>
           {hasCache && (
-            <div className="context-cache">
+            <section className="context-section context-cache" aria-labelledby={`${id}-cache`}>
               <div className="context-heading">
-                <strong>{t("Cache hits")}</strong>
-                <span>{t("{percent}% reused", { percent: Math.round(cacheRate * 100) })}</span>
+                <strong id={`${id}-cache`}>{t("Cache hits")}</strong>
+                <span className="context-percentage">{t("{percent}% reused", { percent: cachePercent })}</span>
               </div>
               <div
                 className="context-cache-bar"
-                role="img"
-                aria-label={t("{percent}% reused", { percent: Math.round(cacheRate * 100) })}
+                role="meter"
+                aria-label={t("Cache hit rate")}
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={cacheRate * 100}
+                aria-valuetext={t("{percent}% reused", { percent: cachePercent })}
               >
                 {totals.cacheRead > 0 && <span data-part="hit" style={{ flex: totals.cacheRead }} />}
                 {totals.input > 0 && <span data-part="fresh" style={{ flex: totals.input }} />}
                 {totals.cacheWrite > 0 && <span data-part="write" style={{ flex: totals.cacheWrite }} />}
               </div>
-              <p className="context-cache-note">
-                {t("{hit} reused · {fresh} new", { hit: tokens(totals.cacheRead), fresh: tokens(totals.input) })}
+              <p
+                className="context-cache-note"
+                title={t("{hit} reused · {fresh} new", { hit: exactTokens(totals.cacheRead), fresh: exactTokens(totals.newInput) })}
+              >
+                {t("{hit} reused · {fresh} new", { hit: tokens(totals.cacheRead), fresh: tokens(totals.newInput) })}
               </p>
-            </div>
+            </section>
           )}
           {speed > 0 && (
-            <div className="context-speed">
+            <section className="context-section context-speed" aria-labelledby={`${id}-speed`}>
               <div className="context-heading">
-                <strong>{t("Tokens per second")}</strong>
-                <span>{t("{rate} tok/s", { rate: tokenRate(speed) })}</span>
+                <strong id={`${id}-speed`}>{t("Tokens per second")}</strong>
+                <span className="context-stat-value">{t("{rate} tok/s", { rate: tokenRate(speed) })}</span>
               </div>
-            </div>
+            </section>
           )}
           {usage && hasTotals && (
             <details className="context-totals">
               <summary>
                 <span>{t("Total processed")}</span>
-                <strong>{tokens(totalProcessed)}</strong>
+                <strong title={exactTokens(totalProcessed)}>{tokens(totalProcessed)}</strong>
                 <ChevronDown size={13} aria-hidden="true" />
               </summary>
               <p>{t("Across all requests, including reused context.")}</p>
               <dl>
                 <div>
                   <dt>{t("Uncached input")}</dt>
-                  <dd>{tokens(totals.input)}</dd>
+                  <dd>{exactTokens(totals.input)}</dd>
                 </div>
                 <div>
                   <dt>{t("Output")}</dt>
-                  <dd>{tokens(totals.output)}</dd>
+                  <dd>{exactTokens(totals.output)}</dd>
                 </div>
                 <div>
                   <dt>{t("Cache read")}</dt>
-                  <dd>{tokens(totals.cacheRead)}</dd>
+                  <dd>{exactTokens(totals.cacheRead)}</dd>
                 </div>
                 <div>
                   <dt>{t("Cache write")}</dt>
-                  <dd>{tokens(totals.cacheWrite)}</dd>
+                  <dd>{exactTokens(totals.cacheWrite)}</dd>
                 </div>
                 {totals.costUsd > 0 && (
                   <div>
@@ -283,17 +338,20 @@ export const ContextUsage = memo(function ContextUsage({ onCompact, draft = "" }
           )}
           {thread?.compacting ? (
             <div className="context-compacting" role="status">
-                <Minimize2 size={15} />{t("Compacting context")}…
+              <Minimize2 size={15} aria-hidden="true" />{t("Compacting context")}…
             </div>
-          ) : thread?.externalId && canCompact && onCompact && (
-            <div className="context-actions">
+          ) : null}
+          {!connected && <div className="context-connection" role="status">{t("Reconnecting…")}</div>}
+          <div className="context-actions">
+            {!thread?.compacting && thread?.externalId && canCompact && onCompact && (
               <button className="btn" type="button" disabled={thread.running || !connected} onClick={onCompact}>
-                <Minimize2 size={15} />{t("Compact context")}
+                <Minimize2 size={15} aria-hidden="true" />{t("Compact context")}
               </button>
-            </div>
-          )}
-          {!connected && <div className="context-connection">{t("Reconnecting…")}</div>}
-          <button type="button" className="btn" onClick={() => setInspecting(true)}>{t("Inspect context sources")}</button>
+            )}
+            <button type="button" className="btn" data-variant="ghost" onClick={() => setInspecting(true)}>
+              <ListTree size={15} aria-hidden="true" />{t("Inspect context sources")}
+            </button>
+          </div>
         </motion.div>
       )}</AnimatePresence>
       <AnimatePresence>{inspecting && thread && <ContextInspector thread={thread} draft={draft} onClose={() => setInspecting(false)} />}</AnimatePresence>

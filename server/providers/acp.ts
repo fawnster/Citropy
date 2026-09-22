@@ -16,6 +16,7 @@ import type { Attachment, FilePatch, ModelOption, PermissionMode, TodoItem } fro
 import type { ProviderCommand } from "../../shared/features.ts";
 import { normalizeTodos } from "../../shared/todos.ts";
 import { parseAcpUsage } from "../../shared/usage-metrics.ts";
+import packageInfo from "../../package.json" with { type: "json" };
 
 export interface AcpConfig {
   label: string;
@@ -61,6 +62,7 @@ interface CursorCreatePlanRequest {
   plan: string;
   todos: CursorTodo[];
   isProject?: boolean;
+  phases?: Array<{ name: string; todos: CursorTodo[] }>;
 }
 
 type CursorCreatePlanResponse = {
@@ -73,6 +75,23 @@ interface CursorUpdateTodosRequest {
   merge: boolean;
 }
 
+interface CursorTaskRequest {
+  toolCallId: string;
+  description: string;
+  prompt: string;
+  subagentType: string | { custom: string };
+  model?: string;
+  agentId?: string;
+  durationMs?: number;
+}
+
+interface CursorGenerateImageRequest {
+  toolCallId: string;
+  description: string;
+  filePath?: string;
+  referenceImagePaths?: string[];
+}
+
 const extensionParams = <T>(): { parse(value: unknown): T } => ({ parse: (value) => value as T });
 
 const MAX_PENDING_NOTIFICATIONS = 500;
@@ -81,7 +100,9 @@ type ToolCallLike = acp.ToolCall | acp.ToolCallUpdate;
 
 interface ToolState {
   name: string;
+  toolName?: string;
   raw: unknown;
+  rawOutput?: unknown;
   input: unknown;
   hidden: boolean;
   started: boolean;
@@ -89,7 +110,11 @@ interface ToolState {
   title: string;
   kind: string;
   content?: Array<acp.ToolCallContent> | null;
+  locations?: Array<acp.ToolCallLocation> | null;
 }
+
+const clientInfo = { name: "citropy", version: packageInfo.version } satisfies acp.Implementation;
+const usageTotalKeys = ["input", "output", "cacheRead", "cacheWrite", "costUsd"] as const;
 
 function errorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -345,6 +370,7 @@ export class AcpSession implements AgentSession {
   #blocks = new Map<string, string>();
   #tools = new Map<string, ToolState>();
   #todos: TodoItem[] = [];
+  #usageOffset = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, costUsd: 0 };
   #segment = 0;
   #stderr = "";
 
@@ -366,7 +392,9 @@ export class AcpSession implements AgentSession {
       .onNotification(acp.methods.client.session.update, (context) => { this.#receive(context.params); })
       .onRequest("cursor/ask_question", extensionParams<CursorAskQuestionRequest>(), (context) => this.#askQuestion(context.params, context.signal))
       .onRequest("cursor/create_plan", extensionParams<CursorCreatePlanRequest>(), (context) => this.#createPlan(context.params, context.signal))
-      .onNotification("cursor/update_todos", extensionParams<CursorUpdateTodosRequest>(), (context) => { this.#updateTodos(context.params); });
+      .onNotification("cursor/update_todos", extensionParams<CursorUpdateTodosRequest>(), (context) => { this.#updateTodos(context.params); })
+      .onNotification("cursor/task", extensionParams<CursorTaskRequest>(), (context) => { this.#task(context.params); })
+      .onNotification("cursor/generate_image", extensionParams<CursorGenerateImageRequest>(), (context) => { this.#generatedImage(context.params); });
     this.#connection = app.connect(stream);
     onLines(this.#child.stderr, (line) => { this.#stderr = `${this.#stderr}${line}\n`.slice(-4000); });
     this.#child.stdin.on("error", (error) => this.#fail(error.message));
@@ -387,14 +415,14 @@ export class AcpSession implements AgentSession {
   async #initialize(): Promise<void> {
     const { label } = this.#config;
     const init = await withTimeout(
-      this.#agent().request(acp.methods.agent.initialize, {
+      this.#agent().request<acp.InitializeResponse, acp.InitializeRequest>(acp.methods.agent.initialize, {
         protocolVersion: acp.PROTOCOL_VERSION,
         clientCapabilities: {
           fs: { readTextFile: false, writeTextFile: false },
           terminal: false,
           ...(this.#config.parameterizedModelPicker ? { _meta: { parameterizedModelPicker: true } } : {}),
         },
-        clientInfo: { name: "citropy", version: "0.1.0" },
+        clientInfo,
       }),
       30_000,
       `${label} did not answer the ACP handshake within 30 seconds`,
@@ -416,6 +444,9 @@ export class AcpSession implements AgentSession {
       }
     }
     const resume = Boolean(this.#options.externalId && this.#capabilities.loadSession);
+    if (!resume) {
+      for (const key of usageTotalKeys) this.#usageOffset[key] = this.#options.usage?.[key] ?? 0;
+    }
     this.#loading = resume;
     let response: acp.NewSessionResponse | undefined;
     let restored: { configOptions?: acp.SessionConfigOption[] } | undefined;
@@ -434,11 +465,12 @@ export class AcpSession implements AgentSession {
       ).catch((error: unknown) => { throw signedOut(this.#config, error); });
       this.#sessionId = response.sessionId;
     }
+    this.#configOptions = response?.configOptions ?? restored?.configOptions ?? [];
     this.#loading = false;
     const pending = this.#pending;
     this.#pending = [];
     for (const notification of pending) if (notification.sessionId === this.#sessionId) this.#dispatch(notification);
-    const applied = await this.#applyConfig(response?.configOptions ?? restored?.configOptions);
+    const applied = await this.#applyConfig(this.#configOptions);
     this.#configOptions = applied;
     const currentModel = selectOption(applied, "model")?.currentValue ?? (response ? acpCurrentModel(response) : undefined) ?? this.#options.model;
     const mode = this.#config.modes[this.#options.permissionMode];
@@ -571,8 +603,7 @@ export class AcpSession implements AgentSession {
         prompt: [{ type: "text", text: next.text || "Please inspect the attached files." }, ...(await this.#content(next.attachments))],
       });
       if (this.#disposed) return;
-      const usage = parseAcpUsage(response);
-      if (Object.keys(usage).length) this.#options.emit({ type: "usage", usage });
+      this.#emitUsage(response);
       if (response.stopReason === "refusal") this.#finish(`${this.#config.label} refused to continue.`);
       else {
         if (response.stopReason === "max_tokens" || response.stopReason === "max_turn_requests")
@@ -672,11 +703,21 @@ export class AcpSession implements AgentSession {
       case "plan":
         this.#plan(update.entries);
         return;
-      case "usage_update": {
-        const usage = parseAcpUsage(update);
-        if (Object.keys(usage).length) this.#options.emit({ type: "usage", usage });
+      case "current_mode_update":
+        this.#configOptions = this.#configOptions.map((option) =>
+          option.type === "select" && option.category === "mode"
+            ? { ...option, currentValue: update.currentModeId }
+            : option);
+        return;
+      case "config_option_update": {
+        this.#configOptions = update.configOptions;
+        const model = selectOption(this.#configOptions, "model")?.currentValue ?? this.#options.model;
+        this.#emitSession(this.#configOptions, model);
         return;
       }
+      case "usage_update":
+        this.#emitUsage(update);
+        return;
       case "available_commands_update":
         this.#config.onCommands?.(this.#options.cwd, update.availableCommands.flatMap((command) => {
           const name = command.name.trim();
@@ -701,10 +742,47 @@ export class AcpSession implements AgentSession {
 
   #plan(entries: acp.PlanEntry[]): void {
     const items: TodoItem[] = normalizeTodos(entries);
-    if (items.length) {
-      this.#todos = items;
-      this.#options.emit({ type: "todos", items });
+    if (!items.length && !this.#todos.length) return;
+    this.#todos = items;
+    this.#options.emit({ type: "todos", items });
+  }
+
+  #emitUsage(value: unknown): void {
+    const usage = parseAcpUsage(value);
+    for (const key of usageTotalKeys) {
+      const total = usage[key];
+      if (total !== undefined) usage[key] = total + this.#usageOffset[key];
     }
+    if (Object.keys(usage).length) this.#options.emit({ type: "usage", usage });
+  }
+
+  #task(params: CursorTaskRequest): void {
+    this.#options.emit({
+      type: "subagent",
+      id: params.agentId || params.toolCallId,
+      title: params.description,
+      prompt: params.prompt,
+      model: params.model,
+      status: "idle",
+    });
+  }
+
+  #generatedImage(params: CursorGenerateImageRequest): void {
+    const { toolCallId, ...input } = params;
+    const state = this.#tools.get(toolCallId);
+    if (state) {
+      this.#toolCall({ toolCallId, name: "GenerateImage", rawInput: input }, false);
+      return;
+    }
+    this.#toolCall({
+      toolCallId: `${toolCallId}:generated-image`,
+      name: "GenerateImage",
+      title: "Generate image",
+      kind: "other",
+      rawInput: input,
+      rawOutput: params.filePath ?? "Image generated.",
+      status: "completed",
+    }, true);
   }
 
   async #askQuestion(params: CursorAskQuestionRequest, signal: AbortSignal): Promise<CursorAskQuestionResponse> {
@@ -733,7 +811,8 @@ export class AcpSession implements AgentSession {
   }
 
   async #createPlan(params: CursorCreatePlanRequest, signal: AbortSignal): Promise<CursorCreatePlanResponse> {
-    if (!this.#todos.length) this.#updateTodos({ toolCallId: params.toolCallId, todos: params.todos, merge: false });
+    const todos = params.todos.length ? params.todos : params.phases?.flatMap((phase) => phase.todos) ?? [];
+    this.#updateTodos({ toolCallId: params.toolCallId, todos, merge: false });
     if (this.#options.permissionMode === "bypass") return { outcome: { outcome: "accepted" } };
     this.#breakText();
     this.#text(`plan:${params.toolCallId}`, "text", params.plan);
@@ -756,6 +835,7 @@ export class AcpSession implements AgentSession {
   }
 
   #updateTodos(params: CursorUpdateTodosRequest): void {
+    const hadTodos = this.#todos.length > 0;
     if (params.merge) {
       const merged = [...this.#todos];
       for (const entry of normalizeTodos(params.todos)) {
@@ -767,7 +847,7 @@ export class AcpSession implements AgentSession {
     } else {
       this.#todos = normalizeTodos(params.todos);
     }
-    if (this.#todos.length) this.#options.emit({ type: "todos", items: this.#todos });
+    if (this.#todos.length || hadTodos) this.#options.emit({ type: "todos", items: this.#todos });
   }
 
   #toolCall(update: ToolCallLike, initial: boolean): void {
@@ -776,10 +856,20 @@ export class AcpSession implements AgentSession {
     };
     if (update.kind) state.kind = update.kind;
     if (update.title) state.title = update.title;
-    if (update.rawInput !== undefined && update.rawInput !== null) state.raw = update.rawInput;
-    if (update.content !== undefined && update.content !== null) state.content = update.content;
+    if (update.name) state.toolName = update.name;
+    if ("rawInput" in update) state.raw = update.rawInput;
+    if ("rawOutput" in update) state.rawOutput = update.rawOutput;
+    if ("content" in update) state.content = update.content;
+    if ("locations" in update) state.locations = update.locations;
     if ((state.raw as { _toolName?: unknown } | undefined)?._toolName === "createPlan") state.hidden = true;
-    const reading = toolReading({ ...update, kind: state.kind as acp.ToolKind, title: state.title, rawInput: state.raw });
+    const reading = toolReading({
+      ...update,
+      kind: state.kind as acp.ToolKind,
+      title: state.title,
+      name: state.toolName,
+      rawInput: state.raw,
+      locations: state.locations ?? undefined,
+    });
     const renamed = state.started && reading.name !== state.name;
     state.name = reading.name;
     state.input = reading.input;
@@ -795,7 +885,7 @@ export class AcpSession implements AgentSession {
       state.started = true;
       this.#breakText();
       this.#options.emit({ type: "tool.start", callId: update.toolCallId, name: state.name, input: state.input });
-    } else if (renamed || update.rawInput !== undefined || update.locations !== undefined) {
+    } else if (renamed || "rawInput" in update || "locations" in update || "name" in update) {
       this.#options.emit({ type: "tool.input", callId: update.toolCallId, input: state.input, ...(renamed ? { name: state.name } : {}) });
     }
     const status = update.status ?? (initial ? "pending" : undefined);
@@ -809,7 +899,7 @@ export class AcpSession implements AgentSession {
         type: "tool.end",
         callId: update.toolCallId,
         ok: status === "completed",
-        output: contentText(state.content, "rawOutput" in update ? update.rawOutput : undefined, Boolean(patch)),
+        output: contentText(state.content, state.rawOutput, Boolean(patch)),
         ...(images.length ? { images } : {}),
         ...(patch ? { patch } : {}),
       });
@@ -821,7 +911,14 @@ export class AcpSession implements AgentSession {
     if (this.#disposed || this.#failed || this.#cancelled) return cancelled;
     const kind = params.toolCall.kind ?? this.#tools.get(params.toolCall.toolCallId)?.kind ?? "other";
     const stored = this.#tools.get(params.toolCall.toolCallId);
-    const reading = toolReading({ ...params.toolCall, kind: kind as acp.ToolKind, rawInput: params.toolCall.rawInput ?? stored?.raw, title: params.toolCall.title ?? stored?.title });
+    const reading = toolReading({
+      ...params.toolCall,
+      kind: kind as acp.ToolKind,
+      name: params.toolCall.name ?? stored?.toolName,
+      rawInput: params.toolCall.rawInput ?? stored?.raw,
+      title: params.toolCall.title ?? stored?.title,
+      locations: params.toolCall.locations ?? stored?.locations ?? undefined,
+    });
     const selected = (decision: "allow" | "allow_always" | "deny") => {
       const optionId = pickOption(params.options, decision);
       return optionId ? { outcome: { outcome: "selected" as const, optionId } } : cancelled;
@@ -850,14 +947,14 @@ export async function acpModels(config: AcpConfig): Promise<ModelOption[]> {
   const connection = acp.client({ name: "citropy" }).connect(stream);
   try {
     const init = await withTimeout(
-      connection.agent.request(acp.methods.agent.initialize, {
+      connection.agent.request<acp.InitializeResponse, acp.InitializeRequest>(acp.methods.agent.initialize, {
         protocolVersion: acp.PROTOCOL_VERSION,
         clientCapabilities: {
           fs: { readTextFile: false, writeTextFile: false },
           terminal: false,
           ...(config.parameterizedModelPicker ? { _meta: { parameterizedModelPicker: true } } : {}),
         },
-        clientInfo: { name: "citropy", version: "0.1.0" },
+        clientInfo,
       }),
       30_000,
       `${config.label} did not answer the ACP handshake within 30 seconds`,

@@ -234,6 +234,7 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
           .protocolVersion,
         "2025-06-18",
       );
+      assert.equal((await rpc("initialize", {})).body.result.serverInfo.version, JSON.parse(fs.readFileSync(new URL("../package.json", import.meta.url), "utf8")).version);
       const tools = (await rpc("tools/list")).body.result.tools;
       assert.deepEqual(tools.map(tool => tool.name), ["ask_user", "tool_help", "run_tool"]);
       const before = Buffer.byteLength(JSON.stringify(workspaceTools));
@@ -241,14 +242,14 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
       t.diagnostic(`MCP initial schemas: ${before} -> ${after} bytes`);
       assert.ok(after < before * 0.3, `Initial schemas: ${before} -> ${after} bytes`);
       const help = (await rpc("tools/call", { name: "tool_help", arguments: { category: "workspace" } })).body.result;
-      assert.deepEqual(JSON.parse(help.content[0].text).map(tool => tool.name), ["workspace_tree", "workspace_read", "open_panel"]);
+      assert.deepEqual(JSON.parse(help.content[0].text).map(tool => tool.name), ["workspace_tree", "workspace_read", "workspace_image", "open_panel"]);
       const subagentTools = JSON.parse((await rpc("tools/call", { name: "tool_help", arguments: { category: "subagent" } })).body.result.content[0].text);
       const subagentStart = subagentTools.find(tool => tool.name === "subagent_start");
       assert.match(subagentStart.description, /any configured provider and any model/);
       assert.match(subagentStart.description, /default to this conversation's/);
       assert.match(subagentStart.inputSchema.properties.model.description, /current model list/);
       assert.match(subagentStart.inputSchema.properties.provider.description, /Provider/);
-      assert.equal((await rpc("tools/call", { name: "workspace_read", arguments: { path: "hello.txt" } })).body.result.content[0].text, "Workspace file");
+      assert.equal(JSON.parse((await rpc("tools/call", { name: "workspace_read", arguments: { path: "hello.txt" } })).body.result.content[0].text).text, "Workspace file");
       for (const name of ["approve", "run_tool", "tool_help"])
         assert.equal((await tool(name)).isError, true);
       for (const args of [null, [], "invalid"])
@@ -281,7 +282,7 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
       assert.equal((await rpc("unsupported")).body.error.code, -32601);
       assert.equal((await tool("missing_tool")).isError, true);
       assert.equal(
-        (await tool("workspace_read", { path: "hello.txt" })).content[0].text,
+        JSON.parse((await tool("workspace_read", { path: "hello.txt" })).content[0].text).text,
         "Workspace file",
       );
       assert.notEqual(
@@ -333,6 +334,10 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
       let snapshot = await tool("browser_snapshot", { tabId: first.id });
       assert.match(snapshot.content[0].text, /Shared browser/);
       assert.equal(snapshot.isError, false);
+      assert.equal(snapshot.content.length, 1);
+      assert.doesNotMatch(snapshot.content[0].text, /screenshot is not available/);
+      assert.equal((await tool("browser_snapshot", { tabId: first.id, screenshot: "true" })).isError, true);
+      snapshot = await tool("browser_snapshot", { tabId: first.id, screenshot: true });
       assert.equal(snapshot.content[1].type, "image");
       await browser.browserAction(first.id, {
         action: "type",
@@ -403,7 +408,7 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
       assert.equal(JSON.parse((await tool("browser_action", { tabId: first.id, action: "resize", width: 390, height: 844 })).content[0].text).mobile, true);
       assert.equal(await page.locator("output").textContent(), "Hello Touch");
       assert.equal(pageRequests.length, count);
-      snapshot = await tool("browser_snapshot", { tabId: first.id });
+      snapshot = await tool("browser_snapshot", { tabId: first.id, screenshot: true });
       const dimensions = await page.evaluate(async (image) => {
         const blob = await (await fetch(`data:${image.mimeType};base64,${image.data}`)).blob();
         const bitmap = await createImageBitmap(blob);
@@ -454,7 +459,7 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
       }));
       assert.ok(Math.abs(await page.evaluate(() => scrollY) - 600) < 3);
       await page.evaluate(() => scrollTo(0, 1700));
-      snapshot = await tool("browser_snapshot", { tabId: first.id });
+      snapshot = await tool("browser_snapshot", { tabId: first.id, screenshot: true });
       const captured = await page.evaluate(async (image) => {
         const bitmap = await createImageBitmap(await (await fetch(`data:${image.mimeType};base64,${image.data}`)).blob());
         const canvas = document.createElement("canvas");
@@ -515,7 +520,7 @@ test("shared workspace tools and panels", { timeout: 60000 }, async (t) => {
       assert.ok(await page.evaluate(() => innerWidth > 390));
       await tool("browser_action", { tabId: first.id, action: "type", role: "textbox", name: "Name", text: "Mobile" });
       await tool("browser_action", { tabId: first.id, action: "click", role: "button", name: "Greet" });
-      snapshot = await tool("browser_snapshot", { tabId: first.id });
+      snapshot = await tool("browser_snapshot", { tabId: first.id, screenshot: true });
       assert.match(snapshot.content[0].text, /Hello Mobile/);
       const edge = await page.evaluate(async (image) => {
         const bitmap = await createImageBitmap(await (await fetch(`data:${image.mimeType};base64,${image.data}`)).blob());

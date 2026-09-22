@@ -741,6 +741,135 @@ app.whenReady().then(() => {
     await f.close();
   });
 
+  await t.test("provider notices render safe Markdown without typing animation or narrow overflow", async () => {
+    const warning = "This session was recorded with model `gpt-5.6-sol` but is resuming with `gpt-6-astra`. Consider switching back to `gpt-5.6-sol` as it may affect Codex performance.";
+    const f = await fixture({ preferences: { textStreaming: "0", typingAnimation: "1" } });
+    const { page } = f;
+    const requests = [];
+    await page.route(/\/api\/favicon\?|example\.test\/tracking\.png/, route => {
+      requests.push(route.request().url());
+      return route.abort();
+    });
+    f.emit({ t: "message.add", threadId: "chat", message: message("notices", [
+      { id: "model-warning", kind: "notice", level: "warn", text: warning },
+      { id: "info-notice", kind: "notice", level: "info", text: "**Details** are available in [the documentation](https://example.test/docs)." },
+      { id: "error-notice", kind: "notice", level: "error", text: "Cannot open `" + "long-path/".repeat(20) + "file.ts`.\n\n<img src=x onerror=alert(1)>\n\n[Unsafe](javascript:alert%281%29) ![Unavailable preview](https://example.test/tracking.png)" },
+    ]) });
+    const warn = page.locator('.notice[data-level="warn"]');
+    const info = page.locator('.notice[data-level="info"]');
+    const error = page.locator('.notice[data-level="error"]');
+    await warn.locator("code").first().waitFor();
+    assert.deepEqual(await warn.locator("code").allTextContents(), ["gpt-5.6-sol", "gpt-6-astra", "gpt-5.6-sol"]);
+    assert.equal(await warn.innerText(), warning.replaceAll("`", ""));
+    await info.locator("strong").waitFor();
+    assert.equal(await info.locator("strong").innerText(), "Details");
+    assert.equal(await info.locator("a").getAttribute("href"), "https://example.test/docs");
+    await error.locator("a").waitFor();
+    assert.equal(await error.locator("a").getAttribute("href"), "#");
+    assert.equal(await error.locator("img").count(), 0);
+    assert.ok((await error.innerText()).includes("<img src=x onerror=alert(1)>"));
+    assert.equal(await page.locator('.notice [data-live], .notice [aria-busy="true"]').count(), 0);
+    for (const width of [1440, 600]) {
+      await page.setViewportSize({ width, height: 900 });
+      if (width === 600) await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
+      await warn.scrollIntoViewIfNeeded();
+      const layout = await page.locator(".notice").evaluateAll(nodes => nodes.map(node => {
+        const text = node.querySelector(".prose");
+        return { width: node.clientWidth, scrollWidth: node.scrollWidth, color: getComputedStyle(node).color, textColor: getComputedStyle(text).color, font: getComputedStyle(text).fontFamily, iconWidth: node.querySelector("svg").getBoundingClientRect().width };
+      }));
+      for (const row of layout) {
+        assert.ok(row.scrollWidth <= row.width + 1, JSON.stringify(row));
+        assert.equal(row.textColor, row.color);
+        assert.ok(!/mono/i.test(row.font), row.font);
+        assert.ok(row.iconWidth >= 13, JSON.stringify(row));
+      }
+      await page.screenshot({ path: `/tmp/citropy-markdown-notices-${width}.png`, animations: "disabled" });
+    }
+    assert.equal(await page.locator(".notice img").count(), 0);
+    assert.deepEqual(requests, []);
+    await f.close();
+  });
+
+  await t.test("Markdown image previews are bounded, keyboard accessible and navigate without including favicons", async () => {
+    const f = await fixture({ preferences: { sidebar: "0", uiScale: "100", textStreaming: "0", typingAnimation: "0" } });
+    const { page } = f;
+    const svg = (width, height, color) => `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}"><rect width="100%" height="100%" fill="${color}"/><circle cx="50%" cy="50%" r="80" fill="#315d59"/></svg>`;
+    const id = "12345678-1234-4234-8234-123456789abc";
+    await page.route("**/api/assets?**", route => {
+      const path = new URL(route.request().url()).searchParams.get("path");
+      return route.fulfill({ status: path === "landscape.png" ? 200 : 404, contentType: "image/svg+xml", body: path === "landscape.png" ? svg(1600, 900, "#b8d1d8") : "" });
+    });
+    await page.route("**/api/tool-images?**", route => {
+      const params = new URL(route.request().url()).searchParams;
+      assert.equal(params.get("threadId"), "chat");
+      assert.equal(params.get("id"), id);
+      return route.fulfill({ contentType: "image/svg+xml", body: svg(600, 1800, "#d0dfbf") });
+    });
+    await page.route("**/api/favicon?**", route => route.fulfill({ contentType: "image/svg+xml", body: svg(16, 16, "#cabaee") }));
+    f.emit({ t: "message.add", threadId: "chat", message: message("image-answer", [textPart("image-answer-text", `Here are the screenshots.\n\n![Landscape](landscape.png) ![Portrait](citropy-image:${id}) ![Missing](missing.png)\n\n[Documentation](https://example.test/docs)` )]) });
+    const prose = page.locator('[data-part-id="image-answer-text"]');
+    const first = prose.getByRole("button", { name: "Preview Landscape", exact: true });
+    const second = prose.getByRole("button", { name: "Preview Portrait", exact: true });
+    await first.waitFor();
+    await page.waitForFunction(() => [...document.querySelectorAll('[data-part-id="image-answer-text"] .markdown-image img')].slice(0, 2).every(image => image.naturalWidth > 0));
+    await prose.getByRole("button", { name: "Preview Missing", exact: true }).getByText("Image unavailable", { exact: true }).waitFor();
+    assert.equal(await prose.locator(".markdown-image[data-error] img").isVisible(), false);
+    for (const width of [1440, 420]) {
+      await page.setViewportSize({ width, height: 900 });
+      await first.scrollIntoViewIfNeeded();
+      const bounds = await prose.locator(".markdown-image:not([data-error]) img").evaluateAll(images => images.map(image => {
+        const box = image.getBoundingClientRect();
+        return { width: box.width, height: box.height, ratio: image.naturalWidth / image.naturalHeight };
+      }));
+      assert.equal(bounds.length, 2);
+      for (const box of bounds) {
+        assert.ok(box.width <= 320.1 && box.height <= 240.1, JSON.stringify(box));
+        assert.ok(Math.abs(box.width / box.height - box.ratio) < 0.01, JSON.stringify(box));
+      }
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
+      await page.screenshot({ path: `/tmp/citropy-markdown-image-previews-${width}.png`, animations: "disabled" });
+    }
+    await second.focus();
+    await page.keyboard.press("Enter");
+    const viewer = page.getByRole("dialog", { name: "Portrait", exact: true });
+    await viewer.waitFor();
+    await viewer.getByRole("status", { name: "Image 2 of 3", exact: true }).waitFor();
+    assert.equal(await viewer.locator(".image-viewport img").getAttribute("alt"), "Portrait");
+    await viewer.getByRole("button", { name: "Previous image", exact: true }).click();
+    await page.getByRole("dialog", { name: "Landscape", exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Previous image", exact: true }).isDisabled(), true);
+    await page.getByRole("button", { name: "Next image", exact: true }).focus();
+    await page.keyboard.press("ArrowRight");
+    await viewer.waitFor();
+    await page.screenshot({ path: "/tmp/citropy-markdown-image-viewer-420.png", animations: "disabled" });
+    await page.getByRole("button", { name: "Next image", exact: true }).click();
+    await page.getByRole("dialog", { name: "Missing", exact: true }).getByText("Unable to load this image.", { exact: true }).waitFor();
+    assert.equal(await page.getByRole("button", { name: "Next image", exact: true }).isDisabled(), true);
+    await page.keyboard.press("Escape");
+    await page.locator(".image-viewer").waitFor({ state: "detached" });
+    assert.equal(await second.evaluate(node => node === document.activeElement), true);
+    await f.close();
+  });
+
+  await t.test("Markdown image errors stay local when malformed URLs are opened", async () => {
+    const f = await fixture({ preferences: { sidebar: "0", typingAnimation: "0" } });
+    const { page } = f;
+    f.emit({ t: "message.add", threadId: "chat", message: message("invalid-images", [textPart("invalid-images-text", "![Malformed](http://[) ![Non-image](data:text/html,test)")]) });
+    const prose = page.locator('[data-part-id="invalid-images-text"]');
+    for (const name of ["Malformed", "Non-image"]) {
+      const trigger = prose.getByRole("button", { name: `Preview ${name}`, exact: true });
+      await trigger.getByText("Image unavailable", { exact: true }).waitFor();
+      await trigger.click();
+      const viewer = page.getByRole("dialog", { name, exact: true });
+      await viewer.getByRole("alert").getByText("Unable to load this image.", { exact: true }).waitFor();
+      assert.equal(await viewer.getByRole("link", { name: "Download image", exact: true }).count(), 0);
+      await page.keyboard.press("Escape");
+      await viewer.waitFor({ state: "detached" });
+      assert.equal(await trigger.evaluate(node => node === document.activeElement), true);
+    }
+    await f.close();
+  });
+
   await t.test("short replies stay readable and navigation selects the clicked message without moving the app", async () => {
     const f = await fixture({ messages: Array.from({ length: 12 }, (_, index) => message(`quick-${index}`, [textPart(`quick-text-${index}`, index === 4 ? "30." : `Short reply ${index}.`)])) });
     const { page } = f;
@@ -902,19 +1031,45 @@ app.whenReady().then(() => {
     }
   });
 
-  await t.test("replies fade once while thought text stays still through streaming and history navigation", async () => {
+  await t.test("replies slide down once while thought text stays still through streaming and history navigation", async () => {
     const f = await fixture();
     const { page } = f;
     await page.evaluate(() => {
       window.proseEntrances = [];
+      const observer = new MutationObserver(() => {
+        const element = document.querySelector('[data-part-id="fresh-text"]');
+        if (!element) return;
+        window.firstReplyAnimated = element.getAnimations().length > 0;
+        observer.disconnect();
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
       const animate = Element.prototype.animate;
       Element.prototype.animate = function (frames, options) {
         if (this.matches(".prose")) window.proseEntrances.push(this.dataset.partId);
-        return animate.call(this, frames, options);
+        const animation = animate.call(this, frames, options);
+        if (this.matches('[data-part-id="fresh-text"]')) {
+          animation.pause();
+          animation.currentTime = 0;
+          window.freshEntrance = animation;
+        }
+        return animation;
       };
     });
     f.begin("fresh", "A new response");
     await page.locator('[data-part-id="fresh-text"]').waitFor();
+    await page.waitForFunction(() => Boolean(window.freshEntrance));
+    assert.equal(await page.evaluate(() => window.firstReplyAnimated), true);
+    await page.evaluate(() => {
+      window.freshEntrance.pause();
+      window.freshEntrance.currentTime = 0;
+    });
+    assert.deepEqual(await page.evaluate(() => window.freshEntrance.effect.getKeyframes().map(frame => frame.transform)), ["translateY(-6px)", "translateY(0px)"]);
+    assert.equal(await page.evaluate(() => window.freshEntrance.effect.getTiming().duration), 220);
+    f.emit({ t: "part.append", threadId: "chat", messageId: "fresh", partId: "fresh-text", text: " keeps arriving" });
+    await page.locator('[data-part-id="fresh-text"]').getByText("A new response keeps arriving", { exact: true }).waitFor();
+    assert.equal(await page.evaluate(() => window.freshEntrance.playState), "paused");
+    assert.deepEqual(await page.evaluate(() => window.proseEntrances), ["fresh-text"]);
+    await page.evaluate(() => window.freshEntrance.finish());
     f.emit({ t: "part.add", threadId: "chat", messageId: "fresh", part: { id: "fresh-thought", kind: "reasoning", text: "Checking **the layout**", complete: false } });
     await page.getByRole("button", { name: "Work details", exact: true }).click();
     await page.getByRole("button", { name: "Thoughts", exact: true }).click();
@@ -934,6 +1089,58 @@ app.whenReady().then(() => {
     f.begin("reduced", "An immediate response.");
     await page.locator('[data-part-id="reduced-text"]').waitFor();
     assert.deepEqual(await page.evaluate(() => window.proseEntrances), ["fresh-text"]);
+    await f.close();
+  });
+
+  await t.test("text entrances preserve layout at desktop and narrow widths and cancel when motion is disabled", async () => {
+    const f = await fixture({ preferences: { sidebar: "0", uiScale: "100" } });
+    const { page } = f;
+    await page.evaluate(() => {
+      const animate = Element.prototype.animate;
+      Element.prototype.animate = function (frames, options) {
+        const animation = animate.call(this, frames, options);
+        if (this.matches(".prose")) {
+          animation.pause();
+          animation.currentTime = 0;
+          window.textEntrance = animation;
+        }
+        return animation;
+      };
+    });
+    for (const width of [1440, 420]) {
+      await page.setViewportSize({ width, height: 900 });
+      const saved = await page.locator('[data-part-id="saved-text"]').boundingBox();
+      const id = `motion-${width}`;
+      f.begin(id, "New text settles below the preceding reply with a small downward motion.");
+      await page.waitForFunction(id => window.textEntrance?.effect.target.dataset.partId === `${id}-text`, id);
+      await page.evaluate(() => window.textEntrance.pause());
+      const positions = await page.evaluate(() => [0, 80, 220].map(time => {
+        window.textEntrance.currentTime = time;
+        const element = window.textEntrance.effect.target;
+        return { y: element.getBoundingClientRect().y, height: element.offsetHeight };
+      }));
+      assert.ok(Math.abs(positions[2].y - positions[0].y - 6) < 0.1, JSON.stringify(positions));
+      assert.ok(positions[0].y < positions[1].y && positions[1].y < positions[2].y);
+      assert.equal(new Set(positions.map(position => position.height)).size, 1);
+      assert.equal((await page.locator('[data-part-id="saved-text"]').boundingBox()).y, saved.y);
+      await page.evaluate(() => { window.textEntrance.currentTime = 80; });
+      assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+      await page.screenshot({ path: `/tmp/citropy-text-motion-${width}-mid.png`, animations: "allow" });
+      await page.evaluate(() => window.textEntrance.finish());
+      f.complete(id);
+      f.idle();
+      await page.screenshot({ path: `/tmp/citropy-text-motion-${width}-end.png`, animations: "allow" });
+    }
+    f.begin("motion-reduced", "Motion preferences take effect immediately.");
+    await page.waitForFunction(() => window.textEntrance?.effect.target.dataset.partId === "motion-reduced-text");
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.waitForFunction(() => window.textEntrance.playState === "idle");
+    assert.equal(await page.locator('[data-part-id="motion-reduced-text"]').evaluate(element => getComputedStyle(element).transform), "none");
+    await page.emulateMedia({ reducedMotion: "no-preference" });
+    f.begin("motion-unmount", "Leaving the conversation releases its animation.");
+    await page.waitForFunction(() => window.textEntrance?.effect.target.dataset.partId === "motion-unmount-text");
+    await page.evaluate(async () => (await import("/web/src/lib/store.ts")).useApp.setState({ activeView: "settings" }));
+    await page.waitForFunction(() => window.textEntrance.playState === "idle");
     await f.close();
   });
 
@@ -1201,6 +1408,51 @@ app.whenReady().then(() => {
       assert.ok(Math.abs(await page.locator(".canvas").evaluate((node) => node.scrollTop) - position) < 2);
       await f.close();
     }
+  });
+
+  await t.test("closing work at the bottom resumes following and scrolling up still preserves the reading position", async () => {
+    const history = [message("history", [textPart("history-text", "The checks finished."), ...tools])];
+    const f = await fixture({ messages: history, preferences: { typingAnimation: "0" } });
+    const { page } = f;
+    const canvas = page.locator(".canvas");
+    const details = page.getByRole("button", { name: "Work details", exact: true });
+    await details.click();
+    await page.locator(".group-head").waitFor();
+    await details.click();
+    await page.locator(".group-head").waitFor({ state: "detached" });
+    await page.waitForFunction(() => {
+      const node = document.querySelector(".canvas");
+      return node.scrollHeight - node.scrollTop - node.clientHeight < 2;
+    });
+    f.begin("following-collapse", "New content after closing work. ".repeat(60));
+    f.complete("following-collapse");
+    f.idle();
+    await page.locator('[data-part-id="following-collapse-text"]').waitFor();
+    await page.waitForFunction(() => {
+      const node = document.querySelector(".canvas");
+      return node.scrollHeight - node.scrollTop - node.clientHeight < 2;
+    });
+    await canvas.hover();
+    await page.mouse.wheel(0, -400);
+    await page.getByRole("button", { name: "Latest", exact: true }).waitFor();
+    const position = await canvas.evaluate(node => new Promise(resolve => {
+      let previous = node.scrollTop;
+      let stable = 0;
+      const measure = () => {
+        stable = Math.abs(node.scrollTop - previous) < 1 ? stable + 1 : 0;
+        previous = node.scrollTop;
+        if (stable >= 4) resolve(previous);
+        else requestAnimationFrame(measure);
+      };
+      requestAnimationFrame(measure);
+    }));
+    f.begin("while-reading-collapse", "New content while reading. ".repeat(60));
+    f.complete("while-reading-collapse");
+    f.idle();
+    await page.locator('[data-part-id="while-reading-collapse-text"]').waitFor();
+    const after = await canvas.evaluate(node => ({ top: node.scrollTop, height: node.scrollHeight, viewport: node.clientHeight }));
+    assert.ok(Math.abs(after.top - position) < 2, JSON.stringify({ before: position, after }));
+    await f.close();
   });
 
   await t.test("completion notices stay quiet only while the same chat is focused near the bottom", async () => {

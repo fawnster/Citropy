@@ -389,6 +389,10 @@ test(
     await page.getByText("76% left", { exact: true }).waitFor();
     await page.getByText("12% left", { exact: true }).waitFor();
     await page.getByText(/^Resets \d/).waitFor();
+    assert.deepEqual(
+      await page.getByLabel("Filter usage by provider").locator("option").allTextContents(),
+      ["All providers", "Claude Code", "Codex", "OpenCode", "Cursor"],
+    );
     await page.screenshot({
       animations: "disabled",
       path: "/tmp/citropy-feature-usage.png",

@@ -186,6 +186,24 @@ test("conversation persistence and lifecycle recovery", async (t) => {
     sessions.splice(previousSessions);
   });
 
+  await t.test("image publishing does not grant raw source-path access before approval", async () => {
+    const entry = store.createThread({ projectId: project.id, provider: "claude", title: "Publish image", permissionMode: "manual" });
+    const previousSessions = sessions.length;
+    await runtimeFor(entry.id).send("Share the screenshot");
+    const session = sessions.at(-1);
+    for (const name of ["workspace_image", "citropy_workspace_image", "mcp__citropy__workspace_image"]) {
+      session.options.emit({ type: "tool.start", callId: name, name, input: { path: "/tmp/private.png" } });
+      session.options.emit({ type: "tool.input", callId: name, input: { path: "/tmp/private.png" } });
+      const part = entry.messages.at(-1).parts.at(-1);
+      assert.equal(part.imageFiles, undefined);
+      session.options.emit({ type: "tool.end", callId: name, ok: false, output: "Denied by the operator" });
+      assert.equal(part.imageFiles, undefined);
+    }
+    disposeRuntime(entry.id);
+    store.removeThread(entry.id);
+    sessions.splice(previousSessions);
+  });
+
   await import("../server/main.ts");
   if (!server.listening) await once(server, "listening");
   const url = `http://127.0.0.1:${server.address().port}`;
@@ -347,6 +365,20 @@ test("conversation persistence and lifecycle recovery", async (t) => {
     assert.deepEqual(toolPart("read").imageFiles, [{ path: join(directory, "cat.jpg"), label: "cat.jpg" }]);
     assert.equal(toolPart("read").images, undefined);
     emit({ type: "tool.end", callId: "read", ok: true, output: "" });
+    const { shellList } = await import("../server/shells.ts");
+    const shells = shellList().length;
+    emit({ type: "tool.input", callId: "read", name: "Bash", input: { command: "echo late" } });
+    assert.equal(shellList().length, shells);
+    emit({ type: "tool.input", callId: "read", name: "GenerateImage", input: { filePath: join(directory, "generated.png") } });
+    assert.equal(toolPart("read").name, "GenerateImage");
+    assert.equal(toolPart("read").status, "ok");
+    assert.deepEqual(toolPart("read").imageFiles, [{ path: join(directory, "generated.png"), label: "generated.png" }]);
+    emit({ type: "tool.start", callId: "edit", name: "Edit", input: {} });
+    emit({ type: "tool.input", callId: "edit", input: { file_path: join(directory, "file.txt"), old_string: "old", new_string: "new" } });
+    emit({ type: "tool.end", callId: "edit", ok: true, output: "" });
+    const patch = toolPart("edit").patch;
+    emit({ type: "tool.input", callId: "edit", name: "GenerateImage", input: { filePath: join(directory, "edit.png") } });
+    assert.deepEqual(toolPart("edit").patch, patch);
     emit({ type: "tool.start", callId: "outside", name: "Read", input: { file_path: "/etc/passwd.png" } });
     assert.deepEqual(toolPart("outside").imageFiles, [{ path: "/etc/passwd.png", label: "passwd.png" }]);
     emit({ type: "tool.end", callId: "outside", ok: true, output: "" });

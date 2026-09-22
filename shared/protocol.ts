@@ -345,6 +345,7 @@ export interface NotificationPreferences {
   toasts: boolean;
   desktop: boolean;
   sound: boolean;
+  subagents: boolean;
 }
 
 export interface NotificationTarget {

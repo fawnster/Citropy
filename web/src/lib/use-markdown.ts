@@ -24,11 +24,12 @@ function fallback(text: string): string {
   return `<p>${escapeHtml(text).replace(/\n{2,}/g, "</p><p>").replace(/\n/g, "<br />")}</p>`;
 }
 
-export function useMarkdown(text: string, live: boolean): { html: string; ready: boolean } {
+export function useMarkdown(text: string, live: boolean, images = true): { html: string; ready: boolean } {
   const theme = useApp((state) => state.theme);
+  const language = useApp((state) => state.language);
   const projectId = useApp((state) => state.activeProjectId);
   const threadId = useApp((state) => state.activeThreadId);
-  const key = `${theme}:${projectId ?? ""}:${threadId ?? ""}:${text}`;
+  const key = `${theme}:${language}:${projectId ?? ""}:${threadId ?? ""}:${images}:${text}`;
   const [rendered, setRendered] = useState(() => ({
     html: cache.get(key) ?? fallback(text),
     key: cache.has(key) ? key : null,
@@ -46,7 +47,7 @@ export function useMarkdown(text: string, live: boolean): { html: string; ready:
     const controller = new AbortController();
     const run = async () => {
       const assets = projectId && threadId ? { projectId, threadId } : undefined;
-      const result = await renderMarkdown(text, theme, controller.signal, assets).catch(() => fallback(text));
+      const result = await renderMarkdown(text, theme, controller.signal, assets, { images, language }).catch(() => fallback(text));
       if (cancelled || latest.current !== key) return;
       if (!live) remember(key, result);
       setRendered({ html: result, key });
@@ -64,7 +65,7 @@ export function useMarkdown(text: string, live: boolean): { html: string; ready:
       controller.abort();
       clearTimeout(timer);
     };
-  }, [key, text, theme, live, projectId, threadId]);
+  }, [key, text, theme, language, live, projectId, threadId, images]);
 
   return { html: rendered.html, ready: rendered.key === key };
 }

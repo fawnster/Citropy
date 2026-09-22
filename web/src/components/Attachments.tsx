@@ -1,7 +1,7 @@
 import { serverUrl } from "../lib/environment.ts";
 import { AnimatePresence } from "motion/react";
 import { useState } from "react";
-import { X, Download } from "lucide-react";
+import { X, Download, ImageOff } from "lucide-react";
 import { FileIcon } from "./FileIcon.tsx";
 import { Modal } from "./Modal.tsx";
 import { FilePreview } from "./FilePreview.tsx";
@@ -23,6 +23,8 @@ export function Attachments({
 }) {
   const t = useI18n();
   const [preview, setPreview] = useState<Attachment>();
+  const [missing, setMissing] = useState<ReadonlySet<string>>(() => new Set());
+  const images = files.filter(file => file.mime?.startsWith("image/"));
   return (
     <>
       <div className="attachments">
@@ -36,11 +38,12 @@ export function Attachments({
               title={`${t("Preview")} ${file.label}`}
             >
               {file.mime?.startsWith("image/") ? (
-                <img
+                missing.has(file.id ?? file.path) ? <span className="image-unavailable" role="img" aria-label={t("Image unavailable")}><ImageOff size={20} aria-hidden="true" /><span>{t("Image unavailable")}</span></span> : <img
                   alt={file.label}
                   loading="lazy"
                   decoding="async"
                   src={serverUrl(`/api/assets?${assetQuery(projectId, file.path, threadId, file.id)}`)}
+                  onError={() => setMissing(previous => new Set(previous).add(file.id ?? file.path))}
                 />
               ) : (
                 <FileIcon path={file.label} mime={file.mime} size={22} className="attachment-file-icon" />
@@ -70,9 +73,10 @@ export function Attachments({
         ))}
       </div>
       <AnimatePresence>{preview && (preview.mime?.startsWith("image/") ? <ImageViewer
-        key={preview.id ?? preview.path}
-        src={serverUrl(`/api/assets?${assetQuery(projectId, preview.path, threadId, preview.id)}`)}
-        name={preview.label}
+        key="image-preview"
+        images={images.map(file => ({ src: serverUrl(`/api/assets?${assetQuery(projectId, file.path, threadId, file.id)}`), name: file.label }))}
+        index={images.findIndex(file => (file.id ?? file.path) === (preview.id ?? preview.path))}
+        onIndexChange={index => setPreview(images[index])}
         onClose={() => setPreview(undefined)}
       /> : (
         <Modal

@@ -64,7 +64,7 @@
 }
 
 .group-icon[data-shape="computer"],
-.tool[data-shape="computer"] .tool-icon { color: var(--web-icon); background: color-mix(in srgb, var(--web-icon) 12%, transparent); }
+.tool[data-shape="computer"] .tool-icon { color: var(--web-icon); }
 .computer-activity .text-ok, .computer-support .text-ok { color: var(--ok); }
 .computer-activity .text-err { color: var(--bad); }
 

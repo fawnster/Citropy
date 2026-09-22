@@ -31,7 +31,7 @@ function waitForExit(running) {
   });
 }
 
-export function packagedBackend(env) {
+export function packagedBackend(env, diagnose = () => {}) {
   let child;
   const start = async () => {
     if (child) return;
@@ -54,11 +54,13 @@ export function packagedBackend(env) {
       },
     );
     const running = child;
+    diagnose("backend.started", { childPid: running.pid });
     let output = "";
     running.stderr.on("data", (chunk) => {
       output = `${output}${chunk}`.slice(-2000);
     });
-    running.once("exit", () => {
+    running.once("exit", (code, signal) => {
+      diagnose("backend.exited", { childPid: running.pid, code, signal });
       if (child === running) child = undefined;
     });
     try {
@@ -73,7 +75,10 @@ export function packagedBackend(env) {
           60000,
         );
         const ready = (message) => {
-          if (message?.t === "ready") finish();
+          if (message?.t === "ready") {
+            diagnose("backend.ready", { childPid: running.pid });
+            finish();
+          }
         };
         const failed = () =>
           finish(
@@ -101,6 +106,7 @@ export function packagedBackend(env) {
   };
   const stop = async () => {
     if (!child || child.exitCode !== null) return;
+    diagnose("backend.stop-requested", { childPid: child.pid });
     await waitForExit(child);
   };
   process.once("exit", () => {
