@@ -42,7 +42,7 @@ test("conversation presentation", { timeout: 360_000 }, async (t) => {
   const warmup = await browser.newPage();
   await warmup.goto(server.resolvedUrls.local[0], { timeout: 120_000 });
   await warmup.close();
-  async function fixture({ desktopPage, preferences = {}, messages = [message("saved", [textPart("saved-text", "Saved conversation.")])], children = [], histories = {}, githubAccount, reducedMotion = "no-preference", isGit = false, hasTouch = false } = {}) {
+  async function fixture({ desktopPage, preferences = {}, messages = [message("saved", [textPart("saved-text", "Saved conversation.")])], children = [], histories = {}, githubAccount, reducedMotion = "no-preference", isGit = false, hasTouch = false, onPhase = () => {} } = {}) {
     const page = desktopPage ?? await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion, hasTouch });
     page.setDefaultTimeout(20000);
     const errors = [];
@@ -89,7 +89,9 @@ test("conversation presentation", { timeout: 360_000 }, async (t) => {
         threads: [thread, ...children], providers: [{ id: "claude", label: "Claude Code", available: true, enabled: true, models: [{ id: "sample", label: "Example model" }] }], permissions: [], home: "/example",
       } }));
     });
+    onPhase("fixture navigation start");
     await page.goto(server.resolvedUrls.local[0]);
+    onPhase("fixture navigation done");
     try {
       await page.locator(".turn").first().waitFor({ timeout: 7000 });
     } catch (error) {
@@ -106,10 +108,14 @@ test("conversation presentation", { timeout: 360_000 }, async (t) => {
   }
 
   await t.test("desktop running shells dismiss without blocking the workspace", { timeout: 40_000 }, async (test) => {
+    const started = performance.now();
+    const phase = name => test.diagnostic(`desktop-shell ${Math.round(performance.now() - started)}ms ${name}`);
+    phase("begin");
     const display = spawn("Xvfb", ["-displayfd", "3", "-screen", "0", "1600x1000x24"], { stdio: ["ignore", "ignore", "ignore", "pipe"] });
     let desktop;
-    test.after(async () => { await desktop?.close(); display.kill(); });
+    test.after(async () => { phase("desktop.close start"); await desktop?.close(); phase("desktop.close done"); display.kill(); });
     const [number] = await once(display.stdio[3], "data");
+    phase("display ready");
     const environment = { ...process.env, DISPLAY: `:${String(number).trim()}` };
     delete environment.ELECTRON_RUN_AS_NODE;
     const main = join(directory, "shell-desktop.cjs");
@@ -121,18 +127,26 @@ app.whenReady().then(() => {
 });
 `);
     desktop = await _electron.launch({ args: ["--ozone-platform=x11", "--no-sandbox", main], env: environment, timeout: 10_000 });
-    const f = await fixture({ desktopPage: await desktop.firstWindow() });
+    phase("electron launched");
+    const desktopPage = await desktop.firstWindow();
+    phase("electron window ready");
+    const f = await fixture({ desktopPage, onPhase: phase });
+    phase("fixture ready");
     const { page, emit } = f;
     const click = async (locator) => {
+      phase(`click start ${locator}`);
       await locator.click({ trial: true });
+      phase("trial click ready");
       const bounds = await locator.boundingBox();
       execFileSync("xdotool", ["mousemove", "--sync", String(Math.round(bounds.x + bounds.width / 2)), String(Math.round(bounds.y + bounds.height / 2)), "click", "1"], { env: environment });
+      phase("click done");
     };
     emit({ t: "shell.upsert", shell: { id: "server", projectId: "workspace", threadId: "chat", command: "npm run dev", cwd: "/example", status: "running", background: true, stopMode: "shell", output: "Server ready\n", startedAt: 1 } });
     const trigger = page.getByRole("button", { name: "Running shells, 1 active", exact: true });
     const panel = page.getByRole("dialog", { name: "Running shells", exact: true });
     const composer = page.locator(".composer-input");
     for (const [width, reducedMotion] of [[1440, "no-preference"], [700, "reduce"]]) {
+      phase(`width ${width}`);
       await desktop.evaluate(({ BrowserWindow }, width) => BrowserWindow.getAllWindows()[0].setContentSize(width, 900), width);
       await page.emulateMedia({ reducedMotion });
       if (width === 700) await click(page.getByRole("button", { name: "Toggle sidebar", exact: true }));
@@ -172,7 +186,9 @@ app.whenReady().then(() => {
       assert.equal(await composer.evaluate(element => element === document.activeElement), true);
       assert.equal(await page.locator(":popover-open").count(), 0);
     }
+    phase("fixture.close start");
     await f.close();
+    phase("fixture.close done");
   });
 
   await t.test("running shells stay discoverable across tasks with bounded output and clear stop scope", async () => {
