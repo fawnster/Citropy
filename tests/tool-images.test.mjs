@@ -5,7 +5,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { syncBuiltinESMExports } from "node:module";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { tmpdir } from "node:os";
 
 const root = await mkdtemp(join(tmpdir(), "citropy-tool-images-"));
@@ -75,17 +75,20 @@ test("tool images saved for a removed conversation leave nothing behind", async 
   assert.equal(existsSync(join(root, "data", "tool-images", "thr_alive", `${kept[0].id}.png`)), true);
 });
 
-test("published image reads handle short reads and close their descriptor", async t => {
+test("published image reads handle short reads and close their descriptors", async t => {
   const fixture = await mkdtemp(join(tmpdir(), "citropy-image-read-"));
   t.after(() => rm(fixture, { recursive: true, force: true }));
   t.after(() => rm(root, { recursive: true, force: true }));
   const path = join(fixture, "image.png");
   await fs.writeFile(path, png);
   const original = fs.open;
+  const handles = [];
   let reads = 0;
   let closed = false;
   fs.open = async (...args) => {
     const file = await original(...args);
+    handles.push(file);
+    if (basename(args[0]) !== "image.png") return file;
     const read = file.read.bind(file);
     const close = file.close.bind(file);
     file.read = (buffer, offset, length, position) => { reads++; return read(buffer, offset, Math.min(3, length), position); };
@@ -97,6 +100,8 @@ test("published image reads handle short reads and close their descriptor", asyn
   const image = await saveToolImageFile("thr_published", path, () => true);
   assert.ok(reads > 1);
   assert.equal(closed, true);
+  assert.equal(handles.length, process.platform === "linux" ? 2 : 1);
+  assert.ok(handles.every(file => file.fd === -1));
   assert.deepEqual(await fs.readFile(join(root, "data", "tool-images", "thr_published", `${image.id}.png`)), png);
 });
 
@@ -113,6 +118,7 @@ test("published images reject canonical-path changes and never read a substitute
   let read = false;
   let closed = false;
   fs.open = async (...args) => {
+    if (basename(args[0]) !== "image.png") return original(...args);
     const file = await original(other, args[1]);
     const close = file.close.bind(file);
     file.read = async () => { read = true; throw new Error("Must not read a substituted file"); };
@@ -126,7 +132,7 @@ test("published images reject canonical-path changes and never read a substitute
   assert.equal(closed, true);
 });
 
-test("published images reread after unrelated sibling changes and discard rejected bytes", async t => {
+test("published images reread changed file contents and discard rejected bytes", async t => {
   const fixture = await mkdtemp(join(tmpdir(), "citropy-image-sibling-"));
   t.after(() => rm(fixture, { recursive: true, force: true }));
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -143,7 +149,7 @@ test("published images reread after unrelated sibling changes and discard reject
   let changed = false;
   fs.open = async (...args) => {
     const file = await original(...args);
-    if (args[0] !== path) return file;
+    if (basename(args[0]) !== "image.png") return file;
     opened++;
     const read = file.read.bind(file);
     const close = file.close.bind(file);
@@ -170,9 +176,14 @@ test("published images reread after unrelated sibling changes and discard reject
   assert.deepEqual(await fs.readFile(join(root, "data", "tool-images", "thr_sibling", `${image.id}.png`)), fresh);
 });
 
-test("published image retries stay bounded and never save under continuous directory changes", async t => {
+for (const platform of process.platform === "linux" ? ["linux", "darwin"] : [process.platform]) {
+test(`published images handle unrelated directory changes with ${platform} path validation`, async t => {
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", { value: platform });
+  t.after(() => Object.defineProperty(process, "platform", originalPlatform));
   const fixture = await mkdtemp(join(tmpdir(), "citropy-image-changing-"));
   t.after(() => rm(fixture, { recursive: true, force: true }));
+  t.after(() => rm(root, { recursive: true, force: true }));
   const folder = join(fixture, "workspace");
   await fs.mkdir(folder);
   const path = join(folder, "image.png");
@@ -182,7 +193,7 @@ test("published image retries stay bounded and never save under continuous direc
   let closed = 0;
   fs.open = async (...args) => {
     const file = await original(...args);
-    if (args[0] !== path) return file;
+    if (basename(args[0]) !== "image.png") return file;
     opened++;
     let changed = false;
     const read = file.read.bind(file);
@@ -191,6 +202,7 @@ test("published image retries stay bounded and never save under continuous direc
       if (!changed) {
         changed = true;
         await fs.mkdir(join(fixture, `unrelated-${opened}`));
+        await fs.writeFile(join(folder, `unrelated-${opened}`), "");
       }
       return read(...args);
     };
@@ -199,13 +211,21 @@ test("published image retries stay bounded and never save under continuous direc
   };
   syncBuiltinESMExports();
   t.after(() => { fs.open = original; syncBuiltinESMExports(); });
-  await assert.rejects(saveToolImageFile("thr_changing", path, () => true), /path changed/);
-  assert.equal(opened, 3);
-  assert.equal(closed, 3);
-  assert.equal(existsSync(join(root, "data", "tool-images", "thr_changing")), false);
+  if (platform === "linux") {
+    const image = await saveToolImageFile("thr_changing", path, () => true);
+    assert.deepEqual(await fs.readFile(join(root, "data", "tool-images", "thr_changing", `${image.id}.png`)), png);
+    assert.equal(opened, 1);
+    assert.equal(closed, 1);
+  } else {
+    await assert.rejects(saveToolImageFile("thr_changing", path, () => true), /path changed/);
+    assert.equal(opened, 3);
+    assert.equal(closed, 3);
+    assert.equal(existsSync(join(root, "data", "tool-images", "thr_changing")), false);
+  }
 });
+}
 
-test("closing a conversation prevents an image read retry and leaves no saved bytes", async t => {
+test("closing a conversation during an image read leaves no saved bytes", async t => {
   const fixture = await mkdtemp(join(tmpdir(), "citropy-image-closed-retry-"));
   t.after(() => rm(fixture, { recursive: true, force: true }));
   const folder = join(fixture, "workspace");
@@ -218,7 +238,7 @@ test("closing a conversation prevents an image read retry and leaves no saved by
   let closed = 0;
   fs.open = async (...args) => {
     const file = await original(...args);
-    if (args[0] !== path) return file;
+    if (basename(args[0]) !== "image.png") return file;
     opened++;
     const read = file.read.bind(file);
     const close = file.close.bind(file);
@@ -247,6 +267,7 @@ test("published images cannot hang if a checked file is replaced by a FIFO", { s
   await fs.writeFile(path, png);
   const original = fs.open;
   fs.open = async (...args) => {
+    if (basename(args[0]) !== "image.png") return original(...args);
     await fs.rm(path);
     execFileSync("mkfifo", [path]);
     return original(...args);
@@ -256,7 +277,12 @@ test("published images cannot hang if a checked file is replaced by a FIFO", { s
   await assert.rejects(saveToolImageFile("thr_fifo", path, () => true), /file changed/);
 });
 
-test("published images reject an intermediate-directory ABA swap before copying outside bytes", async t => {
+for (const platform of process.platform === "linux" ? ["linux", "darwin"] : [process.platform]) {
+for (const replacement of ["symlink", "directory"]) {
+test(`published images reject an intermediate-directory ABA swap using a ${replacement} with ${platform} path validation`, async t => {
+  const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+  Object.defineProperty(process, "platform", { value: platform });
+  t.after(() => Object.defineProperty(process, "platform", originalPlatform));
   const fixture = await mkdtemp(join(tmpdir(), "citropy-image-aba-"));
   t.after(() => rm(fixture, { recursive: true, force: true }));
   const folder = join(fixture, "workspace");
@@ -269,27 +295,256 @@ test("published images reject an intermediate-directory ABA swap before copying 
   await fs.writeFile(join(outside, "image.png"), Buffer.concat([png, Buffer.from("outside bytes")]));
   async function swap() {
     await fs.rename(folder, savedFolder);
-    await fs.symlink(outside, folder, "dir");
+    if (replacement === "symlink") await fs.symlink(outside, folder, "dir");
+    else await fs.rename(outside, folder);
   }
   async function restore() {
-    await fs.rm(folder);
+    if (replacement === "symlink") await fs.rm(folder);
+    else await fs.rename(folder, outside);
     await fs.rename(savedFolder, folder);
   }
   const originalStat = fs.stat;
   const originalOpen = fs.open;
   fs.stat = async (...args) => {
-    if (args[0] !== path) return originalStat(...args);
+    if (basename(args[0]) !== "image.png") return originalStat(...args);
     await swap();
     try { return await originalStat(...args); }
     finally { await restore(); }
   };
   fs.open = async (...args) => {
+    if (basename(args[0]) !== "image.png") return originalOpen(...args);
     await swap();
-    try { return await originalOpen(...args); }
-    finally { await restore(); }
+    const file = await originalOpen(...args);
+    const close = file.close.bind(file);
+    file.close = async () => { try { await close(); } finally { await restore(); } };
+    return file;
   };
   syncBuiltinESMExports();
   t.after(() => { fs.stat = originalStat; fs.open = originalOpen; syncBuiltinESMExports(); });
   await assert.rejects(saveToolImageFile("thr_aba", path, () => true), /path changed/);
   assert.equal(existsSync(join(root, "data", "tool-images", "thr_aba")), false);
+});
+}
+}
+
+test("published images reject a physical file ABA swap before reading outside bytes", { skip: process.platform !== "linux" }, async t => {
+  const fixture = await mkdtemp(join(tmpdir(), "citropy-image-file-aba-"));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const folder = join(fixture, "workspace");
+  await fs.mkdir(folder);
+  const path = join(folder, "image.png");
+  const saved = join(folder, "original.png");
+  const outside = join(fixture, "outside.png");
+  await fs.writeFile(path, png);
+  await fs.writeFile(outside, Buffer.concat([png, Buffer.from("outside bytes")]));
+  async function swap() {
+    await fs.rename(path, saved);
+    await fs.rename(outside, path);
+  }
+  async function restore() {
+    await fs.rename(path, outside);
+    await fs.rename(saved, path);
+  }
+  const originalStat = fs.stat;
+  const originalOpen = fs.open;
+  const handles = [];
+  let read = false;
+  fs.stat = async (...args) => {
+    if (basename(args[0]) !== "image.png") return originalStat(...args);
+    await swap();
+    try { return await originalStat(...args); }
+    finally { await restore(); }
+  };
+  fs.open = async (...args) => {
+    const image = basename(args[0]) === "image.png";
+    if (image) await swap();
+    const file = await originalOpen(...args);
+    handles.push(file);
+    if (!image) return file;
+    const close = file.close.bind(file);
+    file.read = async () => { read = true; throw new Error("Must not read outside bytes"); };
+    file.close = async () => { try { await close(); } finally { await restore(); } };
+    return file;
+  };
+  syncBuiltinESMExports();
+  t.after(() => { fs.stat = originalStat; fs.open = originalOpen; syncBuiltinESMExports(); });
+  await assert.rejects(saveToolImageFile("thr_file_aba", path, () => true), /file changed/);
+  assert.equal(read, false);
+  assert.equal(handles.length, 2);
+  assert.ok(handles.every(file => file.fd === -1));
+  assert.equal(existsSync(join(root, "data", "tool-images", "thr_file_aba")), false);
+});
+
+test("published images reject a substituted parent before looking up the image", { skip: process.platform !== "linux" }, async t => {
+  const fixture = await mkdtemp(join(tmpdir(), "citropy-image-parent-"));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const folder = join(fixture, "workspace");
+  const outside = join(fixture, "outside");
+  await fs.mkdir(folder);
+  await fs.mkdir(outside);
+  const path = join(folder, "image.png");
+  await fs.writeFile(path, png);
+  await fs.writeFile(join(outside, "image.png"), Buffer.concat([png, Buffer.from("outside bytes")]));
+  const originalStat = fs.stat;
+  const originalOpen = fs.open;
+  const handles = [];
+  let lookedUp = false;
+  fs.stat = async (...args) => {
+    lookedUp = true;
+    return originalStat(...args);
+  };
+  fs.open = async (...args) => {
+    assert.equal(args[0], folder);
+    const directory = await originalOpen(outside, args[1]);
+    handles.push(directory);
+    return directory;
+  };
+  syncBuiltinESMExports();
+  t.after(() => { fs.stat = originalStat; fs.open = originalOpen; syncBuiltinESMExports(); });
+  await assert.rejects(saveToolImageFile("thr_parent", path, () => true), /path changed/);
+  assert.equal(lookedUp, false);
+  assert.equal(handles.length, 1);
+  assert.equal(handles[0].fd, -1);
+  assert.equal(existsSync(join(root, "data", "tool-images", "thr_parent")), false);
+});
+
+for (const stage of ["lookup", "open", "stat", "read"]) {
+test(`published images close their descriptors after a file ${stage} failure`, { skip: process.platform !== "linux" }, async t => {
+  const fixture = await mkdtemp(join(tmpdir(), "citropy-image-close-"));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const path = join(fixture, "image.png");
+  await fs.writeFile(path, png);
+  const failure = new Error(`Failed image ${stage}`);
+  const originalStat = fs.stat;
+  const originalOpen = fs.open;
+  const handles = [];
+  fs.stat = async (...args) => {
+    if (stage === "lookup" && basename(args[0]) === "image.png") throw failure;
+    return originalStat(...args);
+  };
+  fs.open = async (...args) => {
+    const image = basename(args[0]) === "image.png";
+    if (image && stage === "open") throw failure;
+    const file = await originalOpen(...args);
+    handles.push(file);
+    if (image && stage === "stat") file.stat = async () => { throw failure; };
+    if (image && stage === "read") file.read = async () => { throw failure; };
+    return file;
+  };
+  syncBuiltinESMExports();
+  t.after(() => { fs.stat = originalStat; fs.open = originalOpen; syncBuiltinESMExports(); });
+  await assert.rejects(saveToolImageFile("thr_close", path, () => true), error => error === failure);
+  assert.equal(handles.length, stage === "lookup" || stage === "open" ? 1 : 2);
+  assert.ok(handles.every(file => file.fd === -1));
+  assert.equal(existsSync(join(root, "data", "tool-images", "thr_close")), false);
+});
+}
+
+for (const action of ["rename", "delete"]) {
+test(`published images reject ${action} of the opened file`, { skip: process.platform !== "linux" }, async t => {
+  const fixture = await mkdtemp(join(tmpdir(), "citropy-image-moved-"));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const path = join(fixture, "image.png");
+  await fs.writeFile(path, png);
+  const original = fs.open;
+  let changed = false;
+  let closed = 0;
+  fs.open = async (...args) => {
+    const file = await original(...args);
+    if (basename(args[0]) !== "image.png") return file;
+    const read = file.read.bind(file);
+    const close = file.close.bind(file);
+    file.read = async (...args) => {
+      const result = await read(...args);
+      if (!changed) {
+        changed = true;
+        if (action === "rename") await fs.rename(path, join(fixture, "moved.png"));
+        else await fs.unlink(path);
+      }
+      return result;
+    };
+    file.close = async () => { closed++; await close(); };
+    return file;
+  };
+  syncBuiltinESMExports();
+  t.after(() => { fs.open = original; syncBuiltinESMExports(); });
+  await assert.rejects(saveToolImageFile("thr_moved", path, () => true), /path changed/);
+  assert.equal(closed, 1);
+  assert.equal(existsSync(join(root, "data", "tool-images", "thr_moved")), false);
+});
+}
+
+for (const target of ["directory", "file"]) {
+test(`published images fail closed when the ${target} descriptor path cannot be inspected`, { skip: process.platform !== "linux" }, async t => {
+  const fixture = await mkdtemp(join(tmpdir(), "citropy-image-descriptor-"));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const path = join(fixture, "image.png");
+  await fs.writeFile(path, png);
+  const originalOpen = fs.open;
+  const originalReadlink = fs.readlink;
+  const handles = [];
+  let fileDescriptor;
+  let reads = 0;
+  let closed = 0;
+  fs.open = async (...args) => {
+    const file = await originalOpen(...args);
+    handles.push(file);
+    if (basename(args[0]) === "image.png") fileDescriptor = `/proc/self/fd/${file.fd}`;
+    const read = file.read.bind(file);
+    const close = file.close.bind(file);
+    file.read = (...args) => { reads++; return read(...args); };
+    file.close = async () => { closed++; await close(); };
+    return file;
+  };
+  fs.readlink = async path => {
+    assert.match(path, /^\/proc\/self\/fd\/\d+$/);
+    if (target === "file" && path !== fileDescriptor) return originalReadlink(path);
+    throw Object.assign(new Error("Descriptor path unavailable"), { code: "ENOENT" });
+  };
+  syncBuiltinESMExports();
+  t.after(() => { fs.open = originalOpen; fs.readlink = originalReadlink; syncBuiltinESMExports(); });
+  await assert.rejects(saveToolImageFile("thr_no_descriptor", path, () => true), /Descriptor path unavailable/);
+  assert.equal(reads, 0);
+  assert.equal(closed, target === "directory" ? 1 : 2);
+  assert.ok(handles.every(file => file.fd === -1));
+  assert.equal(existsSync(join(root, "data", "tool-images", "thr_no_descriptor")), false);
+});
+}
+
+test("published image retries stay bounded when file contents keep changing", async t => {
+  const fixture = await mkdtemp(join(tmpdir(), "citropy-image-writing-"));
+  t.after(() => rm(fixture, { recursive: true, force: true }));
+  const path = join(fixture, "image.png");
+  await fs.writeFile(path, png);
+  const original = fs.open;
+  const handles = [];
+  let opened = 0;
+  let closed = 0;
+  fs.open = async (...args) => {
+    const file = await original(...args);
+    handles.push(file);
+    if (basename(args[0]) !== "image.png") return file;
+    opened++;
+    let changed = false;
+    const read = file.read.bind(file);
+    const close = file.close.bind(file);
+    file.read = async (...args) => {
+      const result = await read(...args);
+      if (!changed) {
+        changed = true;
+        await fs.appendFile(path, "changed");
+      }
+      return result;
+    };
+    file.close = async () => { closed++; await close(); };
+    return file;
+  };
+  syncBuiltinESMExports();
+  t.after(() => { fs.open = original; syncBuiltinESMExports(); });
+  await assert.rejects(saveToolImageFile("thr_writing", path, () => true), /path changed/);
+  assert.equal(opened, 3);
+  assert.equal(closed, 3);
+  assert.equal(handles.length, process.platform === "linux" ? 6 : 3);
+  assert.ok(handles.every(file => file.fd === -1));
+  assert.equal(existsSync(join(root, "data", "tool-images", "thr_writing")), false);
 });

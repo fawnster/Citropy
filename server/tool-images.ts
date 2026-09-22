@@ -1,7 +1,7 @@
-import { mkdir, open, readFile, realpath, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readlink, realpath, stat, writeFile } from "node:fs/promises";
 import { constants, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { dirname, join, parse } from "node:path";
+import { basename, dirname, join, parse } from "node:path";
 import { dataRoot } from "./paths.ts";
 import { directoryState, inside, sameDirectoryState } from "./files.ts";
 import type { IncomingMessage, ServerResponse } from "node:http";
@@ -50,43 +50,61 @@ export async function saveToolImageFile(
   path: string,
   isAlive: () => boolean,
 ): Promise<ToolImage> {
+  const verifyDescriptorPath = process.platform === "linux";
   for (let attempt = 0; attempt < 3; attempt++) {
     if (!isAlive()) throw new Error("Conversation closed.");
-    const directories = await directoryState(parse(path).root, dirname(path));
-    if (!directories) throw new Error("The image path changed. Try again.");
-    const expected = await stat(path);
-    if (!expected.isFile()) throw new Error("Choose a regular image file.");
-    if (expected.size > maxBytes) throw new Error("Images can be up to 8 MiB.");
-    if (await realpath(path) !== path) throw new Error("The image path changed. Try again.");
-    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    let body: Buffer;
-    try {
-      const info = await file.stat();
-      if (!info.isFile() || info.dev !== expected.dev || info.ino !== expected.ino)
-        throw new Error("The image file changed. Try again.");
-      const buffer = Buffer.alloc(maxBytes + 1);
-      let length = 0;
-      while (length < buffer.length) {
-        const { bytesRead } = await file.read(buffer, length, buffer.length - length, length);
-        if (!bytesRead) break;
-        length += bytesRead;
-      }
-      if (length > maxBytes) throw new Error("Images can be up to 8 MiB.");
-      body = buffer.subarray(0, length);
-    } finally {
-      await file.close();
-    }
-    if (!(await sameDirectoryState(directories))) continue;
-    const mime = body.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? "image/png"
-      : body[0] === 255 && body[1] === 216 && body[2] === 255 ? "image/jpeg"
-      : ["GIF87a", "GIF89a"].includes(body.toString("latin1", 0, 6)) ? "image/gif"
-      : body.toString("latin1", 0, 4) === "RIFF" && body.toString("latin1", 8, 12) === "WEBP" ? "image/webp"
+    const directories = verifyDescriptorPath ? undefined : await directoryState(parse(path).root, dirname(path));
+    if (directories === null) throw new Error("The image path changed. Try again.");
+    const directory = verifyDescriptorPath
+      ? await open(dirname(path), constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW)
       : undefined;
-    if (!mime) throw new Error("Choose a PNG, JPEG, GIF, or WebP image.");
-    if (!isAlive()) throw new Error("Conversation closed.");
-    const [image] = await saveToolImages(threadId, [{ mime, data: body.toString("base64") }], isAlive);
-    if (!image) throw new Error("Conversation closed.");
-    return image;
+    try {
+      if (directory && await readlink(`/proc/self/fd/${directory.fd}`) !== dirname(path))
+        throw new Error("The image path changed. Try again.");
+      const lookup = directory ? `/proc/self/fd/${directory.fd}/${basename(path)}` : path;
+      const expected = await stat(lookup, { bigint: true });
+      if (!expected.isFile()) throw new Error("Choose a regular image file.");
+      if (expected.size > maxBytes) throw new Error("Images can be up to 8 MiB.");
+      if (await realpath(lookup) !== path) throw new Error("The image path changed. Try again.");
+      const file = await open(lookup, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      let body: Buffer;
+      try {
+        const info = await file.stat({ bigint: true });
+        if (!info.isFile() || info.dev !== expected.dev || info.ino !== expected.ino ||
+            info.size !== expected.size || info.ctimeNs !== expected.ctimeNs || info.mtimeNs !== expected.mtimeNs)
+          throw new Error("The image file changed. Try again.");
+        if (verifyDescriptorPath && await readlink(`/proc/self/fd/${file.fd}`) !== path)
+          throw new Error("The image path changed. Try again.");
+        const buffer = Buffer.alloc(maxBytes + 1);
+        let length = 0;
+        while (length < buffer.length) {
+          const { bytesRead } = await file.read(buffer, length, buffer.length - length, length);
+          if (!bytesRead) break;
+          length += bytesRead;
+        }
+        if (length > maxBytes) throw new Error("Images can be up to 8 MiB.");
+        if (verifyDescriptorPath && await readlink(`/proc/self/fd/${file.fd}`) !== path)
+          throw new Error("The image path changed. Try again.");
+        const current = await file.stat({ bigint: true });
+        if (current.size !== info.size || current.ctimeNs !== info.ctimeNs || current.mtimeNs !== info.mtimeNs) continue;
+        body = buffer.subarray(0, length);
+      } finally {
+        await file.close();
+      }
+      if (directories && !(await sameDirectoryState(directories))) continue;
+      const mime = body.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? "image/png"
+        : body[0] === 255 && body[1] === 216 && body[2] === 255 ? "image/jpeg"
+        : ["GIF87a", "GIF89a"].includes(body.toString("latin1", 0, 6)) ? "image/gif"
+        : body.toString("latin1", 0, 4) === "RIFF" && body.toString("latin1", 8, 12) === "WEBP" ? "image/webp"
+        : undefined;
+      if (!mime) throw new Error("Choose a PNG, JPEG, GIF, or WebP image.");
+      if (!isAlive()) throw new Error("Conversation closed.");
+      const [image] = await saveToolImages(threadId, [{ mime, data: body.toString("base64") }], isAlive);
+      if (!image) throw new Error("Conversation closed.");
+      return image;
+    } finally {
+      await directory?.close();
+    }
   }
   throw new Error("The image path changed. Try again.");
 }
