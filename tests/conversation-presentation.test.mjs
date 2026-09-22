@@ -995,6 +995,8 @@ app.whenReady().then(() => {
     await bottom();
     f.complete("streaming-response");
     f.idle();
+    const session = await page.context().newCDPSession(page);
+    await session.send("Emulation.setCPUThrottlingRate", { rate: 6 });
     for (const [width, scale] of [[1600, 90], [1280, 120], [960, 150]]) {
       await page.setViewportSize({ width, height: 900 });
       await page.evaluate(async (scale) => (await import("/web/src/lib/store.ts")).setUiScale(scale), scale);
@@ -1005,6 +1007,8 @@ app.whenReady().then(() => {
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
       await page.screenshot({ path: `/tmp/citropy-chat-windowed-${width}.png`, animations: "disabled" });
     }
+    await session.send("Emulation.setCPUThrottlingRate", { rate: 1 });
+    await session.detach();
     await page.getByRole("button", { name: "Toggle sidebar", exact: true }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.waitForFunction(() => window.presentationFrames.size === 0);

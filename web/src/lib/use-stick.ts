@@ -22,6 +22,7 @@ export function useStickToBottom<T extends HTMLElement, C extends HTMLElement>()
     setAtBottom(true);
     node.scrollTo({ top: node.scrollHeight, behavior });
     lastTop.current = node.scrollTop;
+    lastHeight.current = node.scrollHeight;
   }, []);
 
   useEffect(() => {

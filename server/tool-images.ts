@@ -62,16 +62,20 @@ export async function saveToolImageFile(
       if (directory && await readlink(`/proc/self/fd/${directory.fd}`) !== dirname(path))
         throw new Error("The image path changed. Try again.");
       const lookup = directory ? `/proc/self/fd/${directory.fd}/${basename(path)}` : path;
-      const expected = await stat(lookup, { bigint: true });
-      if (!expected.isFile()) throw new Error("Choose a regular image file.");
-      if (expected.size > maxBytes) throw new Error("Images can be up to 8 MiB.");
-      if (await realpath(lookup) !== path) throw new Error("The image path changed. Try again.");
-      const file = await open(lookup, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      const expected = directory ? undefined : await stat(path, { bigint: true });
+      if (expected) {
+        if (!expected.isFile()) throw new Error("Choose a regular image file.");
+        if (expected.size > maxBytes) throw new Error("Images can be up to 8 MiB.");
+        if (await realpath(path) !== path) throw new Error("The image path changed. Try again.");
+      }
+      const file = await open(lookup, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK | constants.O_NOCTTY);
       let body: Buffer;
       try {
         const info = await file.stat({ bigint: true });
-        if (!info.isFile() || info.dev !== expected.dev || info.ino !== expected.ino ||
-            info.size !== expected.size || info.ctimeNs !== expected.ctimeNs || info.mtimeNs !== expected.mtimeNs)
+        if (!info.isFile()) throw new Error("Choose a regular image file.");
+        if (info.size > maxBytes) throw new Error("Images can be up to 8 MiB.");
+        if (expected && (info.dev !== expected.dev || info.ino !== expected.ino ||
+            info.size !== expected.size || info.ctimeNs !== expected.ctimeNs || info.mtimeNs !== expected.mtimeNs))
           throw new Error("The image file changed. Try again.");
         if (verifyDescriptorPath && await readlink(`/proc/self/fd/${file.fd}`) !== path)
           throw new Error("The image path changed. Try again.");
