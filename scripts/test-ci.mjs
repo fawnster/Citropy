@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { readdirSync } from 'node:fs'
 import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { parseArgs } from 'node:util'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const nodeFlags = ['--experimental-strip-types', '--test', '--test-reporter=tap']
@@ -10,9 +11,9 @@ const locationPatterns = [
   /^\s*test at (.+?):\d+:\d+\s*$/gm,
 ]
 
-function runTests(files, concurrency = 2) {
+function runTests(files, concurrency = 2, shard) {
   return new Promise((resolveRun, reject) => {
-    const child = spawn(process.execPath, [...nodeFlags, `--test-concurrency=${concurrency}`, ...files], {
+    const child = spawn(process.execPath, [...nodeFlags, `--test-concurrency=${concurrency}`, ...(shard ? [`--test-shard=${shard}`] : []), ...files], {
       cwd: root,
       stdio: ['inherit', 'pipe', 'inherit'],
     })
@@ -44,6 +45,7 @@ export function failedTestFiles(output, from = root) {
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const { values } = parseArgs({ options: { 'test-shard': { type: 'string' } } })
   const allFiles = readdirSync(resolve(root, 'tests'))
     .filter((name) => name.endsWith('.test.mjs'))
     .sort()
@@ -54,7 +56,16 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     process.exit(1)
   }
 
-  const first = await runTests(allFiles)
+  const shard = values['test-shard']
+  if (shard !== undefined) {
+    const [index, total] = shard.split('/').map(Number)
+    if (!/^[1-9]\d*\/[1-9]\d*$/.test(shard) || index > total || total > allFiles.length) {
+      console.error(`Invalid test shard "${shard}": expected INDEX/TOTAL with 1 <= INDEX <= TOTAL <= ${allFiles.length}.`)
+      process.exit(1)
+    }
+  }
+
+  const first = await runTests(allFiles, 2, shard)
   if (first.code === 0) process.exit(0)
 
   const failed = failedTestFiles(first.output)

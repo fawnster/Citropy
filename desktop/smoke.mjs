@@ -21,9 +21,14 @@ try {
   const appRoot = join(root, "resources/app");
   await access(join(appRoot, "LICENSE"));
   await access(join(appRoot, "dist/index.html"));
+  await access(join(appRoot, "node_modules/@fontsource-variable/inter/files/inter-latin-standard-normal.woff2"));
+  const notices = await readFile(join(appRoot, "dist/THIRD_PARTY_NOTICES.txt"), "utf8");
+  for (const path of ["react/LICENSE", "lucide-react/LICENSE", "@fontsource-variable/geist-mono/LICENSE", "tslib/CopyrightNotice.txt"]) {
+    assert.ok(notices.includes(await readFile(new URL(`../node_modules/${path}`, import.meta.url), "utf8")), `Missing bundled dependency notice: ${path}`);
+  }
   await access(join(appRoot, "desktop/apply-appimage-update.sh"));
   await access(join(appRoot, "desktop/appimage-relaunch.mjs"));
-  for (const path of [".env", "tests", ".git", "web", "desktop/start.mjs", "desktop/install.mjs", "desktop/smoke.mjs", "desktop/smoke-mac.mjs", "desktop/smoke-win.mjs", "node_modules/vite", "node_modules/playwright"]) {
+  for (const path of [".env", "tests", ".git", "web", "desktop/start.mjs", "desktop/install.mjs", "desktop/smoke.mjs", "desktop/smoke-mac.mjs", "desktop/smoke-win.mjs", "node_modules/vite", "node_modules/playwright", "node_modules/lucide-react", "node_modules/shiki", "node_modules/motion"]) {
     const present = await access(join(appRoot, path)).then(() => true, () => false);
     assert.equal(present, false, `Development file in release: ${path}`);
   }

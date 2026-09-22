@@ -15,6 +15,9 @@ concurrency:
 
 jobs:
   check:
+    uses: ./.github/workflows/tests.yml
+
+  linux:
     runs-on: ubuntu-22.04
     timeout-minutes: 30
     steps:
@@ -28,18 +31,9 @@ jobs:
       - name: Install desktop test dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y xvfb xdotool dbus-x11 python3-dbus python3-gi gir1.2-gst-plugins-base-1.0 gir1.2-gdkpixbuf-2.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good libxtst6 libfuse2 openssh-server
+          sudo apt-get install -y xvfb libfuse2
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
-      - run: npm run typecheck
-      - run: npm audit --omit=dev --audit-level=high
-      - run: npm run test:ci
-      - name: Check the installer scripts
-        run: |
-          sh -n scripts/install.sh
-          sh -n desktop/apply-appimage-update.sh
-          shellcheck -s sh scripts/install.sh desktop/apply-appimage-update.sh
-          pwsh -NoProfile -Command '$errors = $null; [System.Management.Automation.Language.Parser]::ParseFile("scripts/install.ps1", [ref]$null, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }'
+      - run: npx playwright install-deps chromium
       - run: npm run desktop:package
       - run: npm run desktop:smoke
       - name: Checksum release files
@@ -48,6 +42,7 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: linux-x64
+          compression-level: 0
           if-no-files-found: error
           path: |
             release/*.AppImage
@@ -85,7 +80,7 @@ jobs:
           cp release/*.zip "macdist/v$VERSION/"
           (cd "macdist/v$VERSION" && shasum -a 256 *.zip > SHA256SUMS)
           cd macdist
-          python3 -m http.server 8791 >/dev/null 2>&1 &
+          python3 -m http.server 8791 --bind 127.0.0.1 >/dev/null 2>&1 &
           for attempt in $(seq 1 40); do
             curl -fsS --connect-timeout 2 --max-time 5 -o /dev/null "http://127.0.0.1:8791/" && break
             sleep 0.5
@@ -100,6 +95,7 @@ jobs:
         if: always()
         with:
           name: mac-package
+          compression-level: 0
           if-no-files-found: ignore
           path: |
             release/*.zip
@@ -198,6 +194,7 @@ jobs:
         if: always()
         with:
           name: windows-package
+          compression-level: 0
           if-no-files-found: ignore
           path: |
             release/*.exe

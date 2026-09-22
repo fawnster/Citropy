@@ -1,4 +1,4 @@
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
@@ -19,6 +19,24 @@ await run(process.execPath, [
   join(root, "node_modules/vite/bin/vite.js"),
   "build",
 ]);
+const lock = JSON.parse(await readFile(join(root, "package-lock.json"), "utf8"));
+const notices = [];
+for (const path of Object.keys(lock.packages).sort()) {
+  const dependency = lock.packages[path];
+  if (!dependency.dev && !dependency.devOptional) continue;
+  const files = await readdir(join(root, path), { withFileTypes: true }).catch((error) => {
+    if (error.code === "ENOENT" && dependency.optional) return [];
+    throw error;
+  });
+  const noticeFiles = files
+    .filter((file) => file.isFile() && /^(?:licen[cs]e|notice|copying|copyright(?:notice)?)(?:[._-].*)?$/i.test(file.name))
+    .map((file) => file.name)
+    .sort();
+  for (const name of noticeFiles) {
+    notices.push(`${path} (${dependency.version})\n${name}\n\n${await readFile(join(root, path, name), "utf8")}\n`);
+  }
+}
+await writeFile(join(root, "dist/THIRD_PARTY_NOTICES.txt"), notices.join("\n"));
 await rm(staging, { recursive: true, force: true });
 await mkdir(staging, { recursive: true });
 for (const name of [
@@ -53,10 +71,21 @@ const platform =
   ["--linux", "--mac", "--win"].find((flag) =>
     process.argv.includes(flag),
   ) ?? "--linux";
+const { version: electronVersion } = JSON.parse(
+  await readFile(join(root, "node_modules/electron/package.json"), "utf8"),
+);
 await run(process.execPath, [
   join(root, "node_modules/electron-builder/cli.js"),
+  "--projectDir",
+  staging,
   "--config",
-  "desktop/electron-builder.yml",
+  join(root, "desktop/electron-builder.yml"),
+  "--config.directories.app",
+  staging,
+  "--config.directories.output",
+  join(root, "release"),
+  "--config.electronVersion",
+  electronVersion,
   platform,
   ...(process.argv.includes("--dir") ? ["--dir"] : []),
   "--publish",

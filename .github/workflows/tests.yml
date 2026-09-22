@@ -1,0 +1,43 @@
+name: Tests
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (${{ matrix.shard }}/3)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22.18.0'
+          cache: npm
+      - name: Install desktop test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb xdotool dbus-x11 python3-dbus python3-gi gir1.2-gst-plugins-base-1.0 gir1.2-gdkpixbuf-2.0 gstreamer1.0-plugins-base gstreamer1.0-plugins-good libxtst6 libfuse2 openssh-server
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run typecheck
+        if: matrix.shard == 1
+      - run: npm audit --audit-level=high
+        if: matrix.shard == 1
+      - name: Check the installer scripts
+        if: matrix.shard == 1
+        run: |
+          sh -n scripts/install.sh
+          sh -n desktop/apply-appimage-update.sh
+          shellcheck -s sh scripts/install.sh desktop/apply-appimage-update.sh
+          pwsh -NoProfile -Command '$errors = $null; [System.Management.Automation.Language.Parser]::ParseFile("scripts/install.ps1", [ref]$null, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Error $_.Message }; exit 1 }'
+      - run: npm run test:ci -- --test-shard=${{ matrix.shard }}/3

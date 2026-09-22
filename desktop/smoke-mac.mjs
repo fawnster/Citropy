@@ -29,8 +29,13 @@ try {
     const appRoot = join(app, "Contents/Resources/app");
     await access(join(appRoot, "LICENSE"));
     await access(join(appRoot, "dist/index.html"));
+    await access(join(appRoot, "node_modules/@fontsource-variable/inter/files/inter-latin-standard-normal.woff2"));
+    const notices = await readFile(join(appRoot, "dist/THIRD_PARTY_NOTICES.txt"), "utf8");
+    for (const path of ["react/LICENSE", "lucide-react/LICENSE", "@fontsource-variable/geist-mono/LICENSE", "tslib/CopyrightNotice.txt"]) {
+      assert.ok(notices.includes(await readFile(new URL(`../node_modules/${path}`, import.meta.url), "utf8")), `Missing bundled dependency notice: ${path}`);
+    }
     await access(join(app, "Contents/Info.plist"));
-    for (const path of [".env", "tests", ".git", "web", "desktop/start.mjs", "desktop/install.mjs", "desktop/smoke.mjs", "desktop/smoke-mac.mjs", "desktop/smoke-win.mjs", "node_modules/vite", "node_modules/playwright"]) {
+    for (const path of [".env", "tests", ".git", "web", "desktop/start.mjs", "desktop/install.mjs", "desktop/smoke.mjs", "desktop/smoke-mac.mjs", "desktop/smoke-win.mjs", "node_modules/vite", "node_modules/playwright", "node_modules/lucide-react", "node_modules/shiki", "node_modules/motion"]) {
       assert.equal(await exists(join(appRoot, path)), false, `Development file in release: ${path}`);
     }
     assert.equal(JSON.parse(await readFile(join(appRoot, "package.json"), "utf8")).version, version);
@@ -79,10 +84,11 @@ try {
     assert.equal(health.development, false);
     const exited = new Promise((resolve) => desktop.once("exit", (code, signal) => resolve({ code, signal })));
     desktop.kill("SIGTERM");
+    let shutdownTimer;
     const result = await Promise.race([
       exited,
-      new Promise((resolve) => setTimeout(() => resolve(undefined), 45000)),
-    ]);
+      new Promise((resolve) => { shutdownTimer = setTimeout(() => resolve(undefined), 45000); }),
+    ]).finally(() => clearTimeout(shutdownTimer));
     assert.ok(result, `Citropy did not quit after SIGTERM.${output ? `\n${output}` : ""}`);
     assert.equal(result.signal, null, `Citropy exited from ${result.signal} instead of quitting cleanly.`);
     assert.equal(result.code, 0);

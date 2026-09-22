@@ -27,7 +27,7 @@ npm run typecheck
 
 Use the relevant files under `tests/` in place of these examples. Keep performance regressions deterministic by checking unnecessary work or resource cleanup rather than asserting wall-clock timings. Unit tests can advance mocked timers; browser and process integration tests still need to wait for the actual result.
 
-Before handing off changes across shared components or server state, run `npm run test:ci` and `npm run build`. CI runs two test files at a time. Failed files rerun serially for diagnosis, but a passing retry never turns the original failure into a pass. Inspect the first failure before changing a timeout or rerunning the suite.
+Before handing off changes across shared components or server state, run `npm run test:ci` and `npm run build`. GitHub runs the full suite across three independent shards, each running two test files at a time. Run one shard locally with `npm run test:ci -- --test-shard=1/3`; omitting the option runs the full suite. Failed files rerun serially for diagnosis without sharding, but a passing retry never turns the original failure into a pass. Inspect the first failure before changing a timeout or rerunning the suite.
 
 ## Local release check
 
@@ -36,7 +36,7 @@ npm ci
 npx playwright install --with-deps chromium
 npm run typecheck
 npm test
-npm audit --omit=dev --audit-level=high
+npm audit --audit-level=high
 npm run desktop:package
 npm run desktop:smoke
 ```
@@ -49,13 +49,13 @@ On macOS, `npm run desktop:package -- --mac` writes `Citropy-<version>-arm64.zip
 
 On Windows, `npm run desktop:package -- --win` writes `Citropy-<version>-x64-Setup.exe`, its blockmap, and `latest.yml`. The installer is NSIS in one-click mode, per user, so it needs no administrator rights and lands in `%LOCALAPPDATA%\Programs\citropy`. `desktop/smoke-win.mjs` checks the installer and unpacked app contents and launches the packaged app to verify startup. The installer is unsigned, so downloads from a browser carry a SmartScreen warning; installing through `scripts/install.ps1` avoids it because the file never receives the Mark of the Web. Smart App Control on Windows 11 ignores that distinction and blocks unsigned executables outright, which needs a signed build or the setting off. Windows builds update through the Electron updater, using the blockmap for differential downloads.
 
-The package includes the application license and bundled font licenses. Source tests, development launchers, Vite, Playwright, local state, and environment files are excluded. The source repository deliberately keeps `private: true` in package.json to prevent accidental npm publication; this does not restrict GitHub releases.
+The package includes the application license, bundled font licenses, and `dist/THIRD_PARTY_NOTICES.txt` for dependencies used at build time. Renderer libraries are bundled into `dist` rather than copied again as runtime dependencies. Source tests, development launchers, Vite, Playwright, local state, and environment files are excluded. The source repository deliberately keeps `private: true` in package.json to prevent accidental npm publication; this does not restrict GitHub releases.
 
 ## GitHub release
 
-Every push and pull request runs type checking, tests, a production dependency audit, installer script checks, AppImage packaging, and the packaged smoke check on Linux, plus a macOS package build, smoke check, and a run of the installer against a locally served release, and the same for Windows with `scripts/install.ps1`.
+Every push and pull request runs type checking, tests, a dependency audit, installer script checks, AppImage packaging, and the packaged smoke check on Linux, plus a macOS package build, smoke check, and a run of the installer against a locally served release, and the same for Windows with `scripts/install.ps1`. The audit includes development dependencies because the renderer bundles some of them into the app. Tests and platform builds run in parallel. The shared test workflow keeps ordinary checks and release checks on the same suite and shard configuration.
 
-Releases start from the Actions tab with the **Release** workflow. Enter the version to ship, for example `0.2.0`, and run it from `main`. The workflow refuses anything other than `main`, a version that does not look like `X.Y.Z`, a version that is not greater than the current one, and a tag that already exists. It then runs the same checks, builds Linux, macOS, and Windows in parallel with that version, and only after every build passes it commits the version bump, pushes the `v<version>` tag, and opens a **draft** GitHub release. A failed build leaves the repository untouched.
+Releases start from the Actions tab with the **Release** workflow. Enter the version to ship, for example `0.2.0`, and run it from `main`. The workflow first rejects anything other than `main`, a version that does not look like `X.Y.Z`, a version that is not greater than the current one, and a tag that already exists. After this validation, the checks and Linux, macOS, and Windows builds run in parallel. Only after every check and build passes does it commit the version bump, push the `v<version>` tag, and open a **draft** GitHub release. A failed check or build leaves the repository untouched.
 
 Inspect the draft, then publish it. Publishing is a separate action; ordinary commits and tags do not publish releases.
 

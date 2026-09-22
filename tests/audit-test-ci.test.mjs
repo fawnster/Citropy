@@ -10,7 +10,7 @@ import { failedTestFiles } from '../scripts/test-ci.mjs';
 
 const exec = promisify(execFile);
 /** Run the real CI script in a disposable suite; null source represents an empty suite. */
-async function suite(t, source) {
+async function suite(t, source, args = []) {
   const root = await mkdtemp(join(tmpdir(), 'citropy-ci-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   await mkdir(join(root, 'scripts'));
@@ -24,7 +24,7 @@ async function suite(t, source) {
   const env = { ...process.env };
   delete env.NODE_TEST_CONTEXT;
   try {
-    const result = await exec(process.execPath, ['scripts/test-ci.mjs'], { cwd: root, env, timeout: 15000 });
+    const result = await exec(process.execPath, ['scripts/test-ci.mjs', ...args], { cwd: root, env, timeout: 15000 });
     return { code: 0, ...result };
   } catch (error) {
     if (typeof error.code !== 'number') throw error;
@@ -35,6 +35,52 @@ async function suite(t, source) {
 test('the CI runner returns success for a clean first pass', async t => {
   const result = await suite(t, "import test from 'node:test'; test('passing', () => {});\n");
   assert.equal(result.code, 0, result.stdout + result.stderr);
+});
+
+test('CI shards cover every file exactly once in deterministic order', async t => {
+  const names = ['a', 'b', 'c', 'd', 'e', 'f', 'g'];
+  const files = Object.fromEntries(names.map(name => [
+    `${name}.test.mjs`,
+    `import test from 'node:test'; test('selected ${name}', () => {});`,
+  ]));
+  const selected = [];
+  for (const index of [1, 2, 3]) {
+    const result = await suite(t, files, ['--test-shard', `${index}/3`]);
+    assert.equal(result.code, 0, result.stdout + result.stderr);
+    const shard = [...result.stdout.matchAll(/^# Subtest: selected (\w+)$/gm)].map(match => match[1]);
+    assert.deepEqual(shard, names.filter((_, position) => position % 3 === index - 1));
+    selected.push(...shard);
+  }
+  assert.deepEqual(selected.sort(), names);
+});
+
+test('CI rejects invalid and empty shard configurations', async t => {
+  for (const shard of ['0/1', '1/0', '2/1', '1.5/2', '1', '', '1/2', '2/2']) {
+    const result = await suite(t, "import test from 'node:test'; test('passing', () => {});", [`--test-shard=${shard}`]);
+    assert.notEqual(result.code, 0, result.stdout + result.stderr);
+    assert.match(result.stderr, /Invalid test shard/);
+    assert.doesNotMatch(result.stdout, /# Subtest:/);
+  }
+});
+
+test('diagnostic retries execute failed shard files without resharding or hiding failure', async t => {
+  const result = await suite(t, {
+    'first.test.mjs': "import test from 'node:test'; test('unselected', () => { throw new Error('unselected file ran'); });",
+    'second.test.mjs': `
+      import test from 'node:test';
+      import { existsSync, writeFileSync } from 'node:fs';
+      test('fails only once', () => {
+        if (!existsSync('attempted')) { writeFileSync('attempted', 'yes'); throw new Error('first run fails'); }
+        console.log('diagnostic retry executed');
+      });
+    `,
+  }, ['--test-shard=2/2']);
+  assert.notEqual(result.code, 0, result.stdout + result.stderr);
+  assert.doesNotMatch(result.stdout, /unselected/);
+  assert.match(result.stdout, /Retrying 1 test file\(s\)/);
+  assert.match(result.stdout, /diagnostic retry executed/);
+  assert.match(result.stdout, /Retries passed/);
+  assert.match(result.stdout, /CI remains failed/);
 });
 
 test('the CI runner overlaps independent files on its first pass', async t => {
