@@ -35,7 +35,7 @@ try {
       assert.ok(notices.includes(await readFile(new URL(`../node_modules/${path}`, import.meta.url), "utf8")), `Missing bundled dependency notice: ${path}`);
     }
     await access(join(app, "Contents/Info.plist"));
-    for (const path of [".env", "tests", ".git", "web", "desktop/start.mjs", "desktop/install.mjs", "desktop/smoke.mjs", "desktop/smoke-mac.mjs", "desktop/smoke-win.mjs", "node_modules/vite", "node_modules/playwright", "node_modules/lucide-react", "node_modules/shiki", "node_modules/motion"]) {
+    for (const path of [".env", "tests", ".git", "web", "desktop/start.mjs", "desktop/install.mjs", "desktop/smoke.mjs", "desktop/smoke-mac.mjs", "desktop/smoke-win.mjs", "desktop/computer-mac.swift", "desktop/computer-mac-build.mjs", "node_modules/vite", "node_modules/playwright", "node_modules/lucide-react", "node_modules/shiki", "node_modules/motion"]) {
       assert.equal(await exists(join(appRoot, path)), false, `Development file in release: ${path}`);
     }
     assert.equal(JSON.parse(await readFile(join(appRoot, "package.json"), "utf8")).version, version);
@@ -46,6 +46,10 @@ try {
       const native = await run("lipo", ["-archs", join(appRoot, name)]);
       assert.equal(native.stdout.trim(), arch, `${name} in ${zip} contains the wrong architecture.`);
     }
+    const helper = join(appRoot, "desktop/computer-mac");
+    assert.deepEqual((await run("lipo", ["-archs", helper])).stdout.trim().split(/\s+/).sort(), ["arm64", "x86_64"], "The macOS computer helper must be universal.");
+    await run("codesign", ["--verify", helper]);
+    if (arch === hostArch) assert.equal(JSON.parse((await run(helper, ["--probe"])).stdout).platform, "darwin");
     if (arch !== hostArch) {
       console.log(`${zip}: ${arch} bundle verified without launching (host is ${hostArch}).`);
       continue;

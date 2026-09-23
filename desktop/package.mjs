@@ -71,6 +71,11 @@ const platform =
   ["--linux", "--mac", "--win"].find((flag) =>
     process.argv.includes(flag),
   ) ?? "--linux";
+await rm(join(staging, "desktop/computer-mac"), { force: true });
+if (platform === "--mac") {
+  const { buildComputerHelper } = await import("./computer-mac-build.mjs");
+  await buildComputerHelper({ output: join(staging, "desktop/computer-mac"), architectures: ["arm64", "x86_64"] });
+}
 const { version: electronVersion } = JSON.parse(
   await readFile(join(root, "node_modules/electron/package.json"), "utf8"),
 );

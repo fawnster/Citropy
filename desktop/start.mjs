@@ -10,6 +10,12 @@ const explicitUiPort = process.env.CITROPY_UI_PORT !== undefined;
 let port = Number(process.env.CITROPY_PORT ?? (development ? 4178 : 4177));
 let uiPort = Number(process.env.CITROPY_UI_PORT ?? 5177);
 const origin = () => `http://127.0.0.1:${port}`;
+if (process.platform === "darwin" && !serverOnly) {
+  const { ensureComputerHelper } = await import("./computer-mac-build.mjs");
+  await ensureComputerHelper().catch((error) =>
+    console.warn(`Computer use is unavailable because the macOS helper did not build: ${error.stderr?.trim() || error.message}`),
+  );
+}
 function running(pid) {
   try {
     process.kill(pid, 0);

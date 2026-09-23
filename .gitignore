@@ -7,3 +7,6 @@ dist/
 .desktop-build/
 release/
 .audition/
+/desktop/computer-mac
+/desktop/computer-mac-arm64
+/desktop/computer-mac-x86_64

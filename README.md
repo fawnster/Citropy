@@ -55,7 +55,7 @@ The workspace panel opens a browser, terminal, file tree, changes view, subagent
   <img alt="The Computer panel sharing a Linux desktop with recent activity" src="docs/assets/computer-light.png">
 </picture>
 
-Share a screen and let a conversation move, click, drag, scroll, and type in native desktop apps. Input follows the conversation's permission mode, a screen indicator keeps pause and stop reachable from anywhere, and sessions end after five minutes without actions.
+Share a screen and let a conversation move, click, drag, scroll, and type in native desktop apps on Linux and macOS. Input follows the conversation's permission mode, a screen indicator keeps pause and stop reachable from anywhere, and sessions end after five minutes without actions.
 
 ## Questions land in one panel
 

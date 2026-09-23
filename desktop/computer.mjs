@@ -1,10 +1,15 @@
 import { spawn, execFile } from "node:child_process";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { globalShortcut } from "electron";
 import { openComputerIndicator } from "./computer-indicator.mjs";
 
-const helper = fileURLToPath(new URL("./computer-linux.py", import.meta.url));
-const shortcut = "CommandOrControl+Alt+Escape";
+const mac = process.platform === "darwin";
+const helper = fileURLToPath(new URL(mac ? "./computer-mac" : "./computer-linux.py", import.meta.url));
+const [program, programArgs] = mac ? [helper, []] : ["python3", [helper]];
+// Command+Option+Escape is Force Quit on macOS, so the Mac shortcut is Control+Option+Escape.
+const shortcut = mac ? "Control+Alt+Escape" : "CommandOrControl+Alt+Escape";
+const shortcutName = mac ? "Control+Option+Escape" : "Ctrl+Alt+Escape";
 let child;
 let stopping;
 let sequence = 0;
@@ -61,11 +66,12 @@ export async function computerRequest(method, params = {}) {
     return;
   }
   if (method === "computer.capabilities") {
-    if (process.platform !== "linux") return { available: false, platform: process.platform, backend: "unavailable", reason: "Computer use currently supports Linux desktops." };
+    if (!mac && process.platform !== "linux") return { available: false, platform: process.platform, backend: "unavailable", reason: "Computer use currently supports Linux and macOS desktops." };
+    if (mac && !existsSync(helper)) return { available: false, platform: "darwin", backend: "unavailable", reason: "The macOS computer helper is missing. Start Citropy with npm run desktop to build it with the Xcode Swift compiler." };
     return new Promise((resolve) => {
-      execFile("python3", [helper, "--probe"], { timeout: 10000, maxBuffer: 16000 }, (error, stdout) => {
+      execFile(program, [...programArgs, "--probe"], { timeout: 10000, maxBuffer: 16000 }, (error, stdout) => {
         try { resolve(JSON.parse(stdout)); }
-        catch { resolve({ available: false, platform: "linux", backend: "unavailable", reason: error?.message || "Install Python 3, PyGObject, and the desktop control libraries." }); }
+        catch { resolve({ available: false, platform: process.platform, backend: "unavailable", reason: error?.message || (mac ? "The macOS computer helper could not start." : "Install Python 3, PyGObject, and the desktop control libraries.") }); }
       });
     });
   }
@@ -73,7 +79,7 @@ export async function computerRequest(method, params = {}) {
     if (stopping) await stopping;
     if (child) throw new Error("Another computer session is already open.");
     const revision = ++generation;
-    const process = spawn("python3", [helper], { stdio: ["pipe", "pipe", "pipe"] });
+    const process = spawn(program, programArgs, { stdio: ["pipe", "pipe", "pipe"] });
     child = process;
     let buffer = "";
     let errorOutput = "";
@@ -104,7 +110,7 @@ export async function computerRequest(method, params = {}) {
       const result = await send("start", params);
       if (revision !== generation) throw new Error("Computer control was stopped.");
       let registered = false;
-      try { registered = globalShortcut.register(shortcut, () => stopComputer("Stopped with Ctrl+Alt+Escape.")); } catch {}
+      try { registered = globalShortcut.register(shortcut, () => stopComputer(`Stopped with ${shortcutName}.`)); } catch {}
       indicatorController = new AbortController();
       indicatorState = { displays: result.displays, control: Boolean(params.control), paused: false, shortcut: registered, language: params.language };
       const opened = await openComputerIndicator(indicatorState, (action, error) => {
