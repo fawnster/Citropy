@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 
 const swift = process.platform === "darwin" && (() => { try { execFileSync("xcrun", ["--find", "swiftc"], { stdio: "ignore" }); return true; } catch { return false; } })();
 
-function session(helper) {
+function session(t, helper) {
   const child = spawn(helper, [], { stdio: ["pipe", "pipe", "pipe"] });
   const waiting = new Map();
   const events = [];
@@ -26,6 +26,12 @@ function session(helper) {
   });
   const raw = line => new Promise(resolve => { waiting.set("raw", resolve); child.stdin.write(`${line}\n`); });
   const exited = new Promise(resolve => child.once("exit", (code, signal) => resolve({ code, signal })));
+  t.after(async () => {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    child.stdin.end();
+    const timer = setTimeout(() => child.kill("SIGKILL"), 1500);
+    try { await exited; } finally { clearTimeout(timer); }
+  });
   return { child, request, raw, events, exited };
 }
 
@@ -45,7 +51,7 @@ test("the macOS computer helper builds, probes permissions and speaks the helper
     assert.equal(Boolean(probe.reason), !(probe.screenRecording && probe.accessibility));
   }
 
-  const idle = session(helper);
+  const idle = session(t, helper);
   assert.equal((await idle.request("screenshot", { displayId: "1" })).error, "Start a computer session first.");
   assert.equal((await idle.request("action", { action: "move" })).error, "Start a computer session first.");
   const malformed = await idle.raw("{not json");
@@ -54,9 +60,16 @@ test("the macOS computer helper builds, probes permissions and speaks the helper
   idle.child.stdin.end();
   assert.deepEqual(await idle.exited, { code: 0, signal: null });
 
+  for (const signal of ["SIGTERM", "SIGINT"]) {
+    const interrupted = session(t, helper);
+    assert.equal((await interrupted.request("action", { action: "wait" })).error, "Start a computer session first.");
+    interrupted.child.kill(signal);
+    assert.deepEqual(await interrupted.exited, { code: 0, signal: null });
+  }
+
   // Capturing only runs where Screen Recording is already granted, so the test never prompts.
   if (!probe.available || !probe.screenRecording) return;
-  const view = session(helper);
+  const view = session(t, helper);
   const started = await view.request("start", { control: false });
   assert.equal(started.result.backend, "macos");
   assert.ok(started.result.displays.length > 0);

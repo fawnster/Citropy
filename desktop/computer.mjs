@@ -7,7 +7,6 @@ import { openComputerIndicator } from "./computer-indicator.mjs";
 const mac = process.platform === "darwin";
 const helper = fileURLToPath(new URL(mac ? "./computer-mac" : "./computer-linux.py", import.meta.url));
 const [program, programArgs] = mac ? [helper, []] : ["python3", [helper]];
-// Command+Option+Escape is Force Quit on macOS, so the Mac shortcut is Control+Option+Escape.
 const shortcut = mac ? "Control+Alt+Escape" : "CommandOrControl+Alt+Escape";
 const shortcutName = mac ? "Control+Option+Escape" : "Ctrl+Alt+Escape";
 let child;
@@ -84,8 +83,9 @@ export async function computerRequest(method, params = {}) {
     let buffer = "";
     let errorOutput = "";
     process.stderr.on("data", (data) => { errorOutput = (errorOutput + data).slice(-1000); });
+    process.stdout.setEncoding("utf8");
     process.stdout.on("data", (data) => {
-      buffer += data.toString();
+      buffer += data;
       if (buffer.length > 12 * 1024 * 1024) return stopComputer("The screen image exceeded the capture limit.", true);
       let end;
       while ((end = buffer.indexOf("\n")) >= 0) {

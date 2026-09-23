@@ -1,5 +1,6 @@
 const { ipcRenderer } = require("electron");
 
+const shortcut = process.platform === "darwin" ? "Control+Option+Escape" : "Ctrl+Alt+Escape";
 let paused = false;
 ipcRenderer.on("computer-indicator:state", (_, state) => {
   const es = state.language === "es";
@@ -17,7 +18,7 @@ ipcRenderer.on("computer-indicator:state", (_, state) => {
   button.setAttribute("aria-label", paused ? text.resume : text.pause);
   button.title = paused ? text.resume : text.pause;
   button.disabled = false;
-  document.querySelector("#stop").title = text.stop + (state.shortcut ? " (Ctrl+Alt+Escape)" : "");
+  document.querySelector("#stop").title = text.stop + (state.shortcut ? ` (${shortcut})` : "");
   document.querySelector("#stop").setAttribute("aria-label", text.stop);
   document.querySelector("#stop-label").textContent = text.stopLabel;
 });

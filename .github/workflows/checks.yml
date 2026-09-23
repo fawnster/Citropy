@@ -67,6 +67,7 @@ jobs:
           node-version: '22.18.0'
           cache: npm
       - run: npm ci
+      - run: node --test tests/computer-mac.test.mjs
       - name: Package the macOS app
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'

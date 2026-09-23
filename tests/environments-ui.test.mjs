@@ -64,6 +64,7 @@ test("grouped workspaces switch hosts without reloading and use the system folde
           "/home/dev": { parent: "/home", folders: [{ name: ".cache", hidden: true }, { name: "projects", hidden: false }] },
           "/home/dev/projects": { parent: "/home/dev", folders: [{ name: "app", hidden: false }] },
           "/home/dev/projects/app": { parent: "/home/dev/projects", folders: [] },
+          "/home/dev/projects/app ": { parent: "/home/dev/projects", folders: [] },
         };
         const resolved = path === "" || path === "~" ? "/home/dev" : path;
         if (!tree[resolved]) throw new Error("Error invoking remote method 'environments:list-folder': Error: That folder does not exist on the SSH host or cannot be opened.");
@@ -262,6 +263,9 @@ test("grouped workspaces switch hosts without reloading and use the system folde
     await folders.getByLabel("Folder path").fill("/missing");
     await folders.getByLabel("Folder path").press("Enter");
     assert.equal(await folders.getByRole("alert").textContent(), "That folder does not exist on the SSH host or cannot be opened.");
+    await folders.getByRole("button", { name: "Open this folder", exact: true }).click();
+    await folders.getByRole("alert").waitFor();
+    assert.ok(await folders.isVisible());
     await folders.getByRole("button", { name: "Parent folder", exact: true }).click();
     await page.waitForFunction(() => document.querySelector(".remote-folder-path input").value === "/home/dev");
     assert.equal(await folders.getByRole("alert").count(), 0);
@@ -283,6 +287,43 @@ test("grouped workspaces switch hosts without reloading and use the system folde
   await page.waitForTimeout(150);
   assert.ok(messages.some(event => event.remote && event.t === "project.choose" && event.path === "/home/dev/projects/app"));
   assert.equal(messages.filter(event => event.t === "project.choose" && event.path?.startsWith("/home/dev/projects/app")).length, 1);
+  for (const [path, enter] of [["/home/dev/projects", false], ["/home/dev/projects/app", true], ["/home/dev/projects/app ", false]]) {
+    await page.getByRole("button", { name: /^Choose workspace, / }).click();
+    await workspaceMenu.getByRole("menuitem", { name: /Open another folder/ }).nth(1).click();
+    const folders = page.getByRole("dialog", { name: /^Choose a folder on Build server/ });
+    await folders.getByRole("listitem").filter({ hasText: "projects" }).waitFor();
+    const before = messages.filter(event => event.t === "project.choose").length;
+    await folders.getByLabel("Folder path").fill(path);
+    if (enter) await folders.getByLabel("Folder path").press("Enter");
+    else await folders.getByRole("button", { name: "Open this folder", exact: true }).click();
+    await folders.waitFor({ state: "detached" });
+    assert.equal(messages.filter(event => event.t === "project.choose").length, before + 1);
+    assert.equal(messages.findLast(event => event.t === "project.choose").path, path);
+  }
+  await page.evaluate(() => {
+    const list = window.citropyDesktop.listWorkspaceFolder;
+    window.citropyDesktop.listWorkspaceFolder = (id, path) => path === "/home/dev/delayed"
+      ? new Promise(resolve => { window.finishDelayedFolder = () => resolve({ path, parent: "/home/dev", folders: [] }); })
+      : list(id, path);
+  });
+  const beforeCancel = messages.filter(event => event.t === "project.choose").length;
+  await page.getByRole("button", { name: /^Choose workspace, / }).click();
+  await workspaceMenu.getByRole("menuitem", { name: /Open another folder/ }).nth(1).click();
+  const pendingFolders = page.getByRole("dialog", { name: /^Choose a folder on Build server/ });
+  await pendingFolders.getByRole("listitem").filter({ hasText: "projects" }).waitFor();
+  await pendingFolders.getByLabel("Folder path").fill("/home/dev/delayed");
+  await pendingFolders.getByRole("button", { name: "Open this folder", exact: true }).click();
+  await page.waitForFunction(() => window.finishDelayedFolder);
+  await pendingFolders.getByRole("button", { name: "Cancel", exact: true }).click();
+  await pendingFolders.waitFor({ state: "detached" });
+  await page.getByRole("button", { name: /^Choose workspace, / }).click();
+  await workspaceMenu.getByRole("menuitem", { name: /Open another folder/ }).nth(1).click();
+  await pendingFolders.getByRole("listitem").filter({ hasText: "projects" }).waitFor();
+  await page.evaluate(() => window.finishDelayedFolder());
+  assert.equal(await pendingFolders.getByLabel("Folder path").inputValue(), "/home/dev");
+  await pendingFolders.getByRole("button", { name: "Cancel", exact: true }).click();
+  await pendingFolders.waitFor({ state: "detached" });
+  assert.equal(messages.filter(event => event.t === "project.choose").length, beforeCancel);
   assert.equal(navigations, 1);
   assert.equal(await page.evaluate(() => window.environmentListenerCount()), 1);
   assert.deepEqual(errors, []);

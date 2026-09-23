@@ -43,6 +43,7 @@ test("screen indicator stays above apps without taking focus and releases its wi
   await update({});
   const page = await indicatorReady;
   await page.getByRole("status").getByText("Citropy is controlling this screen", { exact: true }).waitFor();
+  assert.equal(await page.getByRole("button", { name: "Stop computer use", exact: true }).getAttribute("title"), `Stop computer use (${process.platform === "darwin" ? "Control+Option+Escape" : "Ctrl+Alt+Escape"})`);
   await page.evaluate(() => document.fonts.ready);
   const windowState = () => desktop.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows().find(window => window.getTitle() === "Citropy computer use");

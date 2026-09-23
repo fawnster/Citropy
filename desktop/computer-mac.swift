@@ -185,6 +185,11 @@ final class Controller {
 
   func display(_ id: Any?) throws -> Display {
     guard let id = id as? String, let display = displays.first(where: { $0.id == id }) else { throw Failure("Choose one of the shared screens.") }
+    if CGDisplayBounds(display.displayID) != display.frame {
+      let reason = "The screen layout or resolution changed. Share the screen again before continuing."
+      emit(["event": "closed", "reason": reason, "error": true])
+      throw Failure(reason)
+    }
     return display
   }
 
@@ -192,11 +197,6 @@ final class Controller {
     guard #available(macOS 14.0, *) else { throw Failure("Computer use requires macOS 14 or later.") }
     let display = try self.display(displayId)
     guard let content = display.content as? SCDisplay else { throw Failure("Choose one of the shared screens.") }
-    if CGDisplayBounds(display.displayID).size != display.frame.size {
-      let reason = "The screen resolution changed. Share the screen again before continuing."
-      emit(["event": "closed", "reason": reason, "error": true])
-      throw Failure(reason)
-    }
     let filter = SCContentFilter(display: content, excludingWindows: [])
     let scale = Double(filter.pointPixelScale)
     let width = display.frame.width * scale, height = display.frame.height * scale

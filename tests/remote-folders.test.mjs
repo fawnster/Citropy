@@ -47,9 +47,21 @@ test("SSH folders can be browsed without an SFTP system chooser", async t => {
   assert.equal((await listRemoteFolder(connection, join(home, "projects", "it's here"), signal)).folders.length, 0);
   assert.equal((await listRemoteFolder(connection, "/", signal)).parent, null);
 
+  const unusual = join(home, "unusual");
+  const unusualNames = [" leading", "trailing ", "$(printf expanded)", "`printf expanded`", "; exit 9 #", "*[?]"];
+  await mkdir(unusual);
+  for (const name of unusualNames) await mkdir(join(unusual, name));
+  assert.deepEqual(new Set((await listRemoteFolder(connection, unusual, signal)).folders.map(folder => folder.name)), new Set(unusualNames));
+  for (const name of unusualNames) {
+    const selected = await listRemoteFolder(connection, join(unusual, name), signal);
+    assert.equal(selected.path, join(unusual, name));
+    assert.equal(selected.parent, unusual);
+    assert.deepEqual(selected.folders, []);
+  }
+
   await assert.rejects(listRemoteFolder(connection, join(home, "missing"), signal), /does not exist/);
   await assert.rejects(listRemoteFolder(connection, join(home, "projects", "notes.txt"), signal), /does not exist/);
-  for (const path of ["projects", "../etc", "/tmp\nx", "~other"])
+  for (const path of ["projects", "../etc", "/tmp\nx", "/tmp\rx", "/tmp\0x", "~other", `/${"x".repeat(4096)}`])
     await assert.rejects(listRemoteFolder(connection, path, signal), /absolute folder path/);
 
   if (process.platform !== "linux" || !hasKdialog()) {

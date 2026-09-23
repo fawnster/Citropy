@@ -16,6 +16,9 @@ export async function buildComputerHelper({ output = computerHelper, architectur
       await run("xcrun", ["swiftc", "-O", "-swift-version", "5", "-target", `${arch}-apple-macos12.0`, source, "-o", slices[index]], { maxBuffer: 4 * 1024 * 1024 });
     await run("lipo", ["-create", ...slices, "-output", output]);
     await run("codesign", ["--force", "--sign", "-", output]);
+  } catch (error) {
+    await rm(output, { force: true });
+    throw error;
   } finally {
     await Promise.all(slices.map((slice) => rm(slice, { force: true })));
   }

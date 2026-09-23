@@ -3,7 +3,7 @@ import { AnimatePresence } from "motion/react";
 import { ArrowUp, Folder, FolderOpen, LoaderCircle, Server } from "lucide-react";
 import { Modal } from "./Modal.tsx";
 import { useI18n } from "../lib/i18n.ts";
-import { finishRemoteFolder as finish, useRemoteFolderRequest, type RemoteFolderRequest as Request } from "../lib/remote-folder.ts";
+import { finishRemoteFolder, useRemoteFolderRequest, type RemoteFolderRequest as Request } from "../lib/remote-folder.ts";
 
 type Listing = { path: string; parent: string | null; folders: { name: string; hidden: boolean }[] };
 
@@ -20,6 +20,7 @@ function RemoteFolderBrowser({ request }: { request: Request }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const latest = useRef(0);
+  const finish = (path: string | null) => finishRemoteFolder(request, path);
   const open = async (path: string) => {
     const attempt = ++latest.current;
     setLoading(true);
@@ -29,13 +30,17 @@ function RemoteFolderBrowser({ request }: { request: Request }) {
       if (attempt !== latest.current) return;
       setListing(result);
       setTyped(result.path);
+      return result;
     } catch (error) {
       if (attempt === latest.current) setError((error as Error).message.replace(/^Error invoking remote method '[^']+': (Error: )?/, ""));
     } finally {
       if (attempt === latest.current) setLoading(false);
     }
   };
-  useEffect(() => { void open(request.path); }, []);
+  useEffect(() => {
+    void open(request.path);
+    return () => { latest.current++; };
+  }, [request]);
   const folders = listing?.folders.filter((folder) => hidden || !folder.hidden) ?? [];
   const join = (name: string) => `${listing!.path === "/" ? "" : listing!.path}/${name}`;
   return (
@@ -45,18 +50,19 @@ function RemoteFolderBrowser({ request }: { request: Request }) {
       className="remote-folder-dialog"
       initialFocus=".remote-folder-path input"
       onClose={() => finish(null)}
-      onSubmit={() => {
-        if (typed.trim() && typed.trim() !== listing?.path) void open(typed.trim());
-        else if (listing && !loading) finish(listing.path);
+      onSubmit={async () => {
+        if (!typed.trim() || loading) return;
+        const selected = typed === listing?.path ? listing : await open(typed);
+        if (selected) finish(selected.path);
       }}
       footer={<>
         <button type="button" className="btn" data-cancel onClick={() => finish(null)}>{t("Cancel")}</button>
-        <button type="button" className="btn" data-variant="primary" disabled={!listing || loading} onClick={() => listing && finish(listing.path)}><FolderOpen size={15} />{t("Open this folder")}</button>
+        <button type="submit" className="btn" data-variant="primary" disabled={!typed.trim() || loading}><FolderOpen size={15} />{t("Open this folder")}</button>
       </>}
     >
       <div className="remote-folder-path feature-inline">
         <button type="button" className="icon-btn" aria-label={t("Parent folder")} title={t("Parent folder")} disabled={!listing?.parent || loading} onClick={() => listing?.parent && void open(listing.parent)}><ArrowUp size={16} /></button>
-        <input aria-label={t("Folder path")} value={typed} spellCheck={false} autoComplete="off" placeholder="~/projects" onChange={(event) => setTyped(event.target.value)} />
+        <input aria-label={t("Folder path")} value={typed} readOnly={loading} spellCheck={false} autoComplete="off" placeholder="~/projects" onChange={(event) => setTyped(event.target.value)} />
         <label><input type="checkbox" checked={hidden} onChange={(event) => setHidden(event.target.checked)} />{t("Hidden")}</label>
       </div>
       <div className="remote-folder-list" role="list" aria-busy={loading} aria-label={t("Folders")}>

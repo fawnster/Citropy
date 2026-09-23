@@ -10,8 +10,9 @@ export function browseRemoteFolder(environmentId: string, host: string, path = "
   return new Promise((resolve) => useRemoteFolderRequest.setState({ request: { environmentId, host, path, resolve } }));
 }
 
-export function finishRemoteFolder(path: string | null): void {
+export function finishRemoteFolder(request: RemoteFolderRequest, path: string | null): void {
   const pending = useRemoteFolderRequest.getState().request;
+  if (pending !== request) return;
   useRemoteFolderRequest.setState({ request: null });
   pending?.resolve(path);
 }
