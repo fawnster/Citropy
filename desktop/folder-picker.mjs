@@ -42,7 +42,37 @@ export async function remoteFolderLocation(connection, path, signal) {
   return { url: url.href, hostname: config.hostname.toLowerCase() };
 }
 
+// Lists a folder on an SSH host for Citropy's own folder browser, used where no SFTP-capable
+// system chooser exists (macOS, or Linux without kdialog).
+const listing = `case "$1" in "" | "~") set -- "$HOME" ;; "~/"*) set -- "$HOME/\${1#"~/"}" ;; esac
+cd -- "$1" 2>/dev/null || exit 3
+printf 'CITROPY_DIR %s\\0' "$(pwd)"
+for entry in * .[!.]* ..?*; do [ -d "$entry" ] && printf '%s\\0' "$entry"; done
+exit 0`;
+
+export async function listRemoteFolder(connection, path = "", signal) {
+  if (typeof path !== "string" || path.length > 4096 || /[\r\n\0]/.test(path) || (path && !/^(\/|~(\/|$))/.test(path)))
+    throw new Error("Enter an absolute folder path on the SSH host.");
+  let stdout;
+  try {
+    ({ stdout } = await run("ssh", [...sshArguments(connection), connection.target, `sh -c ${shellQuote(listing)} citropy ${shellQuote(path)}`], { signal, timeout: 20000, maxBuffer: 8 * 1024 * 1024 }));
+  } catch (error) {
+    if (error.code === 3) throw new Error("That folder does not exist on the SSH host or cannot be opened.");
+    throw error;
+  }
+  const start = stdout.indexOf("CITROPY_DIR ");
+  const [current = "", ...names] = start < 0 ? [] : stdout.slice(start + 12).split("\0");
+  if (!current.startsWith("/")) throw new Error("Could not read the folder on the SSH host.");
+  const folders = names.filter(name => name && !name.includes("/")).slice(0, 5000)
+    .sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base", numeric: true }))
+    .map(name => ({ name, hidden: name.startsWith(".") }));
+  return { path: current, parent: current === "/" ? null : current.slice(0, current.lastIndexOf("/")) || "/", folders };
+}
+
 export async function chooseNativeFolder({ connection, path, signal }, showOpenDialog) {
+  signal?.throwIfAborted();
+  const browse = { browse: true, path: path || "" };
+  if (connection && process.platform !== "linux") return browse;
   const location = connection ? await remoteFolderLocation(connection, path, signal) : undefined;
   const title = connection ? `Open workspace on ${connection.name}` : "Open workspace in Citropy";
   let value;
@@ -53,11 +83,11 @@ export async function chooseNativeFolder({ connection, path, signal }, showOpenD
     } catch (error) {
       if (error.code === 1) return null;
       if (error.code !== "ENOENT") throw error;
-      if (connection) throw new Error("Remote folders need the system's SFTP folder chooser. Install kdialog and the KDE SFTP support, then try again.");
+      if (connection) return browse;
     }
   }
   if (value === undefined) {
-    if (connection) throw new Error("The system folder chooser needs SFTP support to browse SSH workspaces.");
+    if (connection) return browse;
     const result = await showOpenDialog({ title, defaultPath: path || homedir(), properties: ["openDirectory", "createDirectory"] });
     if (result.canceled) return null;
     value = result.filePaths[0];

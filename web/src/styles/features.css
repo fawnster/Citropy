@@ -856,3 +856,46 @@
 }
 
 .context-source-path { overflow-wrap: anywhere; font-size: var(--text-sm); }
+.citropy-dialog.remote-folder-dialog { width: min(560px, calc(var(--viewport-width) - 32px)); }
+.remote-folder-path { flex-wrap: nowrap; }
+.remote-folder-path > input { font-family: var(--font-mono); font-size: 12px; }
+.remote-folder-path > label { margin-right: 0; white-space: nowrap; }
+.remote-folder-list {
+  display: flex;
+  flex-direction: column;
+  margin-top: 12px;
+  max-height: min(340px, calc(var(--viewport-height) - 320px));
+  min-height: 120px;
+  overflow: auto;
+  padding: 4px;
+  border-radius: var(--r-sm);
+  background: var(--raised);
+}
+.remote-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex: none;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: var(--r-xs);
+  background: transparent;
+  color: var(--text);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.remote-folder-row:hover:not(:disabled),
+.remote-folder-row:focus-visible { background: var(--raised-2); outline: none; }
+.remote-folder-row > svg { flex: none; color: var(--file-icon); }
+.remote-folder-row[data-hidden] { color: var(--text-3); }
+.remote-folder-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 36px 12px;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+}

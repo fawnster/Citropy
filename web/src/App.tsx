@@ -23,6 +23,7 @@ import { SlidingPanel } from "./components/SlidingPanel.tsx";
 import { PermissionPanel } from "./components/PermissionPanel.tsx";
 import { Toasts } from "./components/Toasts.tsx";
 import { ConfirmationDialog } from "./components/ConfirmationDialog.tsx";
+import { RemoteFolderDialog } from "./components/RemoteFolderDialog.tsx";
 import type { NotificationTarget } from "../../shared/protocol.ts";
 import { Welcome } from "./components/Welcome.tsx";
 import {
@@ -327,6 +328,7 @@ export function App() {
         <NewConversation key={`${environment}:${activeProjectId}:${newThreadProvider}`} />
       )}</AnimatePresence>
       <ConfirmationDialog />
+      <RemoteFolderDialog />
       <LinkActions />
       <Toasts onOpen={openNotification} />
     </div>

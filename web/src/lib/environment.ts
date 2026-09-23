@@ -37,6 +37,7 @@ export function environmentId(): string { return initial.activeId; }
 export function environmentSignal(): AbortSignal { return controller.signal; }
 export function isRemote(): boolean { return initial.activeId !== "local"; }
 export function environmentName(): string { return initial.connections.find(entry => entry.id === initial.activeId)?.name || "Local"; }
+export function connectionName(id: string): string { return initial.connections.find(entry => entry.id === id)?.name || id; }
 export function serverUrl(path: string): string { return `${initial.endpoint}${path}`; }
 
 export function useEnvironments(): EnvironmentState {

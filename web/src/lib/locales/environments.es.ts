@@ -40,4 +40,11 @@ export const environmentsEs: Record<string, string> = {
   "connecting": "Conectando",
   "connected": "Conectado",
   "error": "Error",
+  "Choose a folder on {host}": "Elige una carpeta en {host}",
+  "Folder path": "Ruta de la carpeta",
+  "Folders": "Carpetas",
+  "Hidden": "Ocultas",
+  "No folders here": "No hay carpetas aquí",
+  "Open this folder": "Abrir esta carpeta",
+  "Parent folder": "Carpeta superior",
 };

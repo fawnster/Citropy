@@ -1,5 +1,5 @@
 import { SshEnvironments, sshHosts } from "./ssh.mjs";
-import { chooseNativeFolder } from "./folder-picker.mjs";
+import { chooseNativeFolder, listRemoteFolder } from "./folder-picker.mjs";
 import { randomBytes } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { release } from "node:os";
@@ -859,6 +859,11 @@ app
         folderChoice = controller;
         try { return await chooseNativeFolder({ connection, path: typeof input.path === "string" ? input.path : undefined, signal: controller.signal }, options => dialog.showOpenDialog(window, options)); }
         finally { if (folderChoice === controller) folderChoice = undefined; }
+      },
+      "list-folder": async input => {
+        const connection = environments.connections.find(entry => entry.id === input?.id);
+        if (!connection || connection.kind === "container") throw new Error("This SSH connection was removed.");
+        return listRemoteFolder(connection, typeof input.path === "string" ? input.path : "", AbortSignal.timeout(25000));
       },
     })) ipcMain.handle(`environments:${channel}`, (event, input) => {
       if (!trusted(event)) throw new Error("Unavailable outside Citropy");

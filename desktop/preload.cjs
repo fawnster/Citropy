@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("citropyDesktop", {
   stopEnvironment: (id) => ipcRenderer.invoke("environments:stop", id),
   removeEnvironment: (id) => ipcRenderer.invoke("environments:remove", id),
   chooseWorkspaceFolder: (id, path) => ipcRenderer.invoke("environments:choose-folder", { id, path }),
+  listWorkspaceFolder: (id, path) => ipcRenderer.invoke("environments:list-folder", { id, path }),
   onEnvironmentsState: (callback) => {
     const listener = (_, state) => callback(state);
     ipcRenderer.on("environments:state", listener);

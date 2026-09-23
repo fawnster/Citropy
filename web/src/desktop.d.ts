@@ -22,7 +22,8 @@ declare global {
       disconnectEnvironment(id: string): Promise<void>;
       stopEnvironment(id: string): Promise<void>;
       removeEnvironment(id: string): Promise<void>;
-      chooseWorkspaceFolder(id: string, path?: string): Promise<string | null>;
+      chooseWorkspaceFolder(id: string, path?: string): Promise<string | null | { browse: true; path: string }>;
+      listWorkspaceFolder?(id: string, path: string): Promise<{ path: string; parent: string | null; folders: { name: string; hidden: boolean }[] }>;
       onEnvironmentsState(callback: (state: import("../../shared/environments.ts").EnvironmentState) => void): () => void;
       updateState(): Promise<import("../../shared/app-update.ts").AppUpdateState>;
       updateCommand(
